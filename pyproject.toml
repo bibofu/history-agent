@@ -3,7 +3,7 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "history-research-agent"
+name = "history-agent"
 version = "0.1.0"
 description = "Evidence-grounded local RAG for modern Chinese history research (1921-1978)."
 readme = "README.md"

@@ -1049,7 +1049,7 @@ wheels = [
 ]
 
 [[package]]
-name = "history-research-agent"
+name = "history-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

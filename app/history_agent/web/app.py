@@ -16,7 +16,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or get_settings()
     static_dir = files("history_agent.web").joinpath("static")
     api = FastAPI(
-        title="中国近现代史研究 Agent",
+        title="近现代史研究 Agent",
         version=__version__,
         description="Local evidence-grounded RAG for the 1921-1978 corpus.",
     )
