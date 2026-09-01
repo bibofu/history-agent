@@ -19,8 +19,8 @@
 - 本项目登记的 PDF 史料。PDF 和生成索引不随 Git 仓库分发。
 
 ```powershell
-git clone git@github.com:bibofu/offical-news-agent.git
-cd offical-news-agent
+git clone git@github.com:bibofu/history-agent.git
+cd history-agent
 
 # 创建虚拟环境并安装 OCR、向量检索、Web 和开发依赖
 uv sync --extra ocr --extra vector --extra app --group dev
