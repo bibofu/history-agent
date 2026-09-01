@@ -187,6 +187,47 @@ CREATE TABLE IF NOT EXISTS event_evidence (
     PRIMARY KEY(event_id, evidence_id)
 );
 
+CREATE TABLE IF NOT EXISTS event_extraction_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    source_event_id TEXT NOT NULL REFERENCES historical_events(event_id),
+    provider TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    extractor_version TEXT NOT NULL,
+    request_sha256 TEXT NOT NULL,
+    response_json TEXT,
+    validated_json TEXT,
+    status TEXT NOT NULL CHECK(
+        status IN ('succeeded', 'invalid', 'failed')
+    ),
+    error_code TEXT,
+    usage_json TEXT NOT NULL,
+    before_event_json TEXT NOT NULL,
+    merged_event_json TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_extraction_attempt_lookup
+    ON event_extraction_attempts(
+        source_event_id, provider, model_name, prompt_version, request_sha256, status
+    );
+
+CREATE TABLE IF NOT EXISTS event_review_queue (
+    queue_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL REFERENCES historical_events(event_id),
+    source_attempt_id TEXT NOT NULL REFERENCES event_extraction_attempts(attempt_id),
+    reason_codes_json TEXT NOT NULL,
+    priority INTEGER NOT NULL CHECK(priority >= 1 AND priority <= 100),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'resolved', 'dismissed')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(event_id, source_attempt_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_review_queue_pending
+    ON event_review_queue(status, priority DESC, created_at);
+
 CREATE TABLE IF NOT EXISTS person_relationships (
     relationship_id TEXT PRIMARY KEY,
     relation_type TEXT NOT NULL REFERENCES relation_types(relation_type),
@@ -290,4 +331,4 @@ class Database:
                     "ALTER TABLE event_participants "
                     "ADD COLUMN mention_source TEXT NOT NULL DEFAULT 'explicit'"
                 )
-            connection.execute("PRAGMA user_version = 4")
+            connection.execute("PRAGMA user_version = 5")

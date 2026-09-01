@@ -1,6 +1,6 @@
 # 结构化研究模型
 
-本文定义 M6 人物、事件与关系层的可审计数据契约。当前已完成主数据、数据库表、校验模型、管理命令，以及《周恩来年谱》《林彪年谱》的首批规则事件抽取；自动结果仍不是已确认史实。
+本文定义 M6 人物、事件与关系层的可审计数据契约。当前已完成主数据、数据库表、校验模型、管理命令、《周恩来年谱》《林彪年谱》的首批规则事件抽取，以及模型辅助事件增强的本地实现与测试；自动结果仍不是已确认史实。
 
 ## 1. 设计原则
 
@@ -107,4 +107,37 @@ extraction_methods
   --decision accepted --reviewed-by "复核者" --note "复核说明"
 ```
 
-候选 JSONL 位于 `data/processed/events/`，最新报告位于 `data/reports/chronology_extraction_latest.json`。规则重复运行时，相同记录跳过；规则字段变化时只同步同版本且尚未人工确认的自动记录，`confirmed`、`rejected` 或其他来源记录不会被覆盖。首批基线见 `evals/CHRONOLOGY_BASELINE.md`。下一阶段 M6.4 使用模型辅助处理复杂事件，但仍必须通过同一 schema 和证据约束。
+候选 JSONL 位于 `data/processed/events/`，最新报告位于 `data/reports/chronology_extraction_latest.json`。规则重复运行时，相同记录跳过；规则字段变化时只同步同版本且尚未人工确认的自动记录，`confirmed`、`rejected` 或其他来源记录不会被覆盖。首批基线见 `evals/CHRONOLOGY_BASELINE.md`。模型辅助结果同样必须通过 schema 和证据约束。
+
+## 6. 模型辅助事件增强
+
+M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件中选择 `needs_review`、低置信度或通用 `activity` 候选。模型只返回事件类型、行动原文、地点原文、机构原文和已登记人物的原文提及；日期、描述、证据 ID、文献 ID 和 PDF 页码不进入可修改字段。
+
+本地校验和合并顺序如下：
+
+1. 请求 DeepSeek 返回单个 JSON 对象；
+2. 使用 Pydantic 严格 schema 校验，拒绝额外字段和非法枚举；
+3. 检查行动、地点、机构、人名和角色能否在证据中找到连续原文，仅忽略排版空白差异；
+4. 人名必须能唯一解析到人物主数据，未知或歧义人物使本次结果无效；
+5. 只向原事件补充受控字段，保留原日期、描述、证据链接和既有人物；
+6. 合并后的来源标记为 `rule_llm`，状态固定为 `needs_review`，不能自动确认；
+7. 成功、无效和 API 失败都保存审计记录并进入复核队列。
+
+`event_extraction_attempts` 保存 provider、模型名、提示词版本、抽取器版本、输入哈希、原始响应、schema 校验结果、Token 用量及调用前后事件快照。`event_review_queue` 保存待复核原因、优先级和对应调用。相同证据、模型与提示词版本的已处理请求默认跳过；只有显式使用 `--retry-failed` 才重试无效或失败记录。
+
+```powershell
+# 只看候选，不调用外部 API
+.\.venv\Scripts\history-agent.exe research enrich-events --dry-run --limit 5 --json
+
+# 会将所选事件的短证据发送到 DeepSeek；默认最多 5 条
+.\.venv\Scripts\history-agent.exe research enrich-events --limit 5
+
+# 可按文献或稳定事件 ID 缩小范围
+.\.venv\Scripts\history-agent.exe research enrich-events `
+  --document-id zhou_enlai_chronology_1949_1976 --limit 2
+
+# 查看待复核项
+.\.venv\Scripts\history-agent.exe research review-queue --limit 20 --json
+```
+
+模型增强报告位于 `data/reports/model_event_extraction_latest.json`。本地契约测试见 `evals/MODEL_EVENT_EXTRACTION.md`；真实 API 冒烟需要明确同意把所选短引文发送给 DeepSeek。

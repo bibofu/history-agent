@@ -148,10 +148,28 @@ def test_database_migrates_existing_relationship_table(work_path: Path) -> None:
                 "PRAGMA table_info(event_participants)"
             ).fetchall()
         }
+        attempt_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(event_extraction_attempts)"
+            ).fetchall()
+        }
+        review_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(event_review_queue)"
+            ).fetchall()
+        }
         version = connection.execute("PRAGMA user_version").fetchone()[0]
     assert {"subject_mention_text", "object_mention_text"}.issubset(columns)
     assert "mention_source" in participant_columns
-    assert version == 4
+    assert {"model_name", "prompt_version", "before_event_json"}.issubset(
+        attempt_columns
+    )
+    assert {"source_attempt_id", "reason_codes_json", "priority"}.issubset(
+        review_columns
+    )
+    assert version == 5
 
 
 def test_ambiguous_alias_is_not_forced_and_merge_is_audited(work_path: Path) -> None:

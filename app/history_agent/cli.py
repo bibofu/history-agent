@@ -25,6 +25,10 @@ from history_agent.log import configure_logging
 from history_agent.processing.chunks import build_all_chunks
 from history_agent.research.catalog import load_person_catalog, load_relation_type_catalog
 from history_agent.research.chronology import extract_chronology_events
+from history_agent.research.model_extraction import (
+    enrich_events_with_model,
+    list_review_queue,
+)
 from history_agent.research.people import (
     propose_person_merge,
     resolve_person,
@@ -265,6 +269,123 @@ def research_extract_chronologies(
             f"locations={item.location_candidates}"
         )
     typer.echo(str(settings.reports_dir / "chronology_extraction_latest.json"))
+
+
+@research_app.command("enrich-events")
+def research_enrich_events(
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            min=1,
+            max=50,
+            help="Process at most this many candidates; deliberately bounded to control cost.",
+        ),
+    ] = 5,
+    document_id: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--document-id",
+            help="Only process events from this source. Repeat for multiple documents.",
+        ),
+    ] = None,
+    event_id: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--event-id",
+            help="Only process this event ID. Repeat for multiple events.",
+        ),
+    ] = None,
+    retry_failed: Annotated[
+        bool,
+        typer.Option(
+            "--retry-failed",
+            help="Retry prior invalid or failed attempts; successful attempts still skip.",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Show selected candidates without calling DeepSeek or changing research rows.",
+        ),
+    ] = False,
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Use grounded DeepSeek JSON output to enrich rule-generated events."""
+
+    settings = get_settings()
+    settings.ensure_runtime_dirs()
+    configure_logging(settings.log_level, json_output=json_output)
+    tracker = RunTracker(
+        settings.runs_dir,
+        "model_event_extraction",
+        {
+            **settings.public_snapshot(),
+            "limit": limit,
+            "document_ids": document_id or [],
+            "event_ids": event_id or [],
+            "retry_failed": retry_failed,
+            "dry_run": dry_run,
+        },
+    )
+    try:
+        database = Database(settings.database_path)
+        catalog = load_person_catalog(settings.person_aliases_path)
+        sync_person_catalog(database, catalog)
+        summary = enrich_events_with_model(
+            database=database,
+            settings=settings,
+            catalog=catalog,
+            reports_dir=settings.reports_dir,
+            run_id=tracker.run_id,
+            limit=limit,
+            document_ids=document_id,
+            event_ids=event_id,
+            retry_failed=retry_failed,
+            dry_run=dry_run,
+        )
+        payload = summary.model_dump()
+        tracker.finish(payload)
+    except Exception as exc:
+        tracker.fail(exc)
+        raise
+
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    typer.echo(f"model extraction run: {summary.run_id}")
+    typer.echo(
+        f"selected={summary.selected}, succeeded={summary.succeeded}, "
+        f"invalid={summary.invalid}, failed={summary.failed}, "
+        f"skipped_prior={summary.skipped_prior_attempt}"
+    )
+    typer.echo(f"tokens: {summary.total_tokens}")
+    for selected_event_id in summary.event_ids:
+        typer.echo(selected_event_id)
+    typer.echo(str(settings.reports_dir / "model_event_extraction_latest.json"))
+
+
+@research_app.command("review-queue")
+def research_review_queue(
+    limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 20,
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List pending model-assisted event review items."""
+
+    settings = get_settings()
+    rows = list_review_queue(Database(settings.database_path), limit=limit)
+    if json_output:
+        typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+    if not rows:
+        typer.echo("No pending event review items.")
+        return
+    for row in rows:
+        typer.echo(
+            f"P{row['priority']} {row['event_id']} {row['start_value'] or '-'} "
+            f"{row['name']} [{', '.join(row['reason_codes'])}]"
+        )
 
 
 @people_app.command("resolve")

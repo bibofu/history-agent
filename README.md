@@ -76,6 +76,9 @@ uv run history-agent index build-vector
 # 初始化研究表，并从两部年谱生成带页码证据的事件候选
 uv run history-agent research init
 uv run history-agent research extract-chronologies
+
+# 只预览待模型处理的复杂/低置信度事件，不调用 DeepSeek
+uv run history-agent research enrich-events --dry-run --limit 5
 ```
 
 首次 OCR 和向量索引构建耗时较长，并会下载 PaddleOCR 与中文嵌入模型；任务支持复用已完成的页面结果。生成内容位于 `data/`，不会提交到 Git。
@@ -130,6 +133,13 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 # 从《周恩来年谱》《林彪年谱》抽取事件；重复运行会跳过相同记录
 .\.venv\Scripts\history-agent.exe research extract-chronologies
+
+# 先预览候选；下一条命令会把所选事件的短证据发送给 DeepSeek
+.\.venv\Scripts\history-agent.exe research enrich-events --dry-run --limit 5
+.\.venv\Scripts\history-agent.exe research enrich-events --limit 5
+
+# 查看所有模型成功、无效或失败后生成的待复核项
+.\.venv\Scripts\history-agent.exe research review-queue --limit 20 --json
 
 # 查看最近一次扫描结果
 .\.venv\Scripts\history-agent.exe corpus diff
@@ -188,6 +198,8 @@ DEEPSEEK_API_KEY=你的密钥
 ```
 
 保存后运行 `history-agent llm check` 验证连接，再重启 Web 服务。也可以在 `.env` 中将 `HISTORY_AGENT_LLM_MODEL` 改为 `deepseek-v4-flash`。没有配置密钥时，页面继续使用“证据摘录模式”；DeepSeek 超时、余额不足、认证失败或返回虚构证据编号时，也会自动安全降级，不影响本地检索和引用展示。
+
+`research enrich-events` 是独立的批处理入口，默认一次最多处理 5 条。它使用 DeepSeek JSON Output，但仍在本地执行严格 schema 与原文子串校验；模型不能修改日期、事件原文或证据页码，也不能直接把记录标为“已确认”。每次原始响应、模型与提示词版本、调用前后快照和 Token 用量都会写入 SQLite，结果统一进入复核队列。该命令会把选中事件的短证据发送到 DeepSeek；对资料出境有要求时，应只运行 `--dry-run`，或先完成相应授权与脱敏。JSON Output 参数以 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/json_mode/) 为准。
 
 ## 项目定位
 
@@ -536,4 +548,5 @@ GET  /api/health          查看双索引、生成模式和研究时间范围
 - [x] 建立 25 位人物的稳定 ID、别名/歧义处理和人工合并审计流程
 - [x] 定义带时间精度、共同事件、原文提及、证据和复核状态的事件/关系模型及 7 类关系词表
 - [x] 从《周恩来年谱》《林彪年谱》抽取 15,393 条首批人物事件，保留日期确定性、年谱主体来源、原文和 PDF 页码证据
+- [-] 完成 DeepSeek 结构化事件增强、逐字段原文校验、调用审计和复核队列；本地测试已通过，待授权 2 条短引文的真实 API 冒烟
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比
