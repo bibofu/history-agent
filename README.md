@@ -79,6 +79,10 @@ uv run history-agent research extract-chronologies
 
 # 只预览待模型处理的复杂/低置信度事件，不调用 DeepSeek
 uv run history-agent research enrich-events --dry-run --limit 5
+
+# 预览跨来源重复事件；确认规则输出后去重并保留全部来源证据
+uv run history-agent research merge-events --dry-run --json
+uv run history-agent research merge-events
 ```
 
 首次 OCR 和向量索引构建耗时较长，并会下载 PaddleOCR 与中文嵌入模型；任务支持复用已完成的页面结果。生成内容位于 `data/`，不会提交到 Git。
@@ -140,6 +144,15 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 # 查看所有模型成功、无效或失败后生成的待复核项
 .\.venv\Scripts\history-agent.exe research review-queue --limit 20 --json
+
+# 预览并生成跨来源规范事件；源事件和源证据不会被覆盖或删除
+.\.venv\Scripts\history-agent.exe research merge-events --dry-run --json
+.\.venv\Scripts\history-agent.exe research merge-events
+
+# 查看不确定合并，并按稳定 canonical_event_id 确认、驳回或重新打开
+.\.venv\Scripts\history-agent.exe research merge-review-queue --limit 20 --json
+.\.venv\Scripts\history-agent.exe research review-event-merge CANONICAL_EVENT_ID `
+  --decision confirmed --reviewed-by "研究者" --note "两份年谱记载同一事件"
 
 # 查看最近一次扫描结果
 .\.venv\Scripts\history-agent.exe corpus diff
@@ -549,4 +562,5 @@ GET  /api/health          查看双索引、生成模式和研究时间范围
 - [x] 定义带时间精度、共同事件、原文提及、证据和复核状态的事件/关系模型及 7 类关系词表
 - [x] 从《周恩来年谱》《林彪年谱》抽取 15,393 条首批人物事件，保留日期确定性、年谱主体来源、原文和 PDF 页码证据
 - [x] 完成 DeepSeek 结构化事件增强、1200 字符送模硬上限、逐字段原文校验、调用审计和复核队列；2 条真实 API 冒烟全部成功且幂等复跑不消耗 Token
+- [x] 完成跨来源事件去重：从 15,393 条源事件生成 69 个可逆规范事件组（18 个高置信、51 个待审），保留 139 条来源成员快照和证据链接；幂等复跑零改动
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比

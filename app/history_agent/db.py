@@ -228,6 +228,103 @@ CREATE TABLE IF NOT EXISTS event_review_queue (
 CREATE INDEX IF NOT EXISTS idx_event_review_queue_pending
     ON event_review_queue(status, priority DESC, created_at);
 
+CREATE TABLE IF NOT EXISTS canonical_events (
+    canonical_event_id TEXT PRIMARY KEY,
+    representative_event_id TEXT NOT NULL REFERENCES historical_events(event_id),
+    name TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    start_value TEXT,
+    start_precision TEXT NOT NULL,
+    start_certainty TEXT NOT NULL,
+    start_original_text TEXT,
+    end_value TEXT,
+    end_precision TEXT,
+    end_certainty TEXT,
+    end_original_text TEXT,
+    location_text TEXT,
+    organization_names_json TEXT NOT NULL,
+    description TEXT NOT NULL,
+    merge_method TEXT NOT NULL,
+    merge_confidence REAL NOT NULL CHECK(
+        merge_confidence >= 0 AND merge_confidence <= 1
+    ),
+    candidate_kind TEXT NOT NULL CHECK(
+        candidate_kind IN ('high_confidence', 'uncertain')
+    ),
+    review_status TEXT NOT NULL CHECK(
+        review_status IN ('unreviewed', 'needs_review', 'confirmed', 'rejected')
+    ),
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    field_variants_json TEXT NOT NULL,
+    merge_features_json TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    merge_version TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_events_time
+    ON canonical_events(start_value, review_status, is_active);
+
+CREATE TABLE IF NOT EXISTS canonical_event_members (
+    canonical_event_id TEXT NOT NULL REFERENCES canonical_events(canonical_event_id),
+    source_event_id TEXT NOT NULL REFERENCES historical_events(event_id),
+    source_document_ids_json TEXT NOT NULL,
+    source_snapshot_json TEXT NOT NULL,
+    is_representative INTEGER NOT NULL,
+    PRIMARY KEY(canonical_event_id, source_event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_event_members_source
+    ON canonical_event_members(source_event_id, canonical_event_id);
+
+CREATE TABLE IF NOT EXISTS canonical_event_participants (
+    canonical_event_id TEXT NOT NULL REFERENCES canonical_events(canonical_event_id),
+    person_id TEXT NOT NULL REFERENCES persons(person_id),
+    role TEXT,
+    mention_text TEXT NOT NULL,
+    mention_source TEXT NOT NULL,
+    PRIMARY KEY(canonical_event_id, person_id, mention_text)
+);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_event_participants_person
+    ON canonical_event_participants(person_id, canonical_event_id);
+
+CREATE TABLE IF NOT EXISTS canonical_event_evidence (
+    canonical_event_id TEXT NOT NULL REFERENCES canonical_events(canonical_event_id),
+    evidence_id TEXT NOT NULL REFERENCES evidence_records(evidence_id),
+    source_event_id TEXT NOT NULL REFERENCES historical_events(event_id),
+    PRIMARY KEY(canonical_event_id, evidence_id, source_event_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_merge_review_queue (
+    queue_id TEXT PRIMARY KEY,
+    canonical_event_id TEXT NOT NULL REFERENCES canonical_events(canonical_event_id),
+    reason_codes_json TEXT NOT NULL,
+    priority INTEGER NOT NULL CHECK(priority >= 1 AND priority <= 100),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'resolved', 'dismissed')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_merge_review_queue_pending
+    ON event_merge_review_queue(status, priority DESC, created_at);
+
+CREATE TABLE IF NOT EXISTS canonical_event_reviews (
+    review_id TEXT PRIMARY KEY,
+    canonical_event_id TEXT NOT NULL REFERENCES canonical_events(canonical_event_id),
+    previous_status TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK(decision IN ('confirmed', 'rejected', 'reopened')),
+    reviewed_by TEXT NOT NULL,
+    review_note TEXT,
+    reviewed_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_event_reviews_event
+    ON canonical_event_reviews(canonical_event_id, reviewed_at);
+
 CREATE TABLE IF NOT EXISTS person_relationships (
     relationship_id TEXT PRIMARY KEY,
     relation_type TEXT NOT NULL REFERENCES relation_types(relation_type),
@@ -331,4 +428,4 @@ class Database:
                     "ALTER TABLE event_participants "
                     "ADD COLUMN mention_source TEXT NOT NULL DEFAULT 'explicit'"
                 )
-            connection.execute("PRAGMA user_version = 5")
+            connection.execute("PRAGMA user_version = 6")

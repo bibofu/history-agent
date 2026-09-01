@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 StableId = str
 ReviewStatus = Literal["unreviewed", "needs_review", "confirmed", "rejected"]
-ExtractionMethod = Literal["rule", "llm", "rule_llm", "manual", "import"]
+ExtractionMethod = Literal["rule", "llm", "rule_llm", "merge", "manual", "import"]
 DatePrecision = Literal["day", "month", "year", "unknown"]
 DateCertainty = Literal["exact", "approximate", "inferred", "unknown"]
 

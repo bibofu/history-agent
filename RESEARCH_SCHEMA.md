@@ -1,6 +1,6 @@
 # 结构化研究模型
 
-本文定义 M6 人物、事件与关系层的可审计数据契约。当前已完成主数据、数据库表、校验模型、管理命令、《周恩来年谱》《林彪年谱》的首批规则事件抽取，以及模型辅助事件增强的本地实现与测试；自动结果仍不是已确认史实。
+本文定义 M6 人物、事件与关系层的可审计数据契约。当前已完成主数据、数据库表、校验模型、管理命令、《周恩来年谱》《林彪年谱》的首批规则事件抽取、模型辅助事件增强，以及跨来源事件去重；自动结果仍不是已确认史实。
 
 ## 1. 设计原则
 
@@ -109,7 +109,7 @@ extraction_methods
 
 候选 JSONL 位于 `data/processed/events/`，最新报告位于 `data/reports/chronology_extraction_latest.json`。规则重复运行时，相同记录跳过；规则字段变化时只同步同版本且尚未人工确认的自动记录，`confirmed`、`rejected` 或其他来源记录不会被覆盖。首批基线见 `evals/CHRONOLOGY_BASELINE.md`。模型辅助结果同样必须通过 schema 和证据约束。
 
-## 6. 模型辅助事件增强
+## 8. 模型辅助事件增强
 
 M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件中选择 `needs_review`、低置信度或通用 `activity` 候选。每个事件发送的全部证据正文合计硬限制为 1200 字符。模型只返回事件类型、行动原文、地点原文、机构原文和已登记人物的原文提及；日期、描述、证据 ID、文献 ID 和 PDF 页码不进入可修改字段。
 
@@ -141,3 +141,35 @@ M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件
 ```
 
 模型增强报告位于 `data/reports/model_event_extraction_latest.json`。本地契约测试与首批 2 条真实 API 冒烟结果见 `evals/MODEL_EVENT_EXTRACTION.md`。任何后续批次仍应先明确资料出境范围，再从小批量开始。
+
+## 9. 事件去重与多来源合并
+
+去重层不修改 `historical_events`、`event_participants` 或 `event_evidence`。它根据日期生成跨文献候选对，再综合描述字符二元组相似度、相互包含度、共同人物、年谱主体、地点、机构和事件类型评分。只有精确到日、至少一条日期来自原文明确年份、文本高度相似且不超过两个成员的组合才进入 `high_confidence`；其余满足最低候选条件的组合进入 `uncertain/needs_review`。
+
+规范层由以下表组成：
+
+- `canonical_events`：代表性展示字段、置信度、候选类型、复核状态、字段差异和评分特征；
+- `canonical_event_members`：每条源事件的完整快照和来源文献，保证可追溯、可重建；
+- `canonical_event_participants`：来源参与者的并集；
+- `canonical_event_evidence`：每条证据与其源事件的对应关系；
+- `event_merge_review_queue`：不确定合并的人工复核队列；
+- `canonical_event_reviews`：确认、驳回和重新打开的审计记录。
+
+字段不一致时，规范事件选择一条代表值用于展示，同时在 `field_variants_json` 保存每个不同值及其源事件 ID。人工驳回只让规范事件失活，源事件仍可独立查询；重新打开会恢复规范事件和待审队列。已经人工确认或驳回的记录不会被后续自动同步覆盖。
+
+```powershell
+# 只计算候选和报告，不写规范表
+.\.venv\Scripts\history-agent.exe research merge-events --dry-run --json
+
+# 写入或幂等同步规范事件
+.\.venv\Scripts\history-agent.exe research merge-events
+
+# 查看人工待审队列
+.\.venv\Scripts\history-agent.exe research merge-review-queue --limit 20 --json
+
+# 确认、驳回或重新打开，不改动源事件
+.\.venv\Scripts\history-agent.exe research review-event-merge CANONICAL_EVENT_ID `
+  --decision confirmed --reviewed-by "研究者" --note "复核依据"
+```
+
+最新报告位于 `data/reports/event_merge_latest.json`，真实库基线与完整性审计见 `evals/EVENT_MERGE_BASELINE.md`。

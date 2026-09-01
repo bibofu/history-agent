@@ -25,6 +25,11 @@ from history_agent.log import configure_logging
 from history_agent.processing.chunks import build_all_chunks
 from history_agent.research.catalog import load_person_catalog, load_relation_type_catalog
 from history_agent.research.chronology import extract_chronology_events
+from history_agent.research.event_deduplication import (
+    list_event_merge_review_queue,
+    merge_duplicate_events,
+    review_event_merge,
+)
 from history_agent.research.model_extraction import (
     enrich_events_with_model,
     list_review_queue,
@@ -386,6 +391,127 @@ def research_review_queue(
             f"P{row['priority']} {row['event_id']} {row['start_value'] or '-'} "
             f"{row['name']} [{', '.join(row['reason_codes'])}]"
         )
+
+
+@research_app.command("merge-events")
+def research_merge_events(
+    minimum_score: Annotated[
+        float,
+        typer.Option(
+            "--minimum-score",
+            min=0.5,
+            max=0.95,
+            help="Minimum score for exact-day duplicate candidates.",
+        ),
+    ] = 0.70,
+    automatic_score: Annotated[
+        float,
+        typer.Option(
+            "--automatic-score",
+            min=0.5,
+            max=0.99,
+            help="Minimum score for a conservative high-confidence merge.",
+        ),
+    ] = 0.80,
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Calculate candidates and report them without changing canonical tables.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Build non-destructive canonical events from cross-source duplicates."""
+
+    settings = get_settings()
+    settings.ensure_runtime_dirs()
+    configure_logging(settings.log_level, json_output=json_output)
+    tracker = RunTracker(
+        settings.runs_dir,
+        "merge_duplicate_events",
+        {
+            **settings.public_snapshot(),
+            "minimum_score": minimum_score,
+            "automatic_score": automatic_score,
+            "dry_run": dry_run,
+        },
+    )
+    try:
+        summary = merge_duplicate_events(
+            database=Database(settings.database_path),
+            reports_dir=settings.reports_dir,
+            run_id=tracker.run_id,
+            minimum_score=minimum_score,
+            automatic_score=automatic_score,
+            dry_run=dry_run,
+        )
+        payload = summary.model_dump()
+        tracker.finish(payload)
+    except Exception as exc:
+        tracker.fail(exc)
+        raise
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    typer.echo(f"event merge run: {summary.run_id}")
+    typer.echo(
+        f"pairs={summary.candidate_pairs}, groups={summary.candidate_groups}, "
+        f"high_confidence={summary.high_confidence_groups}, "
+        f"uncertain={summary.uncertain_groups}"
+    )
+    typer.echo(
+        f"created={summary.created}, updated={summary.updated}, "
+        f"skipped={summary.skipped}, protected={summary.protected}, "
+        f"deactivated={summary.deactivated}"
+    )
+    typer.echo(str(settings.reports_dir / "event_merge_latest.json"))
+
+
+@research_app.command("merge-review-queue")
+def research_merge_review_queue(
+    limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 20,
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """List uncertain canonical-event merges awaiting human review."""
+
+    settings = get_settings()
+    rows = list_event_merge_review_queue(
+        Database(settings.database_path), limit=limit
+    )
+    if json_output:
+        typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
+        return
+    if not rows:
+        typer.echo("No pending event-merge review items.")
+        return
+    for row in rows:
+        typer.echo(
+            f"P{row['priority']} {row['canonical_event_id']} "
+            f"score={row['merge_confidence']:.3f} members={row['member_count']} "
+            f"{row['start_value'] or '-'} {row['name']}"
+        )
+
+
+@research_app.command("review-event-merge")
+def research_review_event_merge(
+    canonical_event_id: Annotated[str, typer.Argument()],
+    decision: Annotated[
+        Literal["confirmed", "rejected", "reopened"],
+        typer.Option("--decision"),
+    ],
+    reviewed_by: Annotated[str, typer.Option("--reviewed-by")],
+    note: Annotated[str | None, typer.Option("--note")] = None,
+) -> None:
+    """Confirm, reject, or reopen a canonical merge without changing source events."""
+
+    settings = get_settings()
+    review_id = review_event_merge(
+        Database(settings.database_path),
+        canonical_event_id=canonical_event_id,
+        decision=decision,
+        reviewed_by=reviewed_by,
+        note=note,
+    )
+    typer.echo(f"{review_id}: {canonical_event_id} -> {decision}")
 
 
 @people_app.command("resolve")
