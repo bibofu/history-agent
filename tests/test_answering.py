@@ -9,6 +9,7 @@ from history_agent.answering.service import (
     _llm_answer,
     _unsupported_leading_entity,
 )
+from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.web import app as web_module
 
@@ -152,3 +153,84 @@ def test_deepseek_rejects_unknown_evidence_marker(monkeypatch: Any) -> None:
 
     assert result.answer is None
     assert result.error_code == "invalid_evidence_marker"
+
+
+def test_validation_accepts_cited_core_fact_lines() -> None:
+    result = validate_grounded_answer(
+        "## 主要经历\n- 1956年1月，周恩来参加有关会议。[E1]\n\n资料范围有限。",
+        [_citation()],
+    )
+
+    assert result.valid is True
+    assert result.used_evidence_ids == ("E1",)
+
+
+def test_validation_rejects_uncited_core_fact_line() -> None:
+    result = validate_grounded_answer(
+        "- 1956年1月，周恩来参加有关会议。[E1]\n- 随后主持科学规划工作。",
+        [_citation()],
+    )
+
+    assert result.valid is False
+    assert result.error_code == "uncited_core_claim"
+    assert result.uncited_claims == ("随后主持科学规划工作。",)
+
+
+def test_validation_rejects_fabricated_pdf_page() -> None:
+    result = validate_grounded_answer(
+        "《周恩来年谱》PDF第999页记载周恩来参加会议。[E1]",
+        [_citation()],
+    )
+
+    assert result.valid is False
+    assert result.error_code == "citation_metadata_mismatch"
+
+
+def test_validation_accepts_matching_document_and_pdf_page() -> None:
+    result = validate_grounded_answer(
+        "《周恩来年谱》PDF第688页记载周恩来参加会议。[E1]",
+        [_citation()],
+    )
+
+    assert result.valid is True
+
+
+def test_validation_rejects_mismatched_document_name() -> None:
+    result = validate_grounded_answer(
+        "《林彪年谱》PDF第688页记载周恩来参加会议。[E1]",
+        [_citation()],
+    )
+
+    assert result.valid is False
+    assert result.error_code == "citation_metadata_mismatch"
+
+
+def test_deepseek_falls_back_when_core_fact_has_no_citation(monkeypatch: Any) -> None:
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "1956年1月，周恩来参加有关会议。[E1]\n"
+                                "随后主持科学规划工作。"
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    settings = Settings(_env_file=None, llm_api_key="sk-test")
+    result = _llm_answer(
+        settings=settings,
+        request=QuestionRequest(question="周恩来在1956年做了什么？"),
+        citations=[_citation()],
+    )
+
+    assert result.answer is None
+    assert result.error_code == "uncited_core_claim"

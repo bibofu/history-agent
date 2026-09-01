@@ -17,11 +17,11 @@ class QuestionRequest(BaseModel):
 
 
 class Citation(BaseModel):
-    evidence_id: str
+    evidence_id: str = Field(pattern=r"^E[1-9]\d*$")
     document_id: str
     document: str
     volume: str | None = None
-    pdf_page: int
+    pdf_page: int = Field(ge=1)
     section: list[str]
     quote: str
     source_type: str

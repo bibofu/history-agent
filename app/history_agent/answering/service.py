@@ -8,13 +8,13 @@ from typing import Any, Literal
 import httpx
 
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
+from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.retrieval.hybrid import search_hybrid_index
 from history_agent.retrieval.models import SearchHit
 
 WHITESPACE = re.compile(r"\s+")
 SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？；])")
-EVIDENCE_MARKER = re.compile(r"\[(E\d+)\]")
 LEADING_ENTITY = re.compile(
     r"^(?:请问|我想知道|想知道|帮我查)?(?P<entity>[\u3400-\u4dbf\u4e00-\u9fff·]{2,8})"
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
@@ -136,7 +136,9 @@ def _llm_answer(
         "补充事实。每个事实性结论后必须标注对应证据编号，如[E1]。区分原文观点、年谱记载"
         "和后人叙述；证据不足就明确说明。不要虚构页码或证据编号。先给简明结论，再按时间"
         "或主题组织要点，最后说明资料限制。不要输出证据包中不存在的知识。回答中必须至少"
-        "出现一个本次证据编号；引用格式只能是[E1]、[E2]这种形式。"
+        "出现一个本次证据编号；引用格式只能是[E1]、[E2]这种形式。每一条包含日期、职务、"
+        "地点、行动或人物关系的事实必须在同一行给出证据编号；如需写文献名或PDF页码，必须"
+        "与证据包完全一致。"
     )
     history = [item.model_dump() for item in request.history[-6:]]
     messages = [
@@ -183,12 +185,9 @@ def _llm_answer(
         return LLMResult(answer=None, error_code="invalid_response")
     if finish_reason == "length":
         return LLMResult(answer=None, error_code="max_tokens_exhausted", usage=usage)
-    markers = set(EVIDENCE_MARKER.findall(answer))
-    allowed_markers = {item.evidence_id for item in citations}
-    if not markers:
-        return LLMResult(answer=None, error_code="missing_evidence_markers", usage=usage)
-    if not markers.issubset(allowed_markers):
-        return LLMResult(answer=None, error_code="invalid_evidence_marker", usage=usage)
+    validation = validate_grounded_answer(answer, citations)
+    if not validation.valid:
+        return LLMResult(answer=None, error_code=validation.error_code, usage=usage)
     return LLMResult(answer=answer, usage=usage)
 
 
