@@ -173,3 +173,33 @@ M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件
 ```
 
 最新报告位于 `data/reports/event_merge_latest.json`，真实库基线与完整性审计见 `evals/EVENT_MERGE_BASELINE.md`。
+
+## 10. 人物时间线查询
+
+时间线不是只查规范事件表。查询服务联合两类记录：
+
+1. 人物参与的活跃规范事件，每组只返回一次并附上全部来源证据；
+2. 尚未被当前筛选条件下的规范事件覆盖的源事件。
+
+第二条保证了两种安全回退：人工驳回规范合并后，成员源事件会重新出现；规范事件的展示类型或复核状态不符合筛选条件时，仍保留符合条件的来源字段差异。查询结果按起止时间和稳定 ID 排序，支持起止年份、事件类型、复核状态、`limit` 和 `offset`。
+
+每条结果提供：
+
+- `record_kind`：`canonical` 或 `source`；
+- `source_event_ids`：可回溯的全部来源事件；
+- `verification_level`：`confirmed`、`automatic` 或 `pending_review`；
+- 日期精度与确定性、地点、机构、参与者和来源提及方式；
+- 文献标题、PDF 起止页码、短引文和抽取方式；
+- 规范事件的候选类型及 `field_variants` 来源差异。
+
+```powershell
+# 姓名、稳定 ID 和无歧义别名均可用于 CLI
+.\.venv\Scripts\history-agent.exe research timeline 周恩来 --year 1956
+
+# 可重复指定事件类型和复核状态
+.\.venv\Scripts\history-agent.exe research timeline lin_biao `
+  --start-year 1942 --end-year 1943 `
+  --event-type correspondence --review-status confirmed --json
+```
+
+HTTP 接口为 `GET /api/people/{person_id}/timeline`，查询参数为 `start_year`、`end_year`、可重复的 `event_type` 与 `review_status`、`limit` 和 `offset`。API 只接受稳定 `person_id`，年份必须位于项目研究范围内。真实库验收见 `evals/TIMELINE_BASELINE.md`。

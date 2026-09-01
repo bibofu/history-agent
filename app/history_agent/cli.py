@@ -41,6 +41,7 @@ from history_agent.research.people import (
     sync_person_catalog,
     sync_relation_types,
 )
+from history_agent.research.timeline import get_person_timeline
 from history_agent.retrieval.hybrid import search_hybrid_index
 from history_agent.retrieval.keyword import build_keyword_index, search_keyword_index
 from history_agent.retrieval.vector import build_vector_index, search_vector_index
@@ -512,6 +513,90 @@ def research_review_event_merge(
         note=note,
     )
     typer.echo(f"{review_id}: {canonical_event_id} -> {decision}")
+
+
+@research_app.command("timeline")
+def research_timeline(
+    person: Annotated[
+        str,
+        typer.Argument(help="Stable person ID, canonical name, or unambiguous alias."),
+    ],
+    year: Annotated[int | None, typer.Option("--year", min=1, max=9999)] = None,
+    start_year: Annotated[
+        int | None, typer.Option("--start-year", min=1, max=9999)
+    ] = None,
+    end_year: Annotated[
+        int | None, typer.Option("--end-year", min=1, max=9999)
+    ] = None,
+    event_type: Annotated[
+        list[str] | None,
+        typer.Option("--event-type", help="Filter by event type; repeat as needed."),
+    ] = None,
+    review_status: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--review-status",
+            help="Filter by confirmed, unreviewed, or needs_review; repeat as needed.",
+        ),
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 50,
+    offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Query a deduplicated, evidence-backed timeline for one person."""
+
+    if year is not None and (start_year is not None or end_year is not None):
+        raise typer.BadParameter("--year cannot be combined with --start-year/--end-year")
+    settings = get_settings()
+    effective_start = year if year is not None else start_year
+    effective_end = year if year is not None else end_year
+    lower = settings.research_start.year
+    upper = settings.research_end.year
+    for option_name, value in (
+        ("start year", effective_start),
+        ("end year", effective_end),
+    ):
+        if value is not None and not lower <= value <= upper:
+            raise typer.BadParameter(
+                f"{option_name} must be within the research range {lower}-{upper}"
+            )
+    database = Database(settings.database_path)
+    resolution = resolve_person(database, person)
+    if resolution.status == "ambiguous":
+        choices = ", ".join(item.person_id for item in resolution.candidates)
+        raise typer.BadParameter(f"ambiguous person; use one of these IDs: {choices}")
+    if resolution.status == "resolved":
+        candidate = resolution.candidates[0]
+        person_id = candidate.merged_into_person_id or candidate.person_id
+    else:
+        person_id = person
+    timeline = get_person_timeline(
+        database,
+        person_id=person_id,
+        start_year=effective_start,
+        end_year=effective_end,
+        event_types=event_type,
+        review_statuses=review_status,
+        limit=limit,
+        offset=offset,
+    )
+    if json_output:
+        typer.echo(timeline.model_dump_json(indent=2))
+        return
+    typer.echo(
+        f"{timeline.canonical_name} ({timeline.person_id}): "
+        f"showing {len(timeline.events)} of {timeline.total} events"
+    )
+    for item in timeline.events:
+        date_text = item.start.value or item.start.original_text or "date unknown"
+        sources = ", ".join(
+            f"{evidence.document_title} PDF {evidence.pdf_page_start}"
+            for evidence in item.evidence
+        )
+        typer.echo(
+            f"{date_text} [{item.verification_level}/{item.record_kind}] "
+            f"{item.name} | {sources}"
+        )
 
 
 @people_app.command("resolve")

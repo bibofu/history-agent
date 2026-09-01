@@ -154,6 +154,11 @@ uv sync --extra ocr --extra vector --extra app --group dev
 .\.venv\Scripts\history-agent.exe research review-event-merge CANONICAL_EVENT_ID `
   --decision confirmed --reviewed-by "研究者" --note "两份年谱记载同一事件"
 
+# 查询人物年度时间线；支持姓名、稳定 ID、年份区间、类型和复核状态
+.\.venv\Scripts\history-agent.exe research timeline 周恩来 --year 1956 --limit 50
+.\.venv\Scripts\history-agent.exe research timeline lin_biao `
+  --start-year 1942 --end-year 1943 --event-type correspondence --json
+
 # 查看最近一次扫描结果
 .\.venv\Scripts\history-agent.exe corpus diff
 
@@ -459,9 +464,11 @@ review_status
 ```text
 POST /api/questions       基于本地资料问答
 GET  /api/health          查看双索引、生成模式和研究时间范围
+GET  /api/people/{person_id}/timeline
+                           查询去重后的人物时间线和页码证据
 ```
 
-人物、事件和关系专用接口将在结构化抽取阶段加入；目前这些问题均通过统一问答接口进入混合 RAG。
+人物时间线接口已实现；人物交集和组织关系接口将在后续结构化查询阶段加入。目前会话问答仍通过统一问答接口进入混合 RAG，下一阶段再让会话 Agent 自动调用结构化时间线。
 
 问答接口应返回结构化证据，而不只返回一段文本：
 
@@ -563,4 +570,5 @@ GET  /api/health          查看双索引、生成模式和研究时间范围
 - [x] 从《周恩来年谱》《林彪年谱》抽取 15,393 条首批人物事件，保留日期确定性、年谱主体来源、原文和 PDF 页码证据
 - [x] 完成 DeepSeek 结构化事件增强、1200 字符送模硬上限、逐字段原文校验、调用审计和复核队列；2 条真实 API 冒烟全部成功且幂等复跑不消耗 Token
 - [x] 完成跨来源事件去重：从 15,393 条源事件生成 69 个可逆规范事件组（18 个高置信、51 个待审），保留 139 条来源成员快照和证据链接；幂等复跑零改动
+- [x] 实现人物时间线 CLI 与 API：联合规范事件和独立源事件，支持年份、类型、复核状态及分页过滤，并返回参与者、来源差异和 PDF 页码证据
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比
