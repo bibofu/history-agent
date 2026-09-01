@@ -20,6 +20,22 @@ def _temporal_values(point: TemporalPoint | None) -> tuple[str | None, ...]:
     return (point.value, point.precision, point.certainty, point.original_text)
 
 
+def _event_values(event: HistoricalEvent) -> tuple[object, ...]:
+    return (
+        event.name,
+        event.event_type,
+        *_temporal_values(event.start),
+        *_temporal_values(event.end),
+        event.location_text,
+        json.dumps(event.organization_names, ensure_ascii=False),
+        event.description,
+        event.extraction_method,
+        event.extraction_confidence,
+        event.review_status,
+        event.extractor_version,
+    )
+
+
 class ResearchStore:
     def __init__(self, database: Database):
         self.database = database
@@ -32,57 +48,57 @@ class ResearchStore:
                 connection, [participant.person_id for participant in event.participants]
             )
             try:
-                connection.execute(
-                    """
-                    INSERT INTO historical_events (
-                        event_id, name, event_type,
-                        start_value, start_precision, start_certainty, start_original_text,
-                        end_value, end_precision, end_certainty, end_original_text,
-                        location_text, organization_names_json, description,
-                        extraction_method, extraction_confidence, review_status,
-                        extractor_version, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event.event_id,
-                        event.name,
-                        event.event_type,
-                        *_temporal_values(event.start),
-                        *_temporal_values(event.end),
-                        event.location_text,
-                        json.dumps(event.organization_names, ensure_ascii=False),
-                        event.description,
-                        event.extraction_method,
-                        event.extraction_confidence,
-                        event.review_status,
-                        event.extractor_version,
-                        now,
-                        now,
-                    ),
-                )
-                connection.executemany(
-                    """
-                    INSERT INTO event_participants (event_id, person_id, role, mention_text)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    [
-                        (
-                            event.event_id,
-                            participant.person_id,
-                            participant.role,
-                            participant.mention_text,
-                        )
-                        for participant in event.participants
-                    ],
-                )
-                for evidence in event.evidence:
-                    self._save_evidence(connection, evidence, now)
-                    connection.execute(
-                        "INSERT INTO event_evidence (event_id, evidence_id) VALUES (?, ?)",
-                        (event.event_id, evidence.evidence_id),
-                    )
+                self._insert_event(connection, event, now)
             except sqlite3.IntegrityError as exc:
                 raise ResearchDataError(f"Cannot save event {event.event_id}: {exc}") from exc
+
+    def sync_generated_events(
+        self, events: list[HistoricalEvent]
+    ) -> tuple[int, int, int]:
+        """Idempotently sync rule output while protecting reviewed or foreign records."""
+
+        self.database.initialize()
+        if not events:
+            return 0, 0, 0
+        now = utc_now()
+        created = 0
+        updated = 0
+        skipped = 0
+        with self.database.connect() as connection:
+            self._require_active_people(
+                connection,
+                [
+                    participant.person_id
+                    for event in events
+                    for participant in event.participants
+                ],
+            )
+            try:
+                for event in events:
+                    existing = connection.execute(
+                        "SELECT * FROM historical_events WHERE event_id = ?",
+                        (event.event_id,),
+                    ).fetchone()
+                    if existing is None:
+                        self._insert_event(connection, event, now)
+                        created += 1
+                        continue
+                    if self._event_matches(connection, existing, event):
+                        skipped += 1
+                        continue
+                    is_replaceable = (
+                        existing["extraction_method"] == "rule"
+                        and existing["extractor_version"] == event.extractor_version
+                        and existing["review_status"] in {"unreviewed", "needs_review"}
+                    )
+                    if not is_replaceable:
+                        skipped += 1
+                        continue
+                    self._update_generated_event(connection, event, now)
+                    updated += 1
+            except sqlite3.IntegrityError as exc:
+                raise ResearchDataError(f"Cannot save event batch: {exc}") from exc
+        return created, updated, skipped
 
     def save_relationship(self, relationship: HistoricalRelationship) -> None:
         self.database.initialize()
@@ -151,6 +167,138 @@ class ResearchStore:
                 raise ResearchDataError(
                     f"Cannot save relationship {relationship.relationship_id}: {exc}"
                 ) from exc
+
+    @staticmethod
+    def _insert_event(
+        connection: sqlite3.Connection, event: HistoricalEvent, now: str
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO historical_events (
+                event_id, name, event_type,
+                start_value, start_precision, start_certainty, start_original_text,
+                end_value, end_precision, end_certainty, end_original_text,
+                location_text, organization_names_json, description,
+                extraction_method, extraction_confidence, review_status,
+                extractor_version, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event.event_id,
+                *_event_values(event),
+                now,
+                now,
+            ),
+        )
+        ResearchStore._write_event_links(connection, event, now)
+
+    @staticmethod
+    def _write_event_links(
+        connection: sqlite3.Connection, event: HistoricalEvent, now: str
+    ) -> None:
+        connection.executemany(
+            """
+            INSERT INTO event_participants (
+                event_id, person_id, role, mention_text, mention_source
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    event.event_id,
+                    participant.person_id,
+                    participant.role,
+                    participant.mention_text,
+                    participant.mention_source,
+                )
+                for participant in event.participants
+            ],
+        )
+        for evidence in event.evidence:
+            ResearchStore._save_evidence(connection, evidence, now)
+            connection.execute(
+                "INSERT INTO event_evidence (event_id, evidence_id) VALUES (?, ?)",
+                (event.event_id, evidence.evidence_id),
+            )
+
+    @staticmethod
+    def _event_matches(
+        connection: sqlite3.Connection,
+        existing: sqlite3.Row,
+        event: HistoricalEvent,
+    ) -> bool:
+        columns = (
+            "name",
+            "event_type",
+            "start_value",
+            "start_precision",
+            "start_certainty",
+            "start_original_text",
+            "end_value",
+            "end_precision",
+            "end_certainty",
+            "end_original_text",
+            "location_text",
+            "organization_names_json",
+            "description",
+            "extraction_method",
+            "extraction_confidence",
+            "review_status",
+            "extractor_version",
+        )
+        if tuple(existing[column] for column in columns) != _event_values(event):
+            return False
+        actual_participants = {
+            (row["person_id"], row["role"], row["mention_text"], row["mention_source"])
+            for row in connection.execute(
+                "SELECT * FROM event_participants WHERE event_id = ?",
+                (event.event_id,),
+            ).fetchall()
+        }
+        expected_participants = {
+            (
+                participant.person_id,
+                participant.role,
+                participant.mention_text,
+                participant.mention_source,
+            )
+            for participant in event.participants
+        }
+        if actual_participants != expected_participants:
+            return False
+        actual_evidence = {
+            row["evidence_id"]
+            for row in connection.execute(
+                "SELECT evidence_id FROM event_evidence WHERE event_id = ?",
+                (event.event_id,),
+            ).fetchall()
+        }
+        return actual_evidence == {item.evidence_id for item in event.evidence}
+
+    @staticmethod
+    def _update_generated_event(
+        connection: sqlite3.Connection, event: HistoricalEvent, now: str
+    ) -> None:
+        connection.execute(
+            """
+            UPDATE historical_events SET
+                name = ?, event_type = ?,
+                start_value = ?, start_precision = ?, start_certainty = ?,
+                start_original_text = ?, end_value = ?, end_precision = ?,
+                end_certainty = ?, end_original_text = ?, location_text = ?,
+                organization_names_json = ?, description = ?, extraction_method = ?,
+                extraction_confidence = ?, review_status = ?, extractor_version = ?,
+                updated_at = ?
+            WHERE event_id = ?
+            """,
+            (*_event_values(event), now, event.event_id),
+        )
+        connection.execute(
+            "DELETE FROM event_participants WHERE event_id = ?", (event.event_id,)
+        )
+        connection.execute(
+            "DELETE FROM event_evidence WHERE event_id = ?", (event.event_id,)
+        )
+        ResearchStore._write_event_links(connection, event, now)
 
     @staticmethod
     def _require_active_people(

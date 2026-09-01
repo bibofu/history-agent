@@ -1,6 +1,6 @@
 # 结构化研究模型
 
-本文定义 M6 人物、事件与关系层的可审计数据契约。当前阶段只建立主数据、数据库表、校验模型和管理命令；尚未把自动抽取结果当作已确认史实。
+本文定义 M6 人物、事件与关系层的可审计数据契约。当前已完成主数据、数据库表、校验模型、管理命令，以及《周恩来年谱》《林彪年谱》的首批规则事件抽取；自动结果仍不是已确认史实。
 
 ## 1. 设计原则
 
@@ -64,9 +64,11 @@ extraction_methods
 
 ## 5. 事件
 
-事件保存名称、类型、起止时间、地点、机构、描述、参与者、证据、抽取方法、置信度和复核状态。每个参与者必须保存稳定 `person_id`、当次角色和原文 `mention_text`。
+事件保存名称、类型、起止时间、地点、机构、描述、参与者、证据、抽取方法、置信度和复核状态。每个参与者必须保存稳定 `person_id`、当次角色、`mention_text` 和 `mention_source`。`mention_source=explicit` 表示正文点名；`chronology_subject` 表示主体只由年谱归属推得，不能伪装成原文提及。
 
 自动抽取结果初始状态为 `unreviewed` 或 `needs_review`；只有经过规则或人工流程确认后才能用于确定性时间线。
+
+年谱日期规则保留原始日期表达：精确日、月和年分别保存；日期区间保存起止点；“同日”“在此期间”等继承前一条日期并标记为 `inferred`；多个离散日期只保存近似首末边界并进入复核；终点早于起点等原书或文字层异常不会自动纠正，而是取消错误终点并标记 `needs_review`。跨页正文合并为一个事件，证据页码覆盖真实起止页。
 
 ## 6. 关系词表
 
@@ -93,6 +95,9 @@ extraction_methods
 # 解析标准姓名或历史别名
 .\.venv\Scripts\history-agent.exe research people resolve "伍豪" --json
 
+# 生成两部年谱的事件候选、SQLite 记录和质量报告；命令幂等
+.\.venv\Scripts\history-agent.exe research extract-chronologies
+
 # 提议合并，不立即修改数据
 .\.venv\Scripts\history-agent.exe research people propose-merge SOURCE_ID TARGET_ID `
   --reason "人工核对理由" --proposed-by "研究者"
@@ -102,4 +107,4 @@ extraction_methods
   --decision accepted --reviewed-by "复核者" --note "复核说明"
 ```
 
-下一阶段 M6.3 将从《周恩来年谱》和《林彪年谱》解析日期条目，先生成带证据的事件候选，再评估准确率；不会直接生成未经复核的“人物网络”。
+候选 JSONL 位于 `data/processed/events/`，最新报告位于 `data/reports/chronology_extraction_latest.json`。规则重复运行时，相同记录跳过；规则字段变化时只同步同版本且尚未人工确认的自动记录，`confirmed`、`rejected` 或其他来源记录不会被覆盖。首批基线见 `evals/CHRONOLOGY_BASELINE.md`。下一阶段 M6.4 使用模型辅助处理复杂事件，但仍必须通过同一 schema 和证据约束。

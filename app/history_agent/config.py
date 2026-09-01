@@ -99,6 +99,10 @@ class Settings(BaseSettings):
         return self.data_dir / "processed" / "chunks"
 
     @property
+    def events_dir(self) -> Path:
+        return self.data_dir / "processed" / "events"
+
+    @property
     def keyword_index_path(self) -> Path:
         return self.data_dir / "indexes" / "keyword_fts.db"
 
@@ -120,6 +124,7 @@ class Settings(BaseSettings):
             self.ocr_dir,
             self.structure_dir,
             self.chunks_dir,
+            self.events_dir,
             self.keyword_index_path.parent,
             self.model_cache_dir,
             self.database_path.parent,

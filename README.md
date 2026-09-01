@@ -9,6 +9,7 @@
 - [需求分析](REQUIREMENTS.md)：定义用户场景、功能需求、非功能需求、验收标准和 MVP 边界。
 - [任务规划](TASK_PLAN.md)：将需求拆分为里程碑、具体任务、依赖关系、交付物和质量闸门。
 - [结构化研究模型](RESEARCH_SCHEMA.md)：说明人物、事件、关系、时间精度、证据和人工复核约束。
+- [年谱抽取基线](evals/CHRONOLOGY_BASELINE.md)：记录首批规则抽取规模、人工页码抽查与已知限制。
 
 ## 快速启动
 
@@ -71,6 +72,10 @@ uv run history-agent extract report
 uv run history-agent process chunks
 uv run history-agent index build-keyword
 uv run history-agent index build-vector
+
+# 初始化研究表，并从两部年谱生成带页码证据的事件候选
+uv run history-agent research init
+uv run history-agent research extract-chronologies
 ```
 
 首次 OCR 和向量索引构建耗时较长，并会下载 PaddleOCR 与中文嵌入模型；任务支持复用已完成的页面结果。生成内容位于 `data/`，不会提交到 Git。
@@ -123,6 +128,9 @@ uv sync --extra ocr --extra vector --extra app --group dev
 # 将历史别名解析为稳定 person_id；歧义名称不会被强制合并
 .\.venv\Scripts\history-agent.exe research people resolve "伍豪" --json
 
+# 从《周恩来年谱》《林彪年谱》抽取事件；重复运行会跳过相同记录
+.\.venv\Scripts\history-agent.exe research extract-chronologies
+
 # 查看最近一次扫描结果
 .\.venv\Scripts\history-agent.exe corpus diff
 
@@ -171,7 +179,7 @@ uv sync --extra ocr --extra vector --extra app --group dev
 .\.venv\Scripts\history-agent.exe corpus scan --accept-changes
 ```
 
-首次构建向量索引会下载中文嵌入模型。运行数据保存在 `data/`：SQLite 数据库、逐页文本、OCR、chunks、检索索引、质量报告和任务运行记录都可以删除后重建，不提交 Git。
+首次构建向量索引会下载中文嵌入模型。运行数据保存在 `data/`：SQLite 数据库、逐页文本、OCR、chunks、年谱事件候选、检索索引、质量报告和任务运行记录都可以删除后重建，不提交 Git。
 
 项目已接入 DeepSeek V4，默认模型为 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
 
@@ -527,5 +535,5 @@ GET  /api/health          查看双索引、生成模式和研究时间范围
 - [x] 建立 38 题页码级人工金标准和 MVP 回答评估：关键页命中 91.43%，引用页一致 99.71%，必要事实覆盖 86.46%，拒答 100%
 - [x] 建立 25 位人物的稳定 ID、别名/歧义处理和人工合并审计流程
 - [x] 定义带时间精度、共同事件、原文提及、证据和复核状态的事件/关系模型及 7 类关系词表
-- [ ] 从《周恩来年谱》《林彪年谱》抽取首批人物事件
+- [x] 从《周恩来年谱》《林彪年谱》抽取 15,393 条首批人物事件，保留日期确定性、年谱主体来源、原文和 PDF 页码证据
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比

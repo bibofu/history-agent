@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS event_participants (
     person_id TEXT NOT NULL REFERENCES persons(person_id),
     role TEXT,
     mention_text TEXT NOT NULL,
+    mention_source TEXT NOT NULL DEFAULT 'explicit',
     PRIMARY KEY(event_id, person_id, mention_text)
 );
 
@@ -278,4 +279,15 @@ class Database:
                 connection.execute(
                     "ALTER TABLE person_relationships ADD COLUMN object_mention_text TEXT"
                 )
-            connection.execute("PRAGMA user_version = 3")
+            participant_columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(event_participants)"
+                ).fetchall()
+            }
+            if "mention_source" not in participant_columns:
+                connection.execute(
+                    "ALTER TABLE event_participants "
+                    "ADD COLUMN mention_source TEXT NOT NULL DEFAULT 'explicit'"
+                )
+            connection.execute("PRAGMA user_version = 4")

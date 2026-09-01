@@ -156,6 +156,7 @@ class EventParticipant(BaseModel):
     person_id: str = Field(pattern=STABLE_ID.pattern)
     role: str | None = None
     mention_text: str = Field(min_length=1)
+    mention_source: Literal["explicit", "chronology_subject", "inferred"] = "explicit"
 
 
 class HistoricalEvent(BaseModel):

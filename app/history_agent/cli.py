@@ -24,6 +24,7 @@ from history_agent.extraction.sample import extract_sample_pages
 from history_agent.log import configure_logging
 from history_agent.processing.chunks import build_all_chunks
 from history_agent.research.catalog import load_person_catalog, load_relation_type_catalog
+from history_agent.research.chronology import extract_chronology_events
 from history_agent.research.people import (
     propose_person_merge,
     resolve_person,
@@ -203,6 +204,67 @@ def research_initialize(
             f"ambiguities: {payload['ambiguities']}; "
             f"relation types: {payload['relation_types']}"
         )
+
+
+@research_app.command("extract-chronologies")
+def research_extract_chronologies(
+    document_id: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--document-id",
+            help="Extract one supported chronology. Repeat for multiple documents.",
+        ),
+    ] = None,
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Extract auditable event candidates from supported chronology layouts."""
+
+    settings = get_settings()
+    settings.ensure_runtime_dirs()
+    configure_logging(settings.log_level, json_output=json_output)
+    tracker = RunTracker(
+        settings.runs_dir,
+        "extract_chronology_events",
+        settings.public_snapshot(),
+    )
+    try:
+        database = Database(settings.database_path)
+        sync_person_catalog(
+            database, load_person_catalog(settings.person_aliases_path)
+        )
+        summary = extract_chronology_events(
+            database=database,
+            pages_dir=settings.pages_dir,
+            ocr_dir=settings.ocr_dir,
+            structure_dir=settings.structure_dir,
+            events_dir=settings.events_dir,
+            reports_dir=settings.reports_dir,
+            person_aliases_path=settings.person_aliases_path,
+            run_id=tracker.run_id,
+            research_start=settings.research_start.year,
+            research_end=settings.research_end.year,
+            document_ids=document_id,
+        )
+        payload = summary.model_dump()
+        payload["totals"] = summary.totals
+        tracker.finish(payload)
+    except Exception as exc:
+        tracker.fail(exc)
+        raise
+
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    typer.echo(f"chronology extraction run: {summary.run_id}")
+    typer.echo(f"totals: {summary.totals}")
+    for item in summary.documents:
+        typer.echo(
+            f"{item.document_id}: candidates={item.candidates}, "
+            f"created={item.database_created}, updated={item.database_updated}, "
+            f"skipped={item.database_skipped}, "
+            f"locations={item.location_candidates}"
+        )
+    typer.echo(str(settings.reports_dir / "chronology_extraction_latest.json"))
 
 
 @people_app.command("resolve")
