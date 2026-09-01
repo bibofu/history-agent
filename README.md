@@ -8,6 +8,7 @@
 
 - [需求分析](REQUIREMENTS.md)：定义用户场景、功能需求、非功能需求、验收标准和 MVP 边界。
 - [任务规划](TASK_PLAN.md)：将需求拆分为里程碑、具体任务、依赖关系、交付物和质量闸门。
+- [结构化研究模型](RESEARCH_SCHEMA.md)：说明人物、事件、关系、时间精度、证据和人工复核约束。
 
 ## 快速启动
 
@@ -115,6 +116,12 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 # 扫描 docs/，更新文献数据库并导出清单和差异报告
 .\.venv\Scripts\history-agent.exe corpus scan
+
+# 初始化人物主数据、别名和关系词表（幂等，可重复执行）
+.\.venv\Scripts\history-agent.exe research init
+
+# 将历史别名解析为稳定 person_id；歧义名称不会被强制合并
+.\.venv\Scripts\history-agent.exe research people resolve "伍豪" --json
 
 # 查看最近一次扫描结果
 .\.venv\Scripts\history-agent.exe corpus diff
@@ -342,8 +349,8 @@ content_hash
 ```text
 event_id
 event_name
-start_date
-end_date
+start_date + precision + certainty
+end_date + precision + certainty
 location
 participants
 organizations
@@ -359,8 +366,10 @@ review_status
 subject_person
 relation_type
 object_person
-start_date
-end_date
+subject_mention_text
+object_mention_text
+start_date + precision + certainty
+end_date + precision + certainty
 organization
 event_id
 evidence_chunk_ids
@@ -516,5 +525,7 @@ GET  /api/health          查看双索引、生成模式和研究时间范围
 - [x] 接入 DeepSeek V4-Pro，支持可选 thinking、用量回传、核心事实逐行引用校验和失败降级
 - [x] 扩充为 38 题固定集；35 道可回答题的目标文献/年份基线 Recall@10 97.14%，MRR 0.9381
 - [x] 建立 38 题页码级人工金标准和 MVP 回答评估：关键页命中 91.43%，引用页一致 99.71%，必要事实覆盖 86.46%，拒答 100%
-- [ ] 建立人物事件和关系网络
+- [x] 建立 25 位人物的稳定 ID、别名/歧义处理和人工合并审计流程
+- [x] 定义带时间精度、共同事件、原文提及、证据和复核状态的事件/关系模型及 7 类关系词表
+- [ ] 从《周恩来年谱》《林彪年谱》抽取首批人物事件
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比

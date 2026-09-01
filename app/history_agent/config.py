@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     database_path: Path = Path("data/history_agent.db")
     catalog_path: Path = Path("config/corpus_catalog.json")
     person_aliases_path: Path = Path("config/person_aliases.json")
+    relation_types_path: Path = Path("config/relation_types.json")
     log_level: str = "INFO"
     environment: Literal["development", "test", "production"] = "development"
     research_start: date = date(1921, 1, 1)
@@ -58,6 +59,7 @@ class Settings(BaseSettings):
             "database_path",
             "catalog_path",
             "person_aliases_path",
+            "relation_types_path",
         ):
             value = getattr(self, field_name)
             if not value.is_absolute():
@@ -138,6 +140,7 @@ class Settings(BaseSettings):
             "database_path": str(self.database_path),
             "catalog_path": str(self.catalog_path),
             "person_aliases_path": str(self.person_aliases_path),
+            "relation_types_path": str(self.relation_types_path),
             "log_level": self.log_level,
             "environment": self.environment,
             "research_start": self.research_start.isoformat(),

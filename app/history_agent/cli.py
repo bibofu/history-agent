@@ -23,6 +23,14 @@ from history_agent.extraction.report import build_quality_report
 from history_agent.extraction.sample import extract_sample_pages
 from history_agent.log import configure_logging
 from history_agent.processing.chunks import build_all_chunks
+from history_agent.research.catalog import load_person_catalog, load_relation_type_catalog
+from history_agent.research.people import (
+    propose_person_merge,
+    resolve_person,
+    review_person_merge,
+    sync_person_catalog,
+    sync_relation_types,
+)
 from history_agent.retrieval.hybrid import search_hybrid_index
 from history_agent.retrieval.keyword import build_keyword_index, search_keyword_index
 from history_agent.retrieval.vector import build_vector_index, search_vector_index
@@ -39,12 +47,18 @@ process_app = typer.Typer(help="Clean, structure, and chunk extracted text.", no
 index_app = typer.Typer(help="Build local retrieval indexes.", no_args_is_help=True)
 eval_app = typer.Typer(help="Evaluate retrieval and grounded answers.", no_args_is_help=True)
 llm_app = typer.Typer(help="Inspect and test the DeepSeek V4 connection.", no_args_is_help=True)
+research_app = typer.Typer(
+    help="Manage auditable people, events, and relationships.", no_args_is_help=True
+)
+people_app = typer.Typer(help="Manage stable people and aliases.", no_args_is_help=True)
 app.add_typer(corpus_app, name="corpus")
 app.add_typer(extract_app, name="extract")
 app.add_typer(process_app, name="process")
 app.add_typer(index_app, name="index")
 app.add_typer(eval_app, name="eval")
 app.add_typer(llm_app, name="llm")
+app.add_typer(research_app, name="research")
+research_app.add_typer(people_app, name="people")
 
 
 @app.callback()
@@ -163,6 +177,97 @@ def corpus_diff(json_output: bool = typer.Option(False, "--json", help="Emit JSO
         typer.echo(f"counts: {payload['counts']}")
         for item in payload["observations"]:
             typer.echo(f"{item['status']:>12}  {item['filename']}")
+
+
+@research_app.command("init")
+def research_initialize(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Create research tables and sync people and relation vocabularies."""
+
+    settings = get_settings()
+    settings.ensure_runtime_dirs()
+    database = Database(settings.database_path)
+    people = load_person_catalog(settings.person_aliases_path)
+    relations = load_relation_type_catalog(settings.relation_types_path)
+    payload = {
+        **sync_person_catalog(database, people),
+        **sync_relation_types(database, relations),
+        "database": str(settings.database_path),
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        typer.echo(
+            f"people: {payload['people']}; aliases: {payload['aliases']}; "
+            f"ambiguities: {payload['ambiguities']}; "
+            f"relation types: {payload['relation_types']}"
+        )
+
+
+@people_app.command("resolve")
+def people_resolve(
+    name: Annotated[str, typer.Argument(help="Canonical name or historical alias.")],
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Resolve a name without forcing ambiguous aliases into one person."""
+
+    settings = get_settings()
+    resolution = resolve_person(Database(settings.database_path), name)
+    if json_output:
+        typer.echo(resolution.model_dump_json(indent=2))
+        return
+    typer.echo(f"status: {resolution.status}")
+    for candidate in resolution.candidates:
+        suffix = (
+            f" -> {candidate.merged_into_person_id}"
+            if candidate.merged_into_person_id
+            else ""
+        )
+        typer.echo(
+            f"{candidate.person_id}: {candidate.canonical_name} "
+            f"(matched: {candidate.matched_form}; {candidate.status}{suffix})"
+        )
+
+
+@people_app.command("propose-merge")
+def people_propose_merge(
+    source_person_id: Annotated[str, typer.Argument()],
+    target_person_id: Annotated[str, typer.Argument()],
+    reason: Annotated[str, typer.Option("--reason", help="Why these records may match.")],
+    proposed_by: Annotated[str, typer.Option("--proposed-by")] = "local_researcher",
+) -> None:
+    """Record a merge proposal without changing either person."""
+
+    settings = get_settings()
+    proposal_id = propose_person_merge(
+        Database(settings.database_path),
+        source_person_id=source_person_id,
+        target_person_id=target_person_id,
+        reason=reason,
+        proposed_by=proposed_by,
+    )
+    typer.echo(proposal_id)
+
+
+@people_app.command("review-merge")
+def people_review_merge(
+    proposal_id: Annotated[str, typer.Argument()],
+    decision: Annotated[Literal["accepted", "rejected"], typer.Option("--decision")],
+    reviewed_by: Annotated[str, typer.Option("--reviewed-by")],
+    note: Annotated[str | None, typer.Option("--note")] = None,
+) -> None:
+    """Accept or reject a pending merge while preserving its audit record."""
+
+    settings = get_settings()
+    review_person_merge(
+        Database(settings.database_path),
+        proposal_id=proposal_id,
+        decision=decision,
+        reviewed_by=reviewed_by,
+        review_note=note,
+    )
+    typer.echo(f"{proposal_id}: {decision}")
 
 
 @extract_app.command("sample")

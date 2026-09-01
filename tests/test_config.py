@@ -10,6 +10,7 @@ def test_settings_resolve_paths(work_path: Path) -> None:
 
     assert settings.docs_dir == (work_path / "docs").resolve()
     assert settings.database_path == (work_path / "data" / "history_agent.db").resolve()
+    assert settings.relation_types_path == (work_path / "config" / "relation_types.json").resolve()
     assert settings.research_start == date(1921, 1, 1)
     assert settings.research_end == date(1978, 12, 31)
     assert settings.environment == "development"

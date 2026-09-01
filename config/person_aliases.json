@@ -1,30 +1,80 @@
 {
-  "schema_version": 1,
-  "people": {
-    "毛泽东": ["毛主席", "润之"],
-    "周恩来": ["周总理", "伍豪"],
-    "邓小平": ["小平", "邓希贤"],
-    "林彪": ["林育蓉"],
-    "刘少奇": [],
-    "朱德": ["朱老总"],
-    "陈云": [],
-    "彭德怀": [],
-    "任弼时": [],
-    "瞿秋白": [],
-    "李大钊": [],
-    "陈独秀": [],
-    "张国焘": [],
-    "博古": ["秦邦宪"],
-    "王明": ["陈绍禹"],
-    "项英": [],
-    "叶剑英": [],
-    "聂荣臻": [],
-    "贺龙": [],
-    "罗荣桓": [],
-    "徐向前": [],
-    "粟裕": [],
-    "蒋介石": ["蒋中正"],
-    "孙中山": ["孙文"],
-    "埃德加·斯诺": ["斯诺"]
-  }
+  "schema_version": 2,
+  "people": [
+    {
+      "person_id": "mao_zedong",
+      "canonical_name": "毛泽东",
+      "aliases": [
+        {"name": "毛主席", "alias_type": "title"},
+        {"name": "润之", "alias_type": "courtesy_name"}
+      ]
+    },
+    {
+      "person_id": "zhou_enlai",
+      "canonical_name": "周恩来",
+      "aliases": [
+        {"name": "周总理", "alias_type": "title"},
+        {"name": "伍豪", "alias_type": "pen_name"}
+      ]
+    },
+    {
+      "person_id": "deng_xiaoping",
+      "canonical_name": "邓小平",
+      "aliases": [
+        {"name": "小平", "alias_type": "name"},
+        {"name": "邓希贤", "alias_type": "name"}
+      ]
+    },
+    {
+      "person_id": "lin_biao",
+      "canonical_name": "林彪",
+      "aliases": [{"name": "林育蓉", "alias_type": "name"}]
+    },
+    {"person_id": "liu_shaoqi", "canonical_name": "刘少奇", "aliases": []},
+    {
+      "person_id": "zhu_de",
+      "canonical_name": "朱德",
+      "aliases": [{"name": "朱老总", "alias_type": "title"}]
+    },
+    {"person_id": "chen_yun", "canonical_name": "陈云", "aliases": []},
+    {"person_id": "peng_dehuai", "canonical_name": "彭德怀", "aliases": []},
+    {"person_id": "ren_bishi", "canonical_name": "任弼时", "aliases": []},
+    {"person_id": "qu_qiubai", "canonical_name": "瞿秋白", "aliases": []},
+    {"person_id": "li_dazhao", "canonical_name": "李大钊", "aliases": []},
+    {"person_id": "chen_duxiu", "canonical_name": "陈独秀", "aliases": []},
+    {"person_id": "zhang_guotao", "canonical_name": "张国焘", "aliases": []},
+    {
+      "person_id": "bo_gu",
+      "canonical_name": "博古",
+      "aliases": [{"name": "秦邦宪", "alias_type": "name"}]
+    },
+    {
+      "person_id": "wang_ming",
+      "canonical_name": "王明",
+      "aliases": [{"name": "陈绍禹", "alias_type": "name"}]
+    },
+    {"person_id": "xiang_ying", "canonical_name": "项英", "aliases": []},
+    {"person_id": "ye_jianying", "canonical_name": "叶剑英", "aliases": []},
+    {"person_id": "nie_rongzhen", "canonical_name": "聂荣臻", "aliases": []},
+    {"person_id": "he_long", "canonical_name": "贺龙", "aliases": []},
+    {"person_id": "luo_ronghuan", "canonical_name": "罗荣桓", "aliases": []},
+    {"person_id": "xu_xiangqian", "canonical_name": "徐向前", "aliases": []},
+    {"person_id": "su_yu", "canonical_name": "粟裕", "aliases": []},
+    {
+      "person_id": "jiang_jieshi",
+      "canonical_name": "蒋介石",
+      "aliases": [{"name": "蒋中正", "alias_type": "name"}]
+    },
+    {
+      "person_id": "sun_zhongshan",
+      "canonical_name": "孙中山",
+      "aliases": [{"name": "孙文", "alias_type": "name"}]
+    },
+    {
+      "person_id": "edgar_snow",
+      "canonical_name": "埃德加·斯诺",
+      "aliases": [{"name": "斯诺", "alias_type": "name"}]
+    }
+  ],
+  "ambiguities": []
 }

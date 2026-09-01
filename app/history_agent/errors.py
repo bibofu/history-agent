@@ -24,3 +24,7 @@ class IndexBuildError(HistoryAgentError):
 
 class RetrievalError(HistoryAgentError):
     """Raised when a retrieval request is invalid or cannot be executed."""
+
+
+class ResearchDataError(HistoryAgentError):
+    """Raised when structured research data violates an auditable constraint."""

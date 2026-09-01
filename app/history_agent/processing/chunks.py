@@ -25,6 +25,7 @@ from history_agent.processing.models import (
     StructureEntry,
 )
 from history_agent.processing.structure import section_path_for_page, structure_for_document
+from history_agent.research.catalog import load_person_catalog
 
 CHUNKER_VERSION = "page-sentence-chunker-v1"
 ARABIC_DATE = re.compile(
@@ -70,17 +71,10 @@ def current_documents(database: Database) -> dict[str, dict[str, Any]]:
 
 
 def load_person_aliases(path: Path) -> dict[str, list[str]]:
-    if not path.is_file():
-        raise ExtractionError(f"Person alias catalog does not exist: {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    people = payload.get("people")
-    if not isinstance(people, dict):
-        raise ExtractionError(f"Invalid person alias catalog: {path}")
-    return {
-        str(person): [str(alias) for alias in aliases]
-        for person, aliases in people.items()
-        if isinstance(aliases, list)
-    }
+    try:
+        return load_person_catalog(path).alias_map()
+    except Exception as exc:
+        raise ExtractionError(f"Invalid person alias catalog {path}: {exc}") from exc
 
 
 def effective_pages(

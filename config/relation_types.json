@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "relation_types": [
+    {
+      "relation_type": "held_position",
+      "label": "任职",
+      "object_kind": "organization",
+      "extraction_policy": "allowed",
+      "requires_human_review": false,
+      "requires_event": false,
+      "description": "人物在特定时期担任某机构中的明确职务，必须保存职务、时间和证据。"
+    },
+    {
+      "relation_type": "led",
+      "label": "领导",
+      "object_kind": "person_or_organization",
+      "extraction_policy": "candidate_only",
+      "requires_human_review": true,
+      "requires_event": false,
+      "description": "史料明确记载的领导关系；自动抽取只能形成待复核候选。"
+    },
+    {
+      "relation_type": "reported_to",
+      "label": "汇报",
+      "object_kind": "person",
+      "extraction_policy": "allowed",
+      "requires_human_review": false,
+      "requires_event": false,
+      "description": "主体向客体汇报工作的有向关系，保留当次或持续关系的时间语境。"
+    },
+    {
+      "relation_type": "direct_subordinate",
+      "label": "直接下属",
+      "object_kind": "person",
+      "extraction_policy": "manual_only",
+      "requires_human_review": true,
+      "requires_event": false,
+      "description": "高风险组织关系，只能在机构、任期和直接隶属证据齐全后由人工确认。"
+    },
+    {
+      "relation_type": "co_attended",
+      "label": "共同参会",
+      "object_kind": "person",
+      "extraction_policy": "allowed",
+      "requires_human_review": false,
+      "requires_event": true,
+      "description": "两人共同参加同一规范事件，必须绑定共同 event_id，不能由页面共现推断。"
+    },
+    {
+      "relation_type": "met_with",
+      "label": "会见",
+      "object_kind": "person",
+      "extraction_policy": "allowed",
+      "requires_human_review": false,
+      "requires_event": true,
+      "description": "人物之间有史料明确记载的会见，必须绑定会见事件和原文证据。"
+    },
+    {
+      "relation_type": "member_of",
+      "label": "隶属机构",
+      "object_kind": "organization",
+      "extraction_policy": "candidate_only",
+      "requires_human_review": false,
+      "requires_event": false,
+      "description": "人物在特定时间属于某组织，不等同于上下级关系。"
+    }
+  ]
+}
