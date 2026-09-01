@@ -277,7 +277,11 @@ def test_validation_rejects_mismatched_document_name() -> None:
 
 
 def test_deepseek_falls_back_when_core_fact_has_no_citation(monkeypatch: Any) -> None:
+    calls = 0
+
     def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        nonlocal calls
+        calls += 1
         return httpx.Response(
             200,
             request=httpx.Request("POST", url),
@@ -304,4 +308,76 @@ def test_deepseek_falls_back_when_core_fact_has_no_citation(monkeypatch: Any) ->
     )
 
     assert result.answer is None
-    assert result.error_code == "uncited_core_claim"
+    assert result.error_code == "citation_repair_uncited_core_claim"
+    assert calls == 2
+
+
+def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> None:
+    responses = iter(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "1956年1月，周恩来参加有关会议。[E1]\n\n"
+                                "随后主持科学规划工作。"
+                            )
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "total_tokens": 12,
+                },
+            },
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "1956年1月，周恩来参加有关会议。[E1]\n\n"
+                                "随后主持科学规划工作。[E1]"
+                            )
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 15,
+                    "completion_tokens": 3,
+                    "total_tokens": 18,
+                },
+            },
+        ]
+    )
+    request_bodies: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        request_bodies.append(kwargs["json"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json=next(responses),
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _llm_answer(
+        settings=Settings(_env_file=None, llm_api_key="sk-test"),
+        request=QuestionRequest(question="周恩来在1956年做了什么？"),
+        citations=[_citation()],
+    )
+
+    assert result.answer == (
+        "1956年1月，周恩来参加有关会议。[E1]\n\n"
+        "随后主持科学规划工作。[E1]"
+    )
+    assert result.usage == {
+        "prompt_tokens": 25,
+        "completion_tokens": 5,
+        "total_tokens": 30,
+    }
+    assert len(request_bodies) == 2
+    repair_messages = request_bodies[1]["messages"]
+    assert repair_messages[-2]["role"] == "assistant"
+    assert "随后主持科学规划工作" in repair_messages[-1]["content"]

@@ -20,7 +20,7 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v3"
+PROMPT_VERSION = "grounded-answer-v4"
 
 
 def _compact(text: str) -> str:
@@ -124,46 +124,17 @@ def _deepseek_error_code(exc: httpx.HTTPError) -> str:
     return "network_error"
 
 
-def _llm_answer(
-    *, settings: Settings, request: QuestionRequest, citations: list[Citation]
+def _merge_usage(*items: dict[str, int] | None) -> dict[str, int] | None:
+    keys = {key for item in items if item for key in item}
+    if not keys:
+        return None
+    return {key: sum(item.get(key, 0) for item in items if item) for key in keys}
+
+
+def _request_deepseek_completion(
+    settings: Settings, request_payload: dict[str, object]
 ) -> LLMResult:
-    if not settings.llm_enabled:
-        return LLMResult(answer=None, error_code="not_configured")
-    evidence = "\n\n".join(
-        (
-            f"[{item.evidence_id}] 《{item.document}》PDF第{item.pdf_page}页"
-            f"；章节：{' > '.join(item.section) or '未识别'}\n{item.quote}"
-        )
-        for item in citations
-    )
-    system = (
-        "你是中国近现代史本地史料研究助手。只能根据用户提供的证据回答，不能用模型记忆"
-        "补充事实。每个事实性结论后必须标注对应证据编号，如[E1]。区分原文观点、年谱记载"
-        "和后人叙述；证据不足就明确说明。不要虚构页码或证据编号。先给简明结论，再按时间"
-        "或主题组织要点，最后说明资料限制。不要输出证据包中不存在的知识。回答中必须至少"
-        "出现一个本次证据编号；引用格式只能是[E1]、[E2]这种形式。每一条包含日期、职务、"
-        "地点、行动或人物关系的事实必须在同一段或同一列表项给出证据编号；同一要点正常换行"
-        "不必重复标注。如需写文献名或PDF页码，必须与证据包完全一致。"
-    )
-    history = [item.model_dump() for item in request.history[-6:]]
-    messages = [
-        {"role": "system", "content": system},
-        *history,
-        {
-            "role": "user",
-            "content": f"问题：{request.question}\n\n仅可使用的本地证据：\n{evidence}",
-        },
-    ]
     assert settings.llm_api_key is not None
-    request_payload: dict[str, object] = {
-        "model": settings.llm_model,
-        "messages": messages,
-        "stream": False,
-        "max_tokens": settings.llm_max_tokens,
-        "thinking": {"type": "enabled" if settings.llm_thinking else "disabled"},
-    }
-    if settings.llm_thinking:
-        request_payload["reasoning_effort"] = settings.llm_reasoning_effort
     try:
         result = httpx.post(
             _chat_completions_url(settings.llm_base_url),
@@ -190,10 +161,93 @@ def _llm_answer(
         return LLMResult(answer=None, error_code="invalid_response")
     if finish_reason == "length":
         return LLMResult(answer=None, error_code="max_tokens_exhausted", usage=usage)
-    validation = validate_grounded_answer(answer, citations)
-    if not validation.valid:
-        return LLMResult(answer=None, error_code=validation.error_code, usage=usage)
     return LLMResult(answer=answer, usage=usage)
+
+
+def _llm_answer(
+    *, settings: Settings, request: QuestionRequest, citations: list[Citation]
+) -> LLMResult:
+    if not settings.llm_enabled:
+        return LLMResult(answer=None, error_code="not_configured")
+    evidence = "\n\n".join(
+        (
+            f"[{item.evidence_id}] 《{item.document}》PDF第{item.pdf_page}页"
+            f"；章节：{' > '.join(item.section) or '未识别'}\n{item.quote}"
+        )
+        for item in citations
+    )
+    system = (
+        "你是中国近现代史本地史料研究助手。只能根据用户提供的证据回答，不能用模型记忆"
+        "补充事实。每个事实性结论后必须标注对应证据编号，如[E1]。区分原文观点、年谱记载"
+        "和后人叙述；证据不足就明确说明。不要虚构页码或证据编号。先给简明结论，再按时间"
+        "或主题组织要点，最后说明资料限制。不要输出证据包中不存在的知识。回答中必须至少"
+        "出现一个本次证据编号；引用格式只能是[E1]、[E2]这种形式。每一条包含日期、职务、"
+        "地点、行动或人物关系的事实必须在同一段或同一列表项给出证据编号；同一要点正常换行"
+        "不必重复标注。如需写文献名或PDF页码，必须与证据包完全一致。"
+    )
+    history = [item.model_dump() for item in request.history[-6:]]
+    messages: list[dict[str, object]] = [
+        {"role": "system", "content": system},
+        *history,
+        {
+            "role": "user",
+            "content": f"问题：{request.question}\n\n仅可使用的本地证据：\n{evidence}",
+        },
+    ]
+    request_payload: dict[str, object] = {
+        "model": settings.llm_model,
+        "messages": messages,
+        "stream": False,
+        "max_tokens": settings.llm_max_tokens,
+        "thinking": {"type": "enabled" if settings.llm_thinking else "disabled"},
+    }
+    if settings.llm_thinking:
+        request_payload["reasoning_effort"] = settings.llm_reasoning_effort
+    first = _request_deepseek_completion(settings, request_payload)
+    if first.answer is None:
+        return first
+    validation = validate_grounded_answer(first.answer, citations)
+    if validation.valid:
+        return first
+    if validation.error_code != "uncited_core_claim":
+        return LLMResult(
+            answer=None,
+            error_code=validation.error_code,
+            usage=first.usage,
+        )
+
+    missing_claims = "\n".join(f"- {claim}" for claim in validation.uncited_claims)
+    valid_markers = "、".join(f"[{item.evidence_id}]" for item in citations)
+    repair_instruction = (
+        "上一版回答因部分事实要点缺少引用而未通过校验。请重新输出完整回答，不要增加新事实，"
+        "只修复引用覆盖。每个包含日期、职务、地点、行动、会议决定或人物关系的段落或列表项"
+        f"都要使用证据包中的合法编号（仅限：{valid_markers}）。缺少引用的要点如下：\n"
+        f"{missing_claims}"
+    )
+    repair_payload = {
+        **request_payload,
+        "messages": [
+            *messages,
+            {"role": "assistant", "content": first.answer},
+            {"role": "user", "content": repair_instruction},
+        ],
+    }
+    repaired = _request_deepseek_completion(settings, repair_payload)
+    combined_usage = _merge_usage(first.usage, repaired.usage)
+    if repaired.answer is None:
+        return LLMResult(
+            answer=None,
+            error_code=f"citation_repair_{repaired.error_code}",
+            usage=combined_usage,
+        )
+    repaired_validation = validate_grounded_answer(repaired.answer, citations)
+    if not repaired_validation.valid:
+        return LLMResult(
+            answer=None,
+            error_code=f"citation_repair_{repaired_validation.error_code}",
+            usage=combined_usage,
+        )
+    return LLMResult(answer=repaired.answer, usage=combined_usage)
 
 
 def check_deepseek_connection(settings: Settings) -> dict[str, object]:

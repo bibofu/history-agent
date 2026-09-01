@@ -211,6 +211,8 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 项目已接入 DeepSeek V4，默认模型为 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
 
+生成答案如果只因部分事实要点漏写证据编号而未通过校验，系统会把具体漏引要点反馈给 DeepSeek，自动修复一次引用；第二次仍不合格才降级为证据摘录。修复请求只允许使用原证据包，不得增加新事实，两次调用的 Token 用量会合并返回。伪造证据编号、文献名或 PDF 页码等错误不会触发自动修复。
+
 ```dotenv
 DEEPSEEK_API_KEY=你的密钥
 ```
