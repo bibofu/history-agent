@@ -14,6 +14,7 @@ from history_agent.processing.chunks import load_person_aliases
 from history_agent.processing.models import ChunkRecord
 from history_agent.retrieval.keyword import (
     YEAR,
+    hard_filter_people,
     infer_query_intent,
     infer_year_range,
     load_chunks,
@@ -234,6 +235,8 @@ def search_vector_index(
         for person, names in aliases.items()
         if person in query or any(alias in query for alias in names)
     )
+    query_intent = infer_query_intent(query)
+    filter_people = hard_filter_people(query_people, query_intent)
     query_years = sorted({int(match.group(1)) for match in YEAR.finditer(query)})
     query_year_range = infer_year_range(query, query_years)
     _, QdrantClient, models = _load_vector_dependencies()
@@ -243,7 +246,7 @@ def search_vector_index(
     # pool for exact-year timeline questions, then prefer the year heading in the
     # recovered document structure over incidental year mentions.
     candidate_limit = top_k
-    prefer_section_year = bool(query_years and infer_query_intent(query) == "timeline")
+    prefer_section_year = bool(query_years and query_intent == "timeline")
     if prefer_section_year:
         candidate_limit = min(500, max(100, top_k * 20))
     client = QdrantClient(path=str(index_path))
@@ -254,7 +257,7 @@ def search_vector_index(
             query_filter=_query_filter(
                 models=models,
                 document_ids=document_ids,
-                query_people=query_people,
+                query_people=filter_people,
                 query_year_range=query_year_range,
                 include_out_of_scope=include_out_of_scope,
             ),
@@ -309,7 +312,7 @@ def search_vector_index(
         )
     return SearchResponse(
         query=query,
-        query_intent=infer_query_intent(query),
+        query_intent=query_intent,
         query_terms=[],
         query_years=query_years,
         query_year_range=query_year_range,

@@ -14,6 +14,7 @@ from history_agent.corpus.catalog import load_catalog
 from history_agent.corpus.exporter import export_diff, export_manifest, load_latest_diff
 from history_agent.corpus.scanner import scan_corpus
 from history_agent.db import Database
+from history_agent.evaluation.answers import evaluate_answers
 from history_agent.evaluation.retrieval import evaluate_retrieval
 from history_agent.extraction.benchmark import benchmark_parsers
 from history_agent.extraction.full import extract_all_text
@@ -545,10 +546,60 @@ def eval_retrieval(
         assert isinstance(recall, (int, float))
         assert isinstance(mrr, (int, float))
         typer.echo(f"retrieval evaluation run: {payload['run_id']}")
-        typer.echo(f"questions: {payload['questions']}; hits: {payload['hits']}")
+        typer.echo(
+            f"questions: {payload['questions']}; "
+            f"answerable: {payload['evaluated_questions']}; hits: {payload['hits']}"
+        )
         typer.echo(f"Recall@{top_k}: {recall:.2%}")
         typer.echo(f"MRR: {mrr:.4f}")
         typer.echo(str(settings.reports_dir / "retrieval_eval_latest.json"))
+
+
+@eval_app.command("answers")
+def eval_answers(
+    question_set: Annotated[
+        str,
+        typer.Option("--question-set", help="Question-set path relative to project root."),
+    ] = "evals/retrieval_questions.json",
+    top_k: Annotated[int, typer.Option("--top-k", min=1, max=12)] = 10,
+    with_llm: bool = typer.Option(
+        False,
+        "--with-llm",
+        help="Evaluate DeepSeek output; default uses deterministic extractive answers.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Evaluate answerability, page citations, grounding, and required facts."""
+
+    settings = get_settings()
+    settings.ensure_runtime_dirs()
+    path = settings.project_root / question_set
+    tracker = RunTracker(settings.runs_dir, "evaluate_answers", settings.public_snapshot())
+    try:
+        payload = evaluate_answers(
+            settings=settings,
+            question_set_path=path,
+            top_k=top_k,
+            run_id=tracker.run_id,
+            use_llm=with_llm,
+        )
+        tracker.finish(payload)
+    except Exception as exc:
+        tracker.fail(exc)
+        raise
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    metrics = payload["metrics"]
+    assert isinstance(metrics, dict)
+    typer.echo(f"answer evaluation run: {payload['run_id']}")
+    typer.echo(f"questions: {payload['questions']}; passed: {payload['passed']}")
+    typer.echo(f"gold page hit rate: {float(metrics['gold_page_hit_rate']):.2%}")
+    typer.echo(
+        f"citation page accuracy: {float(metrics['citation_page_accuracy']):.2%}"
+    )
+    typer.echo(f"refusal accuracy: {float(metrics['refusal_accuracy']):.2%}")
+    typer.echo(str(settings.reports_dir / "mvp_eval_latest.md"))
 
 
 @llm_app.command("status")

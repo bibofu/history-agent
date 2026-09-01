@@ -7,10 +7,12 @@ from history_agent.answering.models import AnswerResponse, Citation, QuestionReq
 from history_agent.answering.service import (
     _extractive_answer,
     _llm_answer,
+    _quote_for_hit,
     _unsupported_leading_entity,
 )
 from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
+from history_agent.retrieval.models import SearchHit
 from history_agent.web import app as web_module
 
 
@@ -45,6 +47,32 @@ def test_extractive_answer_skips_bare_ellipsis_sentence() -> None:
     assert "要做系统" in answer
 
 
+def test_quote_window_preserves_nearby_supporting_facts() -> None:
+    hit = SearchHit(
+        rank=1,
+        chunk_id="observation",
+        document_id="red-star",
+        title="西行漫记",
+        filename="red-star.pdf",
+        source_type="contemporary_observation",
+        verification_status="verified",
+        pdf_page_start=118,
+        pdf_page_end=118,
+        section_path=[],
+        text="毛泽东" + "性格质朴。" * 45 + "他是军事和政治战略家。" + "尾声。" * 30,
+        year_mentions=[],
+        people=["毛泽东"],
+        extraction_methods=["ocr"],
+        score=1.0,
+        matched_terms=[],
+    )
+
+    quote = _quote_for_hit(hit, ["毛泽东"])
+
+    assert "军事和政治战略家" in quote
+    assert len(quote) <= 422
+
+
 def test_question_request_rejects_unbounded_history() -> None:
     request = QuestionRequest(question="测试问题")
 
@@ -59,6 +87,29 @@ def test_unknown_leading_person_must_appear_in_evidence() -> None:
         )
         == "爱因斯坦"
     )
+
+
+def test_compound_leading_people_are_checked_individually() -> None:
+    hit = SearchHit(
+        rank=1,
+        chunk_id="intersection",
+        document_id="history",
+        title="测试史料",
+        filename="history.pdf",
+        source_type="history",
+        verification_status="verified",
+        pdf_page_start=1,
+        pdf_page_end=1,
+        section_path=[],
+        text="1975年，毛泽东听取邓小平汇报。",
+        year_mentions=[1975],
+        people=["毛泽东", "邓小平"],
+        extraction_methods=["text_layer"],
+        score=1.0,
+        matched_terms=[],
+    )
+
+    assert _unsupported_leading_entity("毛泽东和邓小平在1975年有哪些交集？", [hit]) is None
 
 
 def test_api_health_and_question_contract(monkeypatch: Any) -> None:

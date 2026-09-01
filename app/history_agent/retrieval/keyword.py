@@ -99,7 +99,12 @@ def tokenize_query(query: str) -> list[str]:
 def infer_query_intent(query: str) -> str:
     if any(term in query for term in ("交集", "共同", "一起", "关系")):
         return "intersection"
-    if any(term in query for term in ("观点", "论述", "主张", "看法", "如何看")):
+    if any(term in query for term in ("记述", "描述")):
+        return "observation"
+    if any(
+        term in query
+        for term in ("观点", "论述", "主张", "看法", "如何看", "怎样分析", "如何分析")
+    ):
         return "viewpoint"
     if YEAR.search(query) and any(
         term in query
@@ -107,6 +112,16 @@ def infer_query_intent(query: str) -> str:
     ):
         return "timeline"
     return "general"
+
+
+def hard_filter_people(query_people: list[str], query_intent: str) -> list[str]:
+    """Return people that must occur in a chunk for the current query intent."""
+
+    # A person's own selected works often omit the author's name from the body.
+    # Viewpoint queries therefore use creator/source ranking bonuses instead.
+    if query_intent in {"viewpoint", "observation"}:
+        return []
+    return query_people
 
 
 def infer_year_range(query: str, explicit_years: list[int]) -> list[int]:
@@ -270,6 +285,7 @@ def search_keyword_index(
         for person, names in aliases.items()
         if person in query or any(alias in query for alias in names)
     )
+    filter_people = hard_filter_people(query_people, query_intent)
     conditions = ["chunk_fts MATCH ?"]
     parameters: list[object] = [_match_expression(terms)]
     if document_ids:
@@ -291,7 +307,7 @@ def search_keyword_index(
         parameters.extend(query_year_range)
     elif not include_out_of_scope:
         conditions.append("m.scope_status != 'out_of_scope'")
-    for person in query_people:
+    for person in filter_people:
         conditions.append(
             "EXISTS (SELECT 1 FROM json_each(m.people_json) WHERE value = ?)"
         )

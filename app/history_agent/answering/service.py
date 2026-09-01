@@ -16,16 +16,18 @@ from history_agent.retrieval.models import SearchHit
 WHITESPACE = re.compile(r"\s+")
 SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？；])")
 LEADING_ENTITY = re.compile(
-    r"^(?:请问|我想知道|想知道|帮我查)?(?P<entity>[\u3400-\u4dbf\u4e00-\u9fff·]{2,8})"
+    r"^(?:请问|我想知道|想知道|帮我查)?(?P<entity>[\u3400-\u4dbf\u4e00-\u9fff·]{2,18})"
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
+ENTITY_SEPARATOR = re.compile(r"[、和与]")
+PROMPT_VERSION = "grounded-answer-v2"
 
 
 def _compact(text: str) -> str:
     return WHITESPACE.sub(" ", text).strip()
 
 
-def _quote_for_hit(hit: SearchHit, query_terms: list[str], limit: int = 280) -> str:
+def _quote_for_hit(hit: SearchHit, query_terms: list[str], limit: int = 420) -> str:
     text = _compact(hit.text)
     if len(text) <= limit:
         return text
@@ -46,15 +48,18 @@ def _unsupported_leading_entity(question: str, hits: list[SearchHit]) -> str | N
     match = LEADING_ENTITY.search(question.strip())
     if match is None:
         return None
-    entity = match.group("entity")
-    if any(
-        entity in hit.title
-        or entity in hit.text
-        or any(entity in part for part in hit.section_path)
-        for hit in hits
-    ):
-        return None
-    return entity
+    entities = [
+        entity for entity in ENTITY_SEPARATOR.split(match.group("entity")) if entity
+    ]
+    for entity in entities:
+        if not any(
+            entity in hit.title
+            or entity in hit.text
+            or any(entity in part for part in hit.section_path)
+            for hit in hits
+        ):
+            return entity
+    return None
 
 
 def _citations(response: Any) -> list[Citation]:

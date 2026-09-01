@@ -1,5 +1,10 @@
-from history_agent.retrieval.hybrid import fuse_search_responses
-from history_agent.retrieval.keyword import infer_query_intent, infer_year_range, tokenize_query
+from history_agent.retrieval.hybrid import expand_query, fuse_search_responses
+from history_agent.retrieval.keyword import (
+    hard_filter_people,
+    infer_query_intent,
+    infer_year_range,
+    tokenize_query,
+)
 from history_agent.retrieval.models import SearchHit, SearchResponse
 
 
@@ -48,8 +53,23 @@ def test_query_routing_extracts_intent_and_period() -> None:
     assert infer_query_intent("毛泽东和周恩来在长征期间的交集") == "intersection"
     assert infer_query_intent("周恩来在1956年主要有哪些经历") == "timeline"
     assert infer_query_intent("毛泽东关于调查研究的观点") == "viewpoint"
+    assert infer_query_intent("毛泽东在矛盾论中怎样分析主要矛盾") == "viewpoint"
+    assert infer_query_intent("斯诺在西行漫记中怎样记述毛泽东") == "observation"
     assert infer_year_range("长征期间", []) == [1934, 1936]
     assert "毛泽" in tokenize_query("毛泽东关于调查研究的观点")
+    assert hard_filter_people(["毛泽东"], "viewpoint") == []
+    assert hard_filter_people(["埃德加·斯诺", "毛泽东"], "observation") == []
+    assert hard_filter_people(["毛泽东", "周恩来"], "intersection") == [
+        "毛泽东",
+        "周恩来",
+    ]
+
+
+def test_observation_query_expansion_is_restrained() -> None:
+    expanded = expand_query("斯诺在西行漫记中怎样记述毛泽东？")
+
+    assert expanded.endswith("外貌 性格 生活 印象")
+    assert expand_query("周恩来在1956年有哪些经历？") == "周恩来在1956年有哪些经历？"
 
 
 def test_rrf_rewards_results_found_by_both_retrievers() -> None:

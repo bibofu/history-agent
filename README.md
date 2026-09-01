@@ -137,8 +137,15 @@ uv sync --extra ocr --extra vector --extra app --group dev
 .\.venv\Scripts\history-agent.exe search-vector "毛泽东关于调查研究的观点" --top-k 5
 .\.venv\Scripts\history-agent.exe search-hybrid "毛泽东和周恩来在长征期间的交集" --top-k 8
 
-# 运行 30 题目标文献/年份检索基线
+# 运行 35 道可回答题的目标文献/年份检索基线（另含 3 道拒答题）
 .\.venv\Scripts\history-agent.exe eval retrieval --top-k 10
+
+# 运行 38 题页码、引用、事实覆盖与拒答的 MVP 验收
+# 默认使用确定性的证据摘录模式，不消耗 DeepSeek Token
+.\.venv\Scripts\history-agent.exe eval answers --top-k 10
+
+# 如需同时评估 DeepSeek 生成结果
+.\.venv\Scripts\history-agent.exe eval answers --top-k 10 --with-llm
 
 # 检查 DeepSeek V4 配置与连通性
 .\.venv\Scripts\history-agent.exe llm status
@@ -507,7 +514,7 @@ GET  /api/health          查看双索引、生成模式和研究时间范围
 - [x] 建立 SQLite FTS5/BM25 + 本地 Qdrant 中文向量混合索引
 - [x] 实现带页码引用的基础问答 API 和单页会话界面
 - [x] 接入 DeepSeek V4-Pro，支持可选 thinking、用量回传、核心事实逐行引用校验和失败降级
-- [x] 建立 30 题目标文献/年份基线：Recall@10 100%，MRR 0.9833
-- [-] 建立页码级人工金标准和引用正确率评估
+- [x] 扩充为 38 题固定集；35 道可回答题的目标文献/年份基线 Recall@10 97.14%，MRR 0.9381
+- [x] 建立 38 题页码级人工金标准和 MVP 回答评估：关键页命中 91.43%，引用页一致 99.71%，必要事实覆盖 86.46%，拒答 100%
 - [ ] 建立人物事件和关系网络
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比

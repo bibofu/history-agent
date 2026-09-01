@@ -5,18 +5,37 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from history_agent.config import Settings
 from history_agent.retrieval.hybrid import search_hybrid_index
 
 
+class GoldEvidence(BaseModel):
+    document_id: str
+    pdf_pages: list[int] = Field(min_length=1)
+
+
 class RetrievalQuestion(BaseModel):
     question_id: str
     question: str
-    expected_document_ids: list[str] = Field(min_length=1)
+    answerable: bool = True
+    expected_document_ids: list[str] = Field(default_factory=list)
     expected_years: list[int] = Field(default_factory=list)
+    expected_evidence: list[GoldEvidence] = Field(default_factory=list)
+    required_fact_terms: list[list[str]] = Field(default_factory=list)
+    forbidden_answer_terms: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_expected_answer(self) -> RetrievalQuestion:
+        if self.answerable and not self.expected_document_ids:
+            raise ValueError("answerable questions require expected_document_ids")
+        if not self.answerable and self.expected_evidence:
+            raise ValueError("unanswerable questions cannot declare expected_evidence")
+        if any(not alternatives for alternatives in self.required_fact_terms):
+            raise ValueError("required_fact_terms groups cannot be empty")
+        return self
 
 
 class RetrievalQuestionSet(BaseModel):
@@ -41,6 +60,21 @@ def evaluate_retrieval(
     tag_totals: dict[str, int] = defaultdict(int)
     tag_hits: dict[str, int] = defaultdict(int)
     for item in question_set.questions:
+        if not item.answerable:
+            results.append(
+                {
+                    "question_id": item.question_id,
+                    "question": item.question,
+                    "answerable": False,
+                    "success": None,
+                    "target_document_rank": None,
+                    "year_hit": None,
+                    "expected_document_ids": [],
+                    "expected_years": item.expected_years,
+                    "returned": [],
+                }
+            )
+            continue
         response = search_hybrid_index(
             keyword_index_path=settings.keyword_index_path,
             vector_index_path=settings.vector_index_path,
@@ -70,6 +104,7 @@ def evaluate_retrieval(
             {
                 "question_id": item.question_id,
                 "question": item.question,
+                "answerable": True,
                 "success": success,
                 "target_document_rank": document_rank,
                 "year_hit": year_hit,
@@ -87,15 +122,17 @@ def evaluate_retrieval(
                 ],
             }
         )
-    hits = sum(int(bool(result["success"])) for result in results)
-    total = len(results)
+    evaluated_results = [result for result in results if result["answerable"]]
+    hits = sum(int(bool(result["success"])) for result in evaluated_results)
+    total = len(evaluated_results)
     payload: dict[str, object] = {
         "run_id": run_id,
         "created_at": datetime.now(UTC).isoformat(),
         "question_set": str(question_set_path),
         "retrieval_mode": "hybrid_rrf",
         "top_k": top_k,
-        "questions": total,
+        "questions": len(results),
+        "evaluated_questions": total,
         "hits": hits,
         "recall_at_k": round(hits / total, 6),
         "mean_reciprocal_rank": round(sum(reciprocal_ranks) / total, 6),

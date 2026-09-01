@@ -8,6 +8,16 @@ from history_agent.retrieval.vector import search_vector_index
 
 RRF_K = 60
 INTENT_SOURCE_BONUS = 0.004
+OBSERVATION_QUERY_MARKERS = ("怎样记述", "如何记述", "怎样描述", "如何描述")
+OBSERVATION_EXPANSION = "外貌 性格 生活 印象"
+
+
+def expand_query(query: str) -> str:
+    """Add restrained search hints for source-observation questions."""
+
+    if any(marker in query for marker in OBSERVATION_QUERY_MARKERS):
+        return f"{query} {OBSERVATION_EXPANSION}"
+    return query
 
 
 def _source_bonus(
@@ -19,6 +29,8 @@ def _source_bonus(
         if not query_people and source_type == "chronology":
             return INTENT_SOURCE_BONUS
     if intent == "viewpoint" and source_type == "selected_works":
+        return INTENT_SOURCE_BONUS
+    if intent == "observation" and source_type == "contemporary_observation":
         return INTENT_SOURCE_BONUS
     return 0.0
 
@@ -112,9 +124,10 @@ def search_hybrid_index(
     include_out_of_scope: bool = False,
 ) -> SearchResponse:
     candidate_k = min(100, max(30, top_k * 4))
+    search_query = expand_query(query)
     keyword = search_keyword_index(
         index_path=keyword_index_path,
-        query=query,
+        query=search_query,
         aliases_path=aliases_path,
         top_k=candidate_k,
         document_ids=document_ids,
@@ -124,9 +137,10 @@ def search_hybrid_index(
         index_path=vector_index_path,
         model_cache_dir=model_cache_dir,
         aliases_path=aliases_path,
-        query=query,
+        query=search_query,
         top_k=candidate_k,
         document_ids=document_ids,
         include_out_of_scope=include_out_of_scope,
     )
-    return fuse_search_responses(keyword, vector, top_k=top_k)
+    response = fuse_search_responses(keyword, vector, top_k=top_k)
+    return response.model_copy(update={"query": query})
