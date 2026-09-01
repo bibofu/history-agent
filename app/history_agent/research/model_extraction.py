@@ -24,6 +24,7 @@ from history_agent.research.people import normalize_person_name, utc_now
 PROMPT_VERSION = "event-extraction-json-v1"
 EXTRACTOR_VERSION = "chronology-rules-v1+deepseek-event-v1"
 PROVIDER = "deepseek"
+EVIDENCE_CHAR_LIMIT = 1200
 WHITESPACE = re.compile(r"\s+")
 CODE_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
@@ -132,15 +133,29 @@ def _stable_id(prefix: str, *parts: str) -> str:
     return f"{prefix}_{digest}"
 
 
+def _bounded_evidence(event: HistoricalEvent) -> list[tuple[str, int, str]]:
+    remaining = EVIDENCE_CHAR_LIMIT
+    bounded: list[tuple[str, int, str]] = []
+    for item in event.evidence:
+        if remaining <= 0:
+            break
+        excerpt = _compact(item.quote)[:remaining]
+        if not excerpt:
+            continue
+        bounded.append((item.document_id, item.pdf_page_start, excerpt))
+        remaining -= len(excerpt)
+    return bounded
+
+
 def _request_messages(
     event: HistoricalEvent, catalog: PersonCatalog
 ) -> list[dict[str, str]]:
+    bounded = _bounded_evidence(event)
     evidence = "\n\n".join(
-        f"证据{index}（{item.document_id}，PDF第{item.pdf_page_start}页）：\n"
-        f"{_compact(item.quote)}"
-        for index, item in enumerate(event.evidence, start=1)
+        f"证据{index}（{document_id}，PDF第{pdf_page}页）：\n{excerpt}"
+        for index, (document_id, pdf_page, excerpt) in enumerate(bounded, start=1)
     )
-    evidence_text = "\n".join(item.quote for item in event.evidence)
+    evidence_text = "\n".join(excerpt for _, _, excerpt in bounded)
     allowed_people = list(
         dict.fromkeys(
             name
@@ -254,7 +269,7 @@ def _validate_and_resolve(
     event: HistoricalEvent,
     catalog: PersonCatalog,
 ) -> list[EventParticipant]:
-    evidence_text = "\n".join(item.quote for item in event.evidence)
+    evidence_text = "\n".join(excerpt for _, _, excerpt in _bounded_evidence(event))
     grounded_values: list[tuple[str, str]] = [("action_text", output.action_text)]
     if output.location_text:
         grounded_values.append(("location_text", output.location_text))
@@ -296,12 +311,16 @@ def _merge_event(
         (item.person_id, item.mention_text): item for item in source.participants
     }
     for item in resolved_participants:
-        participants[(item.person_id, item.mention_text)] = item
+        key = (item.person_id, item.mention_text)
+        existing = participants.get(key)
+        if existing is not None and existing.role == "年谱主体":
+            continue
+        participants[key] = item
     subject = next(
         (
             item.mention_text
             for item in source.participants
-            if item.mention_source == "chronology_subject"
+            if item.role == "年谱主体"
         ),
         source.participants[0].mention_text,
     )

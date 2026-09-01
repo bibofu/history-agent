@@ -8,8 +8,10 @@ import httpx
 from history_agent.config import Settings
 from history_agent.db import Database
 from history_agent.research.model_extraction import (
+    EVIDENCE_CHAR_LIMIT,
     EXTRACTOR_VERSION,
     PROMPT_VERSION,
+    _bounded_evidence,
     enrich_events_with_model,
     list_review_queue,
     select_event_candidates,
@@ -56,7 +58,10 @@ def _settings(work_path: Path) -> Settings:
 
 
 def _prepare_event(
-    database: Database, *, review_status: ReviewStatus = "needs_review"
+    database: Database,
+    *,
+    review_status: ReviewStatus = "needs_review",
+    subject_explicit: bool = False,
 ) -> None:
     catalog = _catalog()
     sync_person_catalog(database, catalog)
@@ -73,6 +78,11 @@ def _prepare_event(
             )
             """
         )
+    text = (
+        "周恩来1月15日，在北京出席中央政治局会议，毛泽东主持会议。"
+        if subject_explicit
+        else "1月15日，在北京出席中央政治局会议，毛泽东主持会议。"
+    )
     event = HistoricalEvent(
         event_id="event_model_one",
         name="周恩来：出席会议",
@@ -83,13 +93,13 @@ def _prepare_event(
             certainty="exact",
             original_text="1月15日",
         ),
-        description="1月15日，在北京出席中央政治局会议，毛泽东主持会议。",
+        description=text,
         participants=[
             EventParticipant(
                 person_id="zhou_enlai",
                 role="年谱主体",
                 mention_text="周恩来",
-                mention_source="chronology_subject",
+                mention_source="explicit" if subject_explicit else "chronology_subject",
             )
         ],
         evidence=[
@@ -98,7 +108,7 @@ def _prepare_event(
                 document_id="zhou_chronology",
                 pdf_page_start=12,
                 pdf_page_end=12,
-                quote="1月15日，在北京出席中央政治局会议，毛泽东主持会议。",
+                quote=text,
                 extraction_methods=["text_layer"],
             )
         ],
@@ -221,6 +231,41 @@ def test_model_enrichment_is_grounded_audited_and_idempotent(
     )
     assert candidates == []
     assert skipped == 1
+
+
+def test_model_evidence_has_a_hard_total_character_limit() -> None:
+    event = HistoricalEvent(
+        event_id="event_bounded_evidence",
+        name="边界测试",
+        event_type="activity",
+        description="验证外发证据长度。",
+        participants=[
+            EventParticipant(person_id="zhou_enlai", mention_text="周恩来")
+        ],
+        evidence=[
+            EvidenceReference(
+                evidence_id="evidence_bounded_one",
+                document_id="zhou_chronology",
+                pdf_page_start=70,
+                pdf_page_end=70,
+                quote="甲" * 800,
+            ),
+            EvidenceReference(
+                evidence_id="evidence_bounded_two",
+                document_id="zhou_chronology",
+                pdf_page_start=71,
+                pdf_page_end=71,
+                quote="乙" * 800,
+            ),
+        ],
+        extraction_method="rule",
+        extraction_confidence=0.5,
+    )
+
+    bounded = _bounded_evidence(event)
+
+    assert sum(len(excerpt) for _, _, excerpt in bounded) == EVIDENCE_CHAR_LIMIT
+    assert [len(excerpt) for _, _, excerpt in bounded] == [800, 400]
 
 
 def test_ungrounded_model_output_is_rejected_without_changing_event(
@@ -378,3 +423,40 @@ def test_unknown_person_mention_is_rejected(work_path: Path, monkeypatch: Any) -
         ).fetchone()
     assert attempt["error_code"] == "unknown_participant"
     assert attempt["validated_json"]
+
+
+def test_explicit_chronology_subject_role_survives_model_merge(
+    work_path: Path, monkeypatch: Any
+) -> None:
+    settings = _settings(work_path)
+    database = Database(settings.database_path)
+    _prepare_event(database, subject_explicit=True)
+    content = _valid_content()
+    content["participants"] = [
+        {"mention_text": "周恩来", "role_text": "出席"}
+    ]
+    monkeypatch.setattr(
+        "history_agent.research.model_extraction.httpx.post",
+        lambda *args, **kwargs: _Response(_api_payload(content)),
+    )
+
+    summary = enrich_events_with_model(
+        database=database,
+        settings=settings,
+        catalog=_catalog(),
+        reports_dir=settings.reports_dir,
+        run_id="run-explicit-subject",
+    )
+
+    assert summary.succeeded == 1
+    with database.connect() as connection:
+        event = connection.execute(
+            "SELECT name FROM historical_events WHERE event_id = 'event_model_one'"
+        ).fetchone()
+        subject = connection.execute(
+            "SELECT role, mention_source FROM event_participants "
+            "WHERE event_id = 'event_model_one' AND person_id = 'zhou_enlai'"
+        ).fetchone()
+    assert event["name"].startswith("周恩来：")
+    assert subject["role"] == "年谱主体"
+    assert subject["mention_source"] == "explicit"

@@ -111,7 +111,7 @@ extraction_methods
 
 ## 6. 模型辅助事件增强
 
-M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件中选择 `needs_review`、低置信度或通用 `activity` 候选。模型只返回事件类型、行动原文、地点原文、机构原文和已登记人物的原文提及；日期、描述、证据 ID、文献 ID 和 PDF 页码不进入可修改字段。
+M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件中选择 `needs_review`、低置信度或通用 `activity` 候选。每个事件发送的全部证据正文合计硬限制为 1200 字符。模型只返回事件类型、行动原文、地点原文、机构原文和已登记人物的原文提及；日期、描述、证据 ID、文献 ID 和 PDF 页码不进入可修改字段。
 
 本地校验和合并顺序如下：
 
@@ -140,4 +140,4 @@ M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件
 .\.venv\Scripts\history-agent.exe research review-queue --limit 20 --json
 ```
 
-模型增强报告位于 `data/reports/model_event_extraction_latest.json`。本地契约测试见 `evals/MODEL_EVENT_EXTRACTION.md`；真实 API 冒烟需要明确同意把所选短引文发送给 DeepSeek。
+模型增强报告位于 `data/reports/model_event_extraction_latest.json`。本地契约测试与首批 2 条真实 API 冒烟结果见 `evals/MODEL_EVENT_EXTRACTION.md`。任何后续批次仍应先明确资料出境范围，再从小批量开始。

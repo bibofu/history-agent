@@ -199,7 +199,7 @@ DEEPSEEK_API_KEY=你的密钥
 
 保存后运行 `history-agent llm check` 验证连接，再重启 Web 服务。也可以在 `.env` 中将 `HISTORY_AGENT_LLM_MODEL` 改为 `deepseek-v4-flash`。没有配置密钥时，页面继续使用“证据摘录模式”；DeepSeek 超时、余额不足、认证失败或返回虚构证据编号时，也会自动安全降级，不影响本地检索和引用展示。
 
-`research enrich-events` 是独立的批处理入口，默认一次最多处理 5 条。它使用 DeepSeek JSON Output，但仍在本地执行严格 schema 与原文子串校验；模型不能修改日期、事件原文或证据页码，也不能直接把记录标为“已确认”。每次原始响应、模型与提示词版本、调用前后快照和 Token 用量都会写入 SQLite，结果统一进入复核队列。该命令会把选中事件的短证据发送到 DeepSeek；对资料出境有要求时，应只运行 `--dry-run`，或先完成相应授权与脱敏。JSON Output 参数以 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/json_mode/) 为准。
+`research enrich-events` 是独立的批处理入口，默认一次最多处理 5 条，每个事件发送的全部证据正文合计硬限制为 1200 字符。它使用 DeepSeek JSON Output，但仍在本地执行严格 schema 与原文子串校验；模型不能修改日期、事件原文或证据页码，也不能直接把记录标为“已确认”。每次原始响应、模型与提示词版本、调用前后快照和 Token 用量都会写入 SQLite，结果统一进入复核队列。该命令会把选中事件的短证据发送到 DeepSeek；对资料出境有要求时，应只运行 `--dry-run`，或先完成相应授权与脱敏。JSON Output 参数以 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/json_mode/) 为准。
 
 ## 项目定位
 
@@ -548,5 +548,5 @@ GET  /api/health          查看双索引、生成模式和研究时间范围
 - [x] 建立 25 位人物的稳定 ID、别名/歧义处理和人工合并审计流程
 - [x] 定义带时间精度、共同事件、原文提及、证据和复核状态的事件/关系模型及 7 类关系词表
 - [x] 从《周恩来年谱》《林彪年谱》抽取 15,393 条首批人物事件，保留日期确定性、年谱主体来源、原文和 PDF 页码证据
-- [-] 完成 DeepSeek 结构化事件增强、逐字段原文校验、调用审计和复核队列；本地测试已通过，待授权 2 条短引文的真实 API 冒烟
+- [x] 完成 DeepSeek 结构化事件增强、1200 字符送模硬上限、逐字段原文校验、调用审计和复核队列；2 条真实 API 冒烟全部成功且幂等复跑不消耗 Token
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比
