@@ -227,6 +227,26 @@ def test_validation_rejects_uncited_core_fact_line() -> None:
     assert result.uncited_claims == ("随后主持科学规划工作。",)
 
 
+def test_validation_accepts_wrapped_fact_with_citation_in_same_list_item() -> None:
+    result = validate_grounded_answer(
+        "- 1956年1月，周恩来参加有关会议。\n"
+        "  随后主持科学规划工作。[E1]",
+        [_citation()],
+    )
+
+    assert result.valid is True
+
+
+def test_validation_accepts_multiline_paragraph_with_trailing_citation() -> None:
+    result = validate_grounded_answer(
+        "1956年1月，周恩来参加有关会议。\n"
+        "随后主持科学规划工作。相关情况见年谱记载。[E1]",
+        [_citation()],
+    )
+
+    assert result.valid is True
+
+
 def test_validation_rejects_fabricated_pdf_page() -> None:
     result = validate_grounded_answer(
         "《周恩来年谱》PDF第999页记载周恩来参加会议。[E1]",
@@ -265,10 +285,10 @@ def test_deepseek_falls_back_when_core_fact_has_no_citation(monkeypatch: Any) ->
                 "choices": [
                     {
                         "message": {
-                            "content": (
-                                "1956年1月，周恩来参加有关会议。[E1]\n"
-                                "随后主持科学规划工作。"
-                            )
+                                "content": (
+                                    "1956年1月，周恩来参加有关会议。[E1]\n\n"
+                                    "随后主持科学规划工作。"
+                                )
                         }
                     }
                 ]

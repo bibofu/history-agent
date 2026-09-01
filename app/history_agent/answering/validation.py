@@ -40,11 +40,34 @@ def _claim_text(line: str) -> str:
     return EVIDENCE_MARKER.sub("", text).strip()
 
 
-def _is_core_fact_line(line: str) -> bool:
-    stripped = line.strip()
-    if not stripped or stripped.startswith("#"):
-        return False
-    claim = _claim_text(stripped)
+def _claim_blocks(answer: str) -> list[str]:
+    """Group wrapped prose by paragraph or Markdown list item."""
+
+    blocks: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        if current:
+            blocks.append(" ".join(current))
+            current.clear()
+
+    for raw_line in answer.splitlines():
+        line = raw_line.strip()
+        if not line:
+            flush()
+            continue
+        if line.startswith("#"):
+            flush()
+            continue
+        if MARKDOWN_LIST_PREFIX.match(line):
+            flush()
+        current.append(line)
+    flush()
+    return blocks
+
+
+def _is_core_fact_block(block: str) -> bool:
+    claim = _claim_text(block)
     if not claim or claim.endswith(("：", ":")):
         return False
     return CORE_FACT_SIGNAL.search(claim) is not None
@@ -91,20 +114,17 @@ def validate_grounded_answer(
 
     uncited_claims: list[str] = []
     citation_mismatches: list[str] = []
-    for raw_line in answer.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        line_markers = EVIDENCE_MARKER.findall(line)
-        if _is_core_fact_line(line) and not line_markers:
-            uncited_claims.append(_claim_text(line))
-        for match in SOURCE_PAGE_REFERENCE.finditer(line):
+    for block in _claim_blocks(answer):
+        block_markers = EVIDENCE_MARKER.findall(block)
+        if _is_core_fact_block(block) and not block_markers:
+            uncited_claims.append(_claim_text(block))
+        for match in SOURCE_PAGE_REFERENCE.finditer(block):
             claimed_page = int(match.group("page"))
             claimed_document = match.group("document")
             matching_citation = any(
                 citation_by_id[marker].pdf_page == claimed_page
                 and _document_matches(claimed_document, citation_by_id[marker].document)
-                for marker in line_markers
+                for marker in block_markers
             )
             if not matching_citation:
                 citation_mismatches.append(match.group(0))
