@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>近现代史研究 Agent</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">LOCAL ARCHIVE · 1921—1978</p>
+        <h1>近现代史研究 Agent</h1>
+        <p class="subtitle">只依据本地史料回答，每条结论都能回到文献与 PDF 页码。</p>
+      </div>
+      <button id="clear" class="ghost" type="button">清空会话</button>
+    </header>
+
+    <section id="messages" class="messages" aria-live="polite">
+      <article class="message assistant welcome">
+        <div class="avatar">史</div>
+        <div class="bubble">
+          <p>可以问我人物经历、人物交集或政治观点。比如：</p>
+          <div class="suggestions">
+            <button>周恩来在1956年主要有哪些经历？</button>
+            <button>毛泽东和周恩来在长征期间有哪些交集？</button>
+            <button>毛泽东关于调查研究有哪些观点？</button>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <form id="composer" class="composer">
+      <label class="sr-only" for="question">输入历史研究问题</label>
+      <textarea id="question" rows="1" maxlength="500" placeholder="输入一个可由本地史料核查的问题……" required></textarea>
+      <button id="send" type="submit">发送</button>
+      <p class="notice"><span id="status-dot"></span><span id="status">正在检查本地索引…</span></p>
+    </form>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>

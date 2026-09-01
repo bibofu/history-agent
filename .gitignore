@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+pytest-cache-files-*/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Local configuration and credentials
+.env
+
+# Generated runtime data
+data/*
+!data/.gitkeep
+logs/
+*.db
+*.db-shm
+*.db-wal
+
+# Local source PDFs and model caches
+docs/*.pdf
+models/
+
+# IDE and operating system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

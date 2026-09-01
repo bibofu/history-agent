@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "documents": [
+    {
+      "document_id": "cpc_history_volume_1",
+      "filename": "中国共产党历史•第1卷（1921-1949).pdf",
+      "title": "中国共产党历史 第一卷（1921—1949）",
+      "creators": ["中共中央党史研究室"],
+      "source_type": "official_history",
+      "edition": "本地文件所载版本",
+      "volume": "第一卷",
+      "verification_status": "metadata_checked",
+      "enabled": true,
+      "ocr_strategy": "partial_if_needed",
+      "expected_page_count": 1027,
+      "notes": "1921—1949 年宏观历史主干。"
+    },
+    {
+      "document_id": "cpc_history_volume_2",
+      "filename": "中国共产党历史•第2卷（1949-1978).pdf",
+      "title": "中国共产党历史 第二卷（1949—1978）",
+      "creators": ["中共中央党史研究室"],
+      "source_type": "official_history",
+      "edition": "本地文件所载版本",
+      "volume": "第二卷",
+      "verification_status": "metadata_checked",
+      "enabled": true,
+      "ocr_strategy": "partial_if_needed",
+      "expected_page_count": 1019,
+      "notes": "1949—1978 年宏观历史主干。"
+    },
+    {
+      "document_id": "mao_selected_works_combined",
+      "filename": "毛泽东选集.pdf",
+      "title": "毛泽东选集",
+      "creators": ["毛泽东"],
+      "source_type": "selected_works",
+      "edition": "民间整合版",
+      "volume": "第一至第七卷合订",
+      "source_series": ["静火", "赤旗", "草堂"],
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_if_needed",
+      "expected_page_count": 3246,
+      "notes": "完整保留当前整合版；篇目入库时继续记录来源系列、卷次、日期和核验状态。"
+    },
+    {
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "filename": "周恩来年谱1949-1976上中下.pdf",
+      "title": "周恩来年谱（1949—1976）",
+      "creators": ["中共中央文献研究室"],
+      "source_type": "chronology",
+      "edition": "上中下卷合订本地文件",
+      "volume": "上、中、下卷",
+      "verification_status": "metadata_checked",
+      "enabled": true,
+      "ocr_strategy": "partial_if_needed",
+      "expected_page_count": 1472,
+      "notes": "人物时间线、会议和人物交集的重点资料。"
+    },
+    {
+      "document_id": "lin_biao_chronology",
+      "filename": "林彪年谱.pdf",
+      "title": "林彪年谱",
+      "creators": ["李德（文件标示主编，待核）"],
+      "source_type": "chronology",
+      "edition": "本地文件版本待核",
+      "verification_status": "source_pending",
+      "enabled": true,
+      "ocr_strategy": "partial_if_needed",
+      "expected_page_count": 1545,
+      "notes": "存在少量字符映射异常；规范化文本必须保留替换记录。"
+    },
+    {
+      "document_id": "deng_xiaoping_selected_works",
+      "filename": "邓小平文选 (全3卷).pdf",
+      "title": "邓小平文选",
+      "creators": ["邓小平"],
+      "source_type": "selected_works",
+      "edition": "全三卷合订本地文件",
+      "volume": "第一至第三卷",
+      "verification_status": "metadata_checked",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 1367,
+      "notes": "大部分页面有文字层，部分区段需要 OCR；1978 年后的篇目默认不参与回答。"
+    },
+    {
+      "document_id": "red_star_over_china",
+      "filename": "西行漫记（红星照耀中国).pdf",
+      "title": "西行漫记（红星照耀中国）",
+      "creators": ["埃德加·斯诺", "董乐山（译）"],
+      "source_type": "contemporary_observation",
+      "edition": "本地扫描版",
+      "verification_status": "metadata_checked",
+      "enabled": true,
+      "ocr_strategy": "full_required",
+      "expected_page_count": 462,
+      "notes": "同时代外部观察资料；整本需要中文 OCR。"
+    }
+  ]
+}
+
