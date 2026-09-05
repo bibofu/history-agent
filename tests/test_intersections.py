@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from history_agent.cli import app
 from history_agent.config import Settings
 from history_agent.errors import ResearchDataError
+from history_agent.evaluation.intersections import evaluate_intersections
 from history_agent.research.intersections import get_person_intersections
 from history_agent.web.app import create_app
 from test_timeline import _prepare_database, _prepare_timeline, _save_event
@@ -180,3 +181,59 @@ def test_joint_pagination_crosses_candidate_batch_boundary(work_path: Path) -> N
     assert result.co_mention_total == 202
     assert result.events[0].event.event_id == "event200"
     assert result.has_more
+
+
+def test_recognized_chronology_retains_owner_when_explicit(work_path: Path) -> None:
+    database = _prepare_database(work_path)
+    _save_event(
+        database,
+        event_id="explicit_owner",
+        document_id="zhou_enlai_chronology_1949_1976",
+        date_value="1956-01-01",
+        description="和毛泽东出席会议。周恩来随后作了报告。",
+        event_type="meeting",
+        review_status="needs_review",
+        page=20,
+        include_lin=False,
+    )
+    with database.connect() as connection:
+        connection.execute("UPDATE event_participants SET mention_source='explicit'")
+    assert (
+        get_person_intersections(
+            database, person_id="mao_zedong", other_person_id="zhou_enlai"
+        ).total
+        == 0
+    )
+    with database.connect() as connection:
+        connection.execute("UPDATE historical_events SET extractor_version='chronology-rules-v1'")
+    result = get_person_intersections(
+        database, person_id="mao_zedong", other_person_id="zhou_enlai"
+    )
+    assert result.total == 1
+    assert result.events[0].joint_evidence[0].subject_basis == "chronology_subject"
+
+
+def test_intersection_evaluation_checks_sources_and_metrics(work_path: Path) -> None:
+    database, _ = _prepare_timeline(work_path)
+    cases_path = work_path / "cases.json"
+    payload = {
+        "cases": [
+            {
+                "id": "recipient",
+                "source_event_id": "event_zhou_message",
+                "document_id": "zhou_enlai_chronology_1949_1976",
+                "pdf_page": 20,
+                "year": 1943,
+                "expected": False,
+                "reason": "recipient is not co-sender",
+            }
+        ]
+    }
+    cases_path.write_text(json.dumps(payload), encoding="utf-8")
+    result = evaluate_intersections(database, cases_path)
+    assert result["true_negative"] == 1
+    assert result["recall"] is None
+    payload["cases"][0]["pdf_page"] = 99
+    cases_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ResearchDataError, match="gold source/page missing"):
+        evaluate_intersections(database, cases_path)

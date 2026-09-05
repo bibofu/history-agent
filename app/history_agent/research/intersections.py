@@ -10,12 +10,13 @@ from pydantic import BaseModel, Field
 
 from history_agent.db import Database
 from history_agent.errors import ResearchDataError
+from history_agent.research.chronology import PROFILES
 from history_agent.research.timeline import (
     TimelineEvent,
     get_person_timeline,
 )
 
-RULE_VERSION = "joint-action-rules-v1"
+RULE_VERSION = "joint-action-rules-v2"
 _ACTION_ROLES = {
     "出席": "共同出席者",
     "参加": "共同参加者",
@@ -233,6 +234,25 @@ def get_person_intersections(
                 ).fetchall()
                 for row in rows:
                     subjects[str(row["event_id"])] = str(row["canonical_name"])
+                # A chronology owner can also be explicitly named later in the entry.
+                # Only trust our recognized extractors and a unique document profile.
+                owner_rows = connection.execute(
+                    "SELECT DISTINCT e.event_id, er.document_id FROM historical_events e "
+                    "JOIN event_evidence ee ON ee.event_id=e.event_id "
+                    "JOIN evidence_records er ON er.evidence_id=ee.evidence_id "
+                    "WHERE e.extractor_version IN "
+                    "('chronology-rules-v1', 'mao-chronology-rules-v1') "
+                    "AND e.event_id IN (" + ",".join("?" for _ in source_ids) + ")",
+                    source_ids,
+                ).fetchall()
+                owners: dict[str, set[str]] = {}
+                for row in owner_rows:
+                    profile = PROFILES.get(str(row["document_id"]))
+                    if profile is not None:
+                        owners.setdefault(str(row["event_id"]), set()).add(profile.subject_name)
+                for source_id, owner_names in owners.items():
+                    if len(owner_names) == 1:
+                        subjects[source_id] = next(iter(owner_names))
         for event in batch.events:
             proofs = []
             for evidence in event.evidence:

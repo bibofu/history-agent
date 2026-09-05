@@ -16,6 +16,7 @@ from history_agent.corpus.scanner import scan_corpus
 from history_agent.db import Database
 from history_agent.errors import ResearchDataError
 from history_agent.evaluation.answers import evaluate_answers
+from history_agent.evaluation.intersections import evaluate_intersections
 from history_agent.evaluation.retrieval import evaluate_retrieval
 from history_agent.extraction.benchmark import benchmark_parsers
 from history_agent.extraction.full import extract_all_text
@@ -592,6 +593,16 @@ def research_timeline(
         typer.echo(
             f"{date_text} [{item.verification_level}/{item.record_kind}] {item.name} | {sources}"
         )
+
+
+@eval_app.command("intersections")
+def eval_intersections() -> None:
+    """Evaluate the visually checked, source-local intersection sample (JSON)."""
+    settings = get_settings()
+    result = evaluate_intersections(
+        Database(settings.database_path), settings.project_root / "evals/person_intersections.json"
+    )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @research_app.command("intersections")
