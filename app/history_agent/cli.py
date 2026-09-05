@@ -16,7 +16,11 @@ from history_agent.corpus.scanner import scan_corpus
 from history_agent.db import Database
 from history_agent.errors import ResearchDataError
 from history_agent.evaluation.answers import evaluate_answers
-from history_agent.evaluation.intersections import evaluate_intersections
+from history_agent.evaluation.intersections import (
+    build_intersection_review_packet,
+    evaluate_intersections,
+    finalize_intersection_review_packet,
+)
 from history_agent.evaluation.retrieval import evaluate_retrieval
 from history_agent.extraction.benchmark import benchmark_parsers
 from history_agent.extraction.full import extract_all_text
@@ -596,13 +600,90 @@ def research_timeline(
 
 
 @eval_app.command("intersections")
-def eval_intersections() -> None:
+def eval_intersections(
+    case_set: Annotated[
+        str,
+        typer.Option("--case-set", help="Case-set path relative to project root."),
+    ] = "evals/person_intersections.json",
+) -> None:
     """Evaluate the visually checked, source-local intersection sample (JSON)."""
     settings = get_settings()
     result = evaluate_intersections(
-        Database(settings.database_path), settings.project_root / "evals/person_intersections.json"
+        Database(settings.database_path), settings.project_root / case_set
     )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@eval_app.command("prepare-intersection-review")
+def prepare_intersection_review(
+    output: Annotated[
+        str,
+        typer.Option("--output", help="Packet path relative to project root."),
+    ] = "evals/person_intersections_blind_review.json",
+    development_set: Annotated[
+        str,
+        typer.Option("--development-set", help="Development cases to exclude."),
+    ] = "evals/person_intersections.json",
+    seed: Annotated[str, typer.Option("--seed", help="Deterministic sampling seed.")] = (
+        "m6.7-independent-v1"
+    ),
+    pair_limit: Annotated[int, typer.Option("--pair-limit", min=1, max=50)] = 10,
+    per_stratum: Annotated[int, typer.Option("--per-stratum", min=1, max=20)] = 2,
+    overwrite: bool = typer.Option(False, "--overwrite"),
+) -> None:
+    """Create an unlabeled, prediction-blind PDF review packet."""
+    settings = get_settings()
+    output_path = settings.project_root / output
+    if output_path.exists() and not overwrite:
+        raise typer.BadParameter("output already exists; use --overwrite to replace it")
+    try:
+        packet = build_intersection_review_packet(
+            Database(settings.database_path),
+            settings.project_root / development_set,
+            seed=seed,
+            pair_limit=pair_limit,
+            per_stratum=per_stratum,
+            start_year=settings.research_start.year,
+            end_year=settings.research_end.year,
+        )
+    except (OSError, ValueError, ResearchDataError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(f"review packet: {output_path}")
+    typer.echo(f"cases: {len(packet.cases)}; predictions and labels omitted")
+
+
+@eval_app.command("finalize-intersection-review")
+def finalize_intersection_review(
+    packet: Annotated[
+        str,
+        typer.Option("--packet", help="Completed review packet relative to project root."),
+    ] = "evals/person_intersections_blind_review.json",
+    output: Annotated[
+        str,
+        typer.Option("--output", help="Final case-set path relative to project root."),
+    ] = "evals/person_intersections_independent.json",
+    overwrite: bool = typer.Option(False, "--overwrite"),
+) -> None:
+    """Validate completed independent annotations and emit an evaluation case set."""
+    settings = get_settings()
+    output_path = settings.project_root / output
+    if output_path.exists() and not overwrite:
+        raise typer.BadParameter("output already exists; use --overwrite to replace it")
+    try:
+        result = finalize_intersection_review_packet(settings.project_root / packet)
+    except (OSError, ValueError, ResearchDataError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    cases = result["cases"]
+    assert isinstance(cases, list)
+    typer.echo(f"independent case set: {output_path}")
+    typer.echo(f"cases: {len(cases)}")
 
 
 @research_app.command("intersections")

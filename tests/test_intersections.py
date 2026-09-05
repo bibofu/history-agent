@@ -8,7 +8,11 @@ from fastapi.testclient import TestClient
 from history_agent.cli import app
 from history_agent.config import Settings
 from history_agent.errors import ResearchDataError
-from history_agent.evaluation.intersections import evaluate_intersections
+from history_agent.evaluation.intersections import (
+    build_intersection_review_packet,
+    evaluate_intersections,
+    finalize_intersection_review_packet,
+)
 from history_agent.research.intersections import (
     _match_adjacent_attendance,
     _match_grouped_attendance,
@@ -241,6 +245,89 @@ def test_intersection_evaluation_checks_sources_and_metrics(work_path: Path) -> 
     cases_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ResearchDataError, match="gold source/page missing"):
         evaluate_intersections(database, cases_path)
+
+
+def test_blind_review_packet_excludes_predictions_and_finalizes(work_path: Path) -> None:
+    database = _prepare_database(work_path)
+    _save_event(
+        database,
+        event_id="blind_positive",
+        document_id="zhou_enlai_chronology_1949_1976",
+        date_value="1943-03-01",
+        description="周恩来和林彪共同出席会议并听取汇报。",
+        event_type="meeting",
+        review_status="needs_review",
+        page=22,
+        include_lin=True,
+    )
+    _save_event(
+        database,
+        event_id="blind_negative",
+        document_id="zhou_enlai_chronology_1949_1976",
+        date_value="1943-03-02",
+        description="周恩来致电毛泽东，林彪在重庆开展工作。",
+        event_type="correspondence",
+        review_status="needs_review",
+        page=23,
+        include_lin=True,
+    )
+    development_path = work_path / "development.json"
+    development_path.write_text('{"cases": []}', encoding="utf-8")
+    packet = build_intersection_review_packet(
+        database,
+        development_path,
+        seed="fixed-seed",
+        pair_limit=1,
+        per_stratum=1,
+        start_year=1943,
+        end_year=1943,
+    )
+    assert packet == build_intersection_review_packet(
+        database,
+        development_path,
+        seed="fixed-seed",
+        pair_limit=1,
+        per_stratum=1,
+        start_year=1943,
+        end_year=1943,
+    )
+    assert len(packet.cases) == 2
+    assert {item.source_event_id for item in packet.cases} == {
+        "blind_positive",
+        "blind_negative",
+    }
+    serialized = packet.model_dump_json()
+    assert "predicted" not in serialized
+    assert all(item.annotation.expected is None for item in packet.cases)
+    packet_path = work_path / "review.json"
+    packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
+    with pytest.raises(ResearchDataError, match="review label missing"):
+        finalize_intersection_review_packet(packet_path)
+    original_name = packet.cases[0].event_name
+    packet.cases[0].event_name = "changed"
+    packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
+    with pytest.raises(ResearchDataError, match="review case content changed"):
+        finalize_intersection_review_packet(packet_path)
+    packet.cases[0].event_name = original_name
+    for item in packet.cases:
+        item.annotation.expected = item.source_event_id == "blind_positive"
+        item.annotation.reason = "完整查看来源页后作出的独立判断。"
+        item.annotation.reviewed_by = "reviewer-a"
+        item.annotation.reviewed_at = "2026-09-06"
+    packet.cases[0].annotation.reviewed_at = "09/06/2026"
+    packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
+    with pytest.raises(ResearchDataError, match="review date must be ISO"):
+        finalize_intersection_review_packet(packet_path)
+    packet.cases[0].annotation.reviewed_at = "2026-09-06"
+    packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
+    finalized = finalize_intersection_review_packet(packet_path)
+    assert finalized["reviewers"] == ["reviewer-a"]
+    assert {item["cohort"] for item in finalized["cases"]} == {"independent"}
+    final_path = work_path / "independent.json"
+    final_path.write_text(json.dumps(finalized), encoding="utf-8")
+    result = evaluate_intersections(database, final_path)
+    assert result["true_positive"] == 1
+    assert result["true_negative"] == 1
 
 
 @pytest.mark.parametrize(

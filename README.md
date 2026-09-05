@@ -167,6 +167,9 @@ uv sync --extra ocr --extra vector --extra app --group dev
 # 复算经原页视觉核对的 26 条定向交集样本（JSON，不调用模型）
 .\.venv\Scripts\history-agent.exe eval intersections
 
+# 生成不含预测和答案的 40 条独立复核包；复核流程见 evals/INTERSECTION_INDEPENDENT_REVIEW.md
+.\.venv\Scripts\history-agent.exe eval prepare-intersection-review
+
 # 查看最近一次扫描结果
 .\.venv\Scripts\history-agent.exe corpus diff
 
@@ -589,5 +592,6 @@ GET  /api/people/{person_id}/timeline
 - [x] 实现人物时间线 CLI 与 API：联合规范事件和独立源事件，支持年份、类型、复核状态及分页过滤，并返回参与者、来源差异和 PDF 页码证据
 - [x] 扩充毛泽东年谱九卷：新增 13,729 条待复核事件；现有源事件 29,122 条、活跃规范组 280 个（前述 69 组为首批基线）
 - [x] 实现人物交集候选 CLI/API：逐来源检查共同动作、保留双方角色和证据；v4 支持紧邻普通名单成员及“中方有……、苏方有……”分组名单。26 条、9 组人物的 PDF 视觉核对定向样本为 TP=16、FP=0、FN=0、TN=10（开发集，非全库准确率），详见 [交集验收](evals/INTERSECTION_BASELINE.md)
+- [-] 已冻结 v4 开发集并生成 40 条预测盲化的独立复核包，覆盖 10 组人物、10 份文献和 23 个年份，与开发源事件零重合；等待未参与规则开发的复核者填写标签后再计算独立指标，详见 [独立复核说明](evals/INTERSECTION_INDEPENDENT_REVIEW.md)
 - [x] 接入保守的时间线/交集聊天路由：保留候选状态、显示总数与截断、按实际共同动作证据引用；不支持的条件要求澄清，详见 [聊天路由验收](evals/STRUCTURED_CHAT_BASELINE.md)
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比

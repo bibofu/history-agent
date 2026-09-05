@@ -1,0 +1,1326 @@
+{
+  "version": "intersection-independent-review-v1",
+  "seed": "m6.7-independent-v1",
+  "source_event_count": 29122,
+  "excluded_development_event_count": 16,
+  "instructions": [
+    "由未参与规则开发的复核者查看列出的原始 PDF 完整页面，不运行交集命令。",
+    "判断指定两人是否被该来源条目明确证明共同参与同一动作；通信收件人不等于共同发件人。",
+    "在 annotation 中填写 expected、reason、reviewed_by、reviewed_at；不得改动其他字段。",
+    "negative 仅表示该来源条目不足以证明共同动作，不表示历史上不存在交集。"
+  ],
+  "cases": [
+    {
+      "id": "blind-7e44daef2fd27abd",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_bef681ecae459763b4ccca689cac",
+      "event_name": "毛泽东：同日晚十时二十分，在中南海颐年堂召集中共中央政治局常委、中央有关部门负责人和各中央局书记等开…",
+      "event_type": "meeting",
+      "date": "1961-01-03",
+      "document_id": "mao_zedong_chronology_volume_7",
+      "pdf_page": 521,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_7",
+          "document_title": "毛泽东年谱 第7卷（1959.04-1961.06）",
+          "volume": "第7卷",
+          "pdf_page_start": 521,
+          "pdf_page_end": 521,
+          "quote": "同日\n晚十时二十分，在中南海颐年堂召集中共中央政治局\n常委、中央有关部门负责人和各中央局书记等开会，听取李富春\n汇报一九六一年国民经济计划。出席会议的有：刘少奇、朱德、\n陈云、邓小平、彭真、李先念、谭震林、陈伯达、薄一波、杨尚\n昆、胡乔木、柯庆施、曾希圣、李井泉、廖志高、李雪峰、乌兰\n夫、刘子厚、刘澜涛、张德生、王任重、宋任穷、欧阳钦。李富\n春说：去年计划有四条经验。一是计划不全面，去年计划是工业\n交通计划，忽视了农业，没有以农业为基础，没有贯彻工农业并\n举；二是计划指标偏高；三是权力下放偏多偏下；四是对计划的\n执行检查不够。不仅没有注意农业，而是挤了农业，挤了农业的\n人力物力，工业战线过大，面过宽。首先要保住农业，而后炼\n钢。关于一九六一年的钢产量指标，会上提出三个方案，一千九\n百五十万吨、一千九百万吨、一千八百七十万吨。毛泽东说：究\n竟搞多少，还要看煤能否搞那么多，二是看矿石，三是看运输。\n要很好安排一下，否则还要吃去年的苦头，到第四季度扔开一切\n搞钢铁。我担心，就是搞一千八百七十万吨也还可能出现去年的\n紧张情况。那样搞，实际上是个浪费。去年为什么那么紧张？就"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_7",
+          "document_title": "毛泽东年谱 第7卷（1959.04-1961.06）",
+          "volume": "第7卷",
+          "pdf_page_start": 522,
+          "pdf_page_end": 522,
+          "quote": "是因为由一千三百五十万吨一下提到一千八百七十万吨。总之，\n今年就是要打重工业的主意，它的人多，设备也多，要缩短重工\n业的战线，延长农业轻工业的战线。这三年都是指标搞高了，后\n来退下来。这三年大搞钢铁，挤了农业。定指标主要决定去年下\n半年和今年上半年投产的有多少，要好好研究一下。毛泽东问：\n今年的方针是怎么提的？李富春说：是调整、巩固、充实、提\n高。调整，就是调整各方面的关系。有调整、充实，才能巩固、\n提高。毛泽东说：是四面八方了。你这个意思就是休整的意思，\n和部队在两个战役之间的休整一样。毛泽东问：大跃进的口号能\n不能在一九六一年提？邓小平说：今年元旦社论没提大跃进，是\n提的争取社会主义建设的新胜利。毛泽东说：今年可能是就地踏\n步，休养生息。这两年农业减产影响了工业，看来农业机械化、\n化肥未上去以前，工业是不能大上的。过去农业上是层层加码，\n收购也是层层加码，以后再不能层层加码了。集中力量打歼灭\n战，这句话说了好几遍了，就看灵不灵。要收回一些权力，把权\n力收到中央、中央局、省市区三级，下面收缩一下，这样就不会\n层层加码了。他说：希望各省市、中央局自己去摸一个生产队，心\n中就有数了。现在整风是搞坏的，最好摸一个有曲折发展过程的，\n如像宝坻县那个生产队刮过“共产风“，后来纠正，生产又上去了。"
+        }
+      ],
+      "case_checksum": "e40e102710a1769a0e0e8e4740bf12c8a2426a1dd57ffef12da0716d81bc8af0",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-04692e6add19d0c6",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_76016f5461ad4e448ebcbc91be9d",
+      "event_name": "毛泽东：7月20日下午，在北戴河中直俱乐部第一会议室主持召开中共中央政治局常委扩大会议，讨论国际形势…",
+      "event_type": "meeting",
+      "date": "1960-07-20",
+      "document_id": "mao_zedong_chronology_volume_7",
+      "pdf_page": 438,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_7",
+          "document_title": "毛泽东年谱 第7卷（1959.04-1961.06）",
+          "volume": "第7卷",
+          "pdf_page_start": 438,
+          "pdf_page_end": 438,
+          "quote": "7 月\n20 日\n下午，在北戴河中直俱乐部第一会议室主持召\n开中共中央政治局常委扩大会议，讨论国际形势和国内工农业生\n产问题，以及今年生产任务的完成情况。出席会议的有：刘少\n奇、周恩来、朱德、陈云、邓小平、彭真、陈毅、李富春、贺\n龙、李先念、柯庆施、李井泉、乌兰夫、薄一波、杨尚昆、罗瑞\n卿、曾希圣、陶铸、王任重、欧阳钦、张德生。会议上，毛泽东\n首先问：今年完成钢的计划有没有希望。周恩来说：上半年巳完\n成八百八十万吨，占全年计划的百分之四十四，这在过去是没有\n的。邓小平说：总的情况很好，但问题也值得注意，主要是日产\n量下降，不抓就危险，抓还是可以上去的。毛泽东说：钢，一九\n六二年搞到三千万吨，再搞三千万吨，就着重搞品种、质量，现\n在也要注意品种、质量。在谈到同苏联的关系问题时，毛泽东\n说：现在是联苏、反帝。我们不和他分裂，分裂不利。人民公社\n杜勒斯骂，赫鲁晓夫也骂，我考虑过到底对不对。总路线我们不\n搞搞什么？大跃进换个说法就是高速度；两条腿走路，赫鲁晓夫\n说是两条腿站着；对于我党的建军方针，赫鲁晓夫反对党委领导"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_7",
+          "document_title": "毛泽东年谱 第7卷（1959.04-1961.06）",
+          "volume": "第7卷",
+          "pdf_page_start": 439,
+          "pdf_page_end": 439,
+          "quote": "下的首长负责制、民兵制、将军当兵；他还反对干部参加劳动。\n这些我们当然不能改，他也不会改。他是他的社会主义，我们是\n我们的社会主义。"
+        }
+      ],
+      "case_checksum": "46c6e181b25cb8dd0587d4ce01ffe5b9259986318d52298e7aa8b1a6afcdf6c1",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-2ed9cebf7b21ec95",
+      "person_id": "zhou_enlai",
+      "person_name": "周恩来",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_08602f16543068e21608624312eb",
+      "event_name": "毛泽东：10月29日下午，在中南海怀仁堂邀集全国工商联执行委员座谈私营工商业社会主义改造问题，刘少奇…",
+      "event_type": "speech",
+      "date": "1955-10-29",
+      "document_id": "mao_zedong_chronology_volume_5",
+      "pdf_page": 464,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 463,
+          "pdf_page_end": 463,
+          "quote": "10 月29 日\n下午，在中南海怀仁堂邀集全国工商联执行委"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 464,
+          "pdf_page_end": 464,
+          "quote": "员座谈私营工商业社会主义改造问题，刘少奇、周恩来、朱德、\n陈云、彭真、彭德怀、邓小平、康生、张闻天等参加。毛泽东在\n会上作长篇讲话，开宗明义提出：工商业社会主义改造，前途如\n何？或者说趋势如何？他说：这个问题，在全国广大的人群中都\n是存在的，因为我们现在是要改变社会制度。现在我国存在两种\n私有制，一种是个体小生产者的私有制，一种是资本主义的私有\n制。在改变这两种私有制的过程中，凡是处在这两种私有制地位\n的人，都发生前途如何或叫趋势如何的问题，都处在一种动荡不\n安的情况之中，不晓得将来会如何。所以，我想就这个问题贡献\n一点意见，就是说，自己要掌握自己的命运。我总劝朋友们，大\n家安下心来，不要十五个吊桶打水，七上八下。我们的目标是要\n使我国比现在大为发展，大为富，大为强。我们还是个农业国。\n在农业国的基础上，是谈不上什么强的，也谈不上什么富的。但\n是，现在我们实行这么一种制度，这么一种计划，是可以一年一\n年走向更富更强的，一年一年可以看到更富更强些。而这个富，\n是共同的富，这个强，是共同的强，大家都有份，也包括地主阶\n级。地主过了几年之后，就有了选举权，他就不叫地主了，叫农\n民了。资产阶级，总有一天，大约三个五年计划之内，就不叫资\n产阶级了，他们成为工人了。农民这个阶级还是有的，但他们也\n变了，不再是个体私有制的农民，而变成合作社集体所有制的农\n民了。这种共同富裕，是有把握的，不是什么今天不晓得明天的\n事。那种不能掌握自己命运的情况，在几个五年计划之内，应该\n逐步结束。那时，全国只有工人、农民和知识分子。知识分子是\n工人、农民的知识分子。我们现在对资本主义工商业的社会主义\n改造，实际上就是运用从前马克思、恩格斯、列宁提出过的赎买\n政策。它不是国家用一笔钱或者发行公债来购买资本家的私有财\n产（不是生活资料，是生产资料，即机器、厂房这些东西），也"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 465,
+          "pdf_page_end": 465,
+          "quote": "不是用突然的方法，而是逐步地进行，延长改造的时间，比如讲\n十五年吧，在这中间由工人替工商业者生产一部分利润。这部分\n利润，是工人生产的利润中间分给私人的部分，有说一年四五个\n亿的，有说没有这么多的，大概是一年几个亿吧，十年就是几十\n个亿。我们实行的就是这么一种政策。全国资本家的固定资产的\n估价，有这么一笔账：工业方面有二十五亿元，商业方面有八亿\n元，合计是三十三亿元。我想，如果十五年再加恢复时期三年共\n十八年，工人阶级替资产阶级生产的利润就会超过这个数字。改\n变资本主义私有制，要有几年的准备工作。你们回去传达，请注\n意不要说是要共产了，引起一阵风，好像刮台风一样，那样不\n好。关千社会主义改造，我们需要有充分的准备，包括思想准备、\n宣传教育等许多工作在内，要有秩序有步骤地进行，而不是一阵\n风，以免招致可能的某些损失。我们要力求保障损失越少越好。\n我们的目标是要赶上美国，并且要超过美国。美国只有一亿多人\n口，我国有六亿多人口，我们应该赶上美国。哪一天赶上美国，\n超过美国，我们才吐一口气。现在我们不像样子嘛，要受人欺负。"
+        }
+      ],
+      "case_checksum": "0867dd6d2b5a5e66a24f4c44b07be28a4eb2657df41b966caac0cec5ab70e9d9",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-ef8d9392f217ab9a",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_4941c6f3c74101e484a321a22e1b",
+      "event_name": "周恩来：与毛泽东、刘少奇、邓小平接见越南劳动党中央政治局委员、政府副总理阮维祯一行",
+      "event_type": "activity",
+      "date": "1962-09-21",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 981,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 981,
+          "pdf_page_end": 981,
+          "quote": "与毛泽东、刘少奇、邓小平接见越南劳动党中央政治局委员、政府副总理阮维祯一行。"
+        }
+      ],
+      "case_checksum": "5f63d9a6fbbcaaffbd2c9dcf69df3f2d3b0592ad34917b8017d663aaf70f46d0",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-515a05b0e5ef32ea",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_53c8789e0dbe19e56ffae25d18ab",
+      "event_name": "毛泽东：7月7日主持中共中央政治局会议，会议讨论关于对付国民党发动的反共宣传与准备进攻陕甘宁边区问题",
+      "event_type": "meeting",
+      "date": "1943-07-07",
+      "document_id": "mao_zedong_chronology_volume_2",
+      "pdf_page": 457,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_2",
+          "document_title": "毛泽东年谱 第2卷（1937.07-1945.08）",
+          "volume": "第2卷",
+          "pdf_page_start": 457,
+          "pdf_page_end": 457,
+          "quote": "7 月7 日\n主持中共中央政治局会议，会议讨论关于对付国\n民党发动的反共宣传与准备进攻陕甘宁边区问题。毛泽东发言指\n出：此次蒋介石、胡宗南调集河防兵力积极准备进攻边区，国民\n党公开宣传”取消中共\"、“取消边区“，制造反共舆论的举动，\n是他们企图利用德苏及日苏的紧张关系，估计日本会进攻苏联，\n利用共产国际解散机会，实行军事压迫、政治阴谋，企图解散中\n共、取消边区、取消八路军的反动行为。我们过去两年采用不刺\n激国民党的”和国“政策，保持了两年多的比较平静，是正确\n的。现在情况变化，就不适用了，而要采用以宣传对付他们的反\n共宣传，以军事对付他们的军事进攻。会议同意毛泽东的意见，\n作出四项决定：\n（一）在坚持统一战线，实行三民主义，拥护国\n民党政府和蒋介石的原则下，集中力量痛斥国民党反共分子的反\n动政策与挑起内战、破坏抗日团结的“第五纵队”的行为。立即\n公布朱德总司令致蒋、胡的电报及反对西安特务张涤非制造反共\n宣传的新闻。延安各机关、学校、部队应配合学习“七七”宣言\n举行热烈的讨论。（二）七月九日召开延安各界群众大会，纪念\n抗战六周年，在群众大会上表示坚持抗战，反对内战，坚持团\n结，反对分裂，并用大会名义发表通电。（三）进行军事上的作"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_2",
+          "document_title": "毛泽东年谱 第2卷（1937.07-1945.08）",
+          "volume": "第2卷",
+          "pdf_page_start": 458,
+          "pdf_page_end": 458,
+          "quote": "战准备，但后方机关不到必要时不要移动。（四）由中央书记处\n对各地发出一个内部通知，陕甘宁边区各地由西北局发出。"
+        }
+      ],
+      "case_checksum": "d26ae0da69017e647be7c1b0a56f3af70ea18dd07c173e0be15aa36f4320efdf",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-caddb49a354d63a6",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_f53618f4da361c06b8deb634394f",
+      "event_name": "毛泽东：同日和朱德、张国焘致电杨虎城、千学忠转王以哲家属，吊咭王以哲遇难",
+      "event_type": "correspondence",
+      "date": "1937-02-04",
+      "document_id": "mao_zedong_chronology_volume_1",
+      "pdf_page": 661,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_1",
+          "document_title": "毛泽东年谱 第1卷（1893.12-1937.06）",
+          "volume": "第1卷",
+          "pdf_page_start": 661,
+          "pdf_page_end": 661,
+          "quote": "同日\n和朱德、张国焘致电杨虎城、千学忠转王以哲家属，"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_1",
+          "document_title": "毛泽东年谱 第1卷（1893.12-1937.06）",
+          "volume": "第1卷",
+          "pdf_page_start": 662,
+          "pdf_page_end": 662,
+          "quote": "吊咭王以哲遇难。同时，还向东北军第六十七军副军长吴克仁及\n全军官兵发出咭电。"
+        }
+      ],
+      "case_checksum": "d98218d8a7c3aa2c0e7b748310dcf9447afc2685b78cc8883ef05ba76285be85",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-ba910481bd9b75cc",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_85ec3605bd6706be0265c55c64d2",
+      "event_name": "毛泽东：6月27日晚上，和刘少奇、周恩来在中南海勤政殿会见芬兰议会访华代表团，宋庆龄、李济深、沈钧儒…",
+      "event_type": "activity",
+      "date": "1956-06-27",
+      "document_id": "mao_zedong_chronology_volume_5",
+      "pdf_page": 593,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 593,
+          "pdf_page_end": 593,
+          "quote": "6 月27 日\n晚上，和刘少奇、周恩来在中南海勤政殿会见\n芬兰议会访华代表团，宋庆龄、李济深、沈钧儒、彭真、张闻\n天、李维汉在座。"
+        }
+      ],
+      "case_checksum": "4ec9a350a9480341429aa7499281a6a57db14292dfc86f4281a04f32b42317fb",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-27c7306e846aff41",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_bfb214353e7ff03a5f96421d6c25",
+      "event_name": "周恩来：飞回北京",
+      "event_type": "correspondence",
+      "date": "1970-09-09",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 1305,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 1305,
+          "pdf_page_end": 1305,
+          "quote": "飞回北京。次日，主持中共中央政治局会议，议定：（一）组成由康生、李德生、周恩来负\n责的陈伯达专案组，具体工作由中央办公厅有关负责人处理。（二）在京的中央政治局委员除原经\n常参加议事的周恩来、康生、江青、张春桥、姚文元、黄永胜、吴法宪、李作鹏、邱会作、李先念、\n纪登奎、李德生十二人外，今后如遇有重大政策问题需讨论，还拟请董必武、朱德、叶剑英三人参\n加；正在休养期间的刘伯承、谢富治二人拟不通知。（三）今后在国际来往上，只实行必要的个别\n出访，不举行周游；拟起草一外交通报告驻外各使馆。不要随便答复问题。次日，同康生联名致信\n毛泽东、林彪，报告政治局会议讨论各事。"
+        }
+      ],
+      "case_checksum": "92b021e21ecd520d4de369ec5473afdebf796be0fc334b52f7d2f664c694a4a8",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-c209d520cea15287",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_259a601168d50391929a1c515171",
+      "event_name": "林彪：毛泽东、林彪、周恩来致电齐奥塞斯库和毛雷尔，祝罗马尼亚解放27周年",
+      "event_type": "correspondence",
+      "date": "1971-08-22",
+      "document_id": "lin_biao_chronology",
+      "pdf_page": 1530,
+      "evidence": [
+        {
+          "document_id": "lin_biao_chronology",
+          "document_title": "林彪年谱",
+          "volume": null,
+          "pdf_page_start": 1530,
+          "pdf_page_end": 1530,
+          "quote": "毛泽东、林彪、周恩来致电齐奥塞斯库和毛雷尔，祝罗\n马尼亚解放27周年。"
+        }
+      ],
+      "case_checksum": "7d0884b2821773ebf1ab4335e5fc5ae8c825fcadc41a06403c1f4f7dd2dbb8b4",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-fb972b4ecfe087d5",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_a0cdb463fec7e819ab2db40f7417",
+      "event_name": "毛泽东：4月17日和朱德、周恩来致电西哈努克、宾努、乔森潘，祝贺柬埔寨民族解放人民武装力量完全解放金…",
+      "event_type": "correspondence",
+      "date": "1975-04-17",
+      "document_id": "mao_zedong_chronology_volume_9",
+      "pdf_page": 585,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_9",
+          "document_title": "毛泽东年谱 第9卷（1966.10-1976.09）",
+          "volume": "第9卷",
+          "pdf_page_start": 585,
+          "pdf_page_end": 585,
+          "quote": "4 月\n17 日\n和朱德、周恩来致电西哈努克、宾努、乔森潘，\n祝贺柬埔寨民族解放人民武装力量完全解放金边。贺电说：柬埔\n寨人民通过武装斗争所取得的这一伟大胜利，再一次雄辩地证\n明，只要坚持正确的道路，弱国就一定能够打败强国，小国就一\n定能够打败大国。柬埔寨人民的伟大胜利，不仅为印度支那人民\n的反帝斗争作出了重大的贡献，而且有力地鼓舞和推动着全世界\n一切被压迫民族和被压迫人民的革命斗争。"
+        }
+      ],
+      "case_checksum": "d4a7ea3e7933c62be4094b74c7a0a4d7ff7f75b9c5bb01030e5b25ca79598b53",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-486e324519a568f5",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "peng_dehuai",
+      "other_person_name": "彭德怀",
+      "source_event_id": "evt_0ea9320d2ce6d4ed90a6969d4a20",
+      "event_name": "毛泽东：同日关于今后华中战略任务，和朱德、王稼祥致电刘少奇、陈毅并告彭德怀：“目前华中指导中心应着重…",
+      "event_type": "correspondence",
+      "date": "1941-02-01",
+      "document_id": "mao_zedong_chronology_volume_2",
+      "pdf_page": 274,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_2",
+          "document_title": "毛泽东年谱 第2卷（1937.07-1945.08）",
+          "volume": "第2卷",
+          "pdf_page_start": 274,
+          "pdf_page_end": 274,
+          "quote": "同日\n关于今后华中战略任务，和朱德、王稼祥致电刘少\n奇、陈毅并告彭德怀：“目前华中指导中心应着重三个基本战略\n地区。第一个基本战略地区是鄂豫陕边，其办法由彭雪枫、张云\n逸、李先念三地逐步向西推进，以在一年内达到鄂西、豫西及陕\n南建立游击根据地为目的\"。“第二个战略中心是江南根据地。又\n分为苏南、皖南、浙东及闽浙赣边四方面”。“第三是苏鲁战区。\n这是目前华中的基本根据地，主力所在，用力最大”。"
+        }
+      ],
+      "case_checksum": "1a8f8ca565e4ab244c02da1d4c6e3afa8df99f7c2dc3a39427c183cc978148ed",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-6ad476fdbd9bd90a",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_14403059799cc4247d9eeb21f0dc",
+      "event_name": "毛泽东：同日晚上，在中南海颐年堂主持召开中共中央政治局会议，讨论政府工作问题，朱德、·周恩来、高岗、…",
+      "event_type": "meeting",
+      "date": "1953-03-05",
+      "document_id": "mao_zedong_chronology_volume_5",
+      "pdf_page": 53,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 53,
+          "pdf_page_end": 53,
+          "quote": "同日\n晚上，在中南海颐年堂主持召开中共中央政治局会\n议，讨论政府工作问题，朱德、·周恩来、高岗、彭真、林伯渠、\n彭德怀出席，邓小平、饶漱石、邓子恢、薄一波、曾山、罗瑞\n卿、习仲勋、杨尚昆、李维汉、安子文列席。．"
+        }
+      ],
+      "case_checksum": "c5e1d256b17ef1048e5255eac1a732c4dc61045042f623d2350ff74686d3b664",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-83125fcb168c39d8",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_ef1eaff97ed60bc7f65d1864e147",
+      "event_name": "毛泽东：11月14日和刘少奇、周恩来、邓小平在中南海颐年堂会见参加苏共二十二大后途经北京回国的胡志明…",
+      "event_type": "visit",
+      "date": "1961-11-14",
+      "document_id": "mao_zedong_chronology_volume_8",
+      "pdf_page": 53,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_8",
+          "document_title": "毛泽东年谱 第8卷（1961.07-1966.09）",
+          "volume": "第8卷",
+          "pdf_page_start": 53,
+          "pdf_page_end": 53,
+          "quote": "11 月\n14 日\n和刘少奇、周恩来、邓小平在中南海颐年堂会\n见参加苏共二十二大后途经北京回国的胡志明，并共进晚餐，彭\n真、杨尚昆等参加。胡志明首先邀请毛泽东、刘少奇访问越南，\n并说：我已邀请过许多次。我来的次数越多，你们欠的债也越\n多。毛泽东说：债欠得太多了，还不起，要还只能还你一点。谈\n到苏共二十二大反对阿尔巴尼亚问题时，毛泽东说：赫鲁晓夫反\n对阿尔巴尼亚，其实就是反对中国，反对越南，反对朝鲜，反对\n日本党、印尼党，有连带关系。关千斯大林，毛泽东说：他领导\n苏联人民建设社会主义，打败希特勒，有功劳，但是他有错误，\n有缺点。我们曾说过，斯大林一生功过三七开，即是过三分，功\n七分。斯大林在战争问题上的确有过一些错误。他对希特勒进攻\n苏联估计不足，不在边境设防，不在波苏边界、波罗的海三国和\n乌克兰设防，以致苏德战争初期苏联吃了较多的亏。波罗的海三\n国不设防，致使列宁格勒遭受的损失大。乌克兰不设防，致使德\n军在南线轻易深入。虽然这样，最后打了胜仗，苏联把法西斯德\n国打败了。斯大林最少做了两件大事：在苏联建设社会主义和打\n败了法西斯德国。斯大林在党内把肃反扩大化，把苏共十七大的\n代表搞掉百分之七十，犯了大错。但他整社会上反革命分子，搞\n错的是少数，搞对的是多数。我们这里也有搞错的。你们国内肃\n反，一个人也没有搞错，你能相信吗？我不信。阶级斗争进行得\n这么激烈，规模这么大，情况这么复杂，社会主义革命的事业这\n么艰巨，以前没有经验，在工作中犯错误是不可免的。在谈到赫\n鲁晓夫时，毛泽东说：赫鲁晓夫早就有野心，在斯大林还没有死"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_8",
+          "document_title": "毛泽东年谱 第8卷（1961.07-1966.09）",
+          "volume": "第8卷",
+          "pdf_page_start": 54,
+          "pdf_page_end": 54,
+          "quote": "的时候就有。他搞阴谋手段是有步骤的：第一步，杀掉贝利\n亚[1〕，抓住公安；第二步，拉拢布尔加宁[2〕，推倒马林科夫；\n第三步，搞反党集团事件，整掉莫洛托夫〔3〕、马林科夫、卡冈\n诺维奇[4〕；以后继续搞掉布尔加宁、伏罗希洛夫[5]等等。斯大\n林杀错人，难道斯大林周围的人没有份？贝利亚有份，莫洛托\n夫、马林科夫、卡冈诺维奇有份，赫鲁晓夫也不会没有份。赫鲁\n晓夫在苏共二十大反斯大林，全世界来个反苏反共大浪潮，搞了\n一年多。然后是反党事件。现在是第三阶段，反斯大林，反反党\n集团，加上反阿尔巴尼亚。对阿尔巴尼亚的做法不得人心。你是"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_8",
+          "document_title": "毛泽东年谱 第8卷（1961.07-1966.09）",
+          "volume": "第8卷",
+          "pdf_page_start": 55,
+          "pdf_page_end": 55,
+          "quote": "大国，好比是房子，阿尔巴尼亚是小国，好比是茶杯，这么大的\n房子怎么容不下一个这么小的茶杯。到底是房子不容茶杯，还是\n茶杯不容房子，是房子怕茶杯，还是茶杯怕房子？霍查(1) 敢登\n赫鲁晓夫的东西，然后回驳，为什么霍查的东西苏联不敢登出\n来？我们是两边的东西都登。胡志明说：总的说来，现在是天下\n正多事。毛泽东说：天下正多事，人人自危之。"
+        }
+      ],
+      "case_checksum": "6cd79ec29fe706125ee9e5966c7b97d2e5a1a5954d3bdb443eb5a805655605fc",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-0574d5dc2320790b",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_a2a4724d492bbfe31e874b541031",
+      "event_name": "周恩来：毛泽东、刘少奇、周恩来、邓小平会见十二日来京的胡志明，就国际共产主义运动中的一些原则问题交换…",
+      "event_type": "activity",
+      "date": "1961-11-14",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 953,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 953,
+          "pdf_page_end": 953,
+          "quote": "毛泽东、刘少奇、周恩来、邓小平会见十二日来京的胡志明，就国际共产主义运动中的一些\n原则问题交换了意见。"
+        }
+      ],
+      "case_checksum": "0614633a0136941e0ab55b1f234eaf5d8dd21069490e4e290561ab2aee4fa059",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-ea2ca2d0d3aab442",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_c8d82e87c41e6a644ffdd21e238f",
+      "event_name": "毛泽东：同日阅天津警备区司令员郑三生(1)等三月六日关于天津延安中学通过军训实现全校大联合的报告，批…",
+      "event_type": "speech",
+      "date": "1967-03-07",
+      "document_id": "mao_zedong_chronology_volume_9",
+      "pdf_page": 66,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_9",
+          "document_title": "毛泽东年谱 第9卷（1966.10-1976.09）",
+          "volume": "第9卷",
+          "pdf_page_start": 66,
+          "pdf_page_end": 66,
+          "quote": "同日\n阅天津警备区司令员郑三生(1) 等三月六日关于天津\n延安中学通过军训实现全校大联合的报告，批示：“林彪、恩来、\n文革小组各同志：此件似可转发全国，参照执行。军队应分期分\n批对大学、中学和小学高年级实行军训，并且参预关于开学、整\n顿组织、建立｀三结合＇领导机关和实行斗、批、改的工作。先\n作试点，取得经验，逐步推广。还要说服学生，实行马克思所说\n只有解放全人类才能最后解放无产阶级自己的教导，在军训时不\n要排斥犯错误的教师和干部。除老年和生病的以外，要让这些人\n参加，以利改造。所有这些，只要认真去做，问题并不难解决。”\n三月八日，中共中央印发毛泽东的批示和这个报告。"
+        }
+      ],
+      "case_checksum": "5e73596d8d67995943e3c105ad9602f83e1c0914a784ba955dea4385505d98c4",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-6db088338eb86c48",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_47daeed23236da445b9c8ba9f8a3",
+      "event_name": "林彪：毛泽东、林彪、周恩来致电越南劳动党中央委员会主席胡志明等，热烈祝贺越南民主共和国独立24周年",
+      "event_type": "correspondence",
+      "date": "1969-09-01",
+      "document_id": "lin_biao_chronology",
+      "pdf_page": 1491,
+      "evidence": [
+        {
+          "document_id": "lin_biao_chronology",
+          "document_title": "林彪年谱",
+          "volume": null,
+          "pdf_page_start": 1491,
+          "pdf_page_end": 1491,
+          "quote": "毛泽东、林彪、周恩来致电越南劳动党中央委员会主席\n胡志明等，热烈祝贺越南民主共和国独立24周年。"
+        }
+      ],
+      "case_checksum": "1f25dd2ca4d091d9a3eea0c28802faa03b11e6398162095ccb702c0c798a2f49",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-4bd02c8b36996ae3",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_27a5cc62865b13830322eb39081a",
+      "event_name": "毛泽东：同日审阅周恩来报送的外交部关于向美方转达口信给黄华的电报稿，周恩来送审报告说：“美说派高级外…",
+      "event_type": "speech",
+      "date": "1973-03-09",
+      "document_id": "mao_zedong_chronology_volume_9",
+      "pdf_page": 478,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_9",
+          "document_title": "毛泽东年谱 第9卷（1966.10-1976.09）",
+          "volume": "第9卷",
+          "pdf_page_start": 478,
+          "pdf_page_end": 478,
+          "quote": "同日\n审阅周恩来报送的外交部关于向美方转达口信给黄华\n的电报稿，周恩来送审报告说：“美说派高级外交官来任驻京联\n络处主任，我拟相应地派黄镇大使去任驻华盛顿我联络处主任，\n使世人出乎意外，以利推动工作发展。”毛泽东批示：“照发。”"
+        }
+      ],
+      "case_checksum": "5d3b5f689f9ceb2688a03dcba474be42a27b0e2424bda0f74bfc57f22b4edd86",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-6b9c9949c1d1da83",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "peng_dehuai",
+      "other_person_name": "彭德怀",
+      "source_event_id": "evt_e2e18c86fe24d224ce22358634a7",
+      "event_name": "毛泽东：同日和周恩来、彭德怀致电朱德、张国焘，徐向前、陈昌浩，询问可否先期占领通渭",
+      "event_type": "correspondence",
+      "date": "1936-10-02",
+      "document_id": "mao_zedong_chronology_volume_1",
+      "pdf_page": 601,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_1",
+          "document_title": "毛泽东年谱 第1卷（1893.12-1937.06）",
+          "volume": "第1卷",
+          "pdf_page_start": 601,
+          "pdf_page_end": 601,
+          "quote": "同日\n和周恩来、彭德怀致电朱德、张国焘，徐向前、陈\n昌浩，询问可否先期占领通渭。同时指出：现全国人心愤激，\n要求南京抗战，南京亲日、抗日两派争论未决，新事变在酝酿变\n化中。"
+        }
+      ],
+      "case_checksum": "399c40cfd94dd4500a566c80183e7bb250568c2b83c58429ba1dba9209fa114d",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-bc6753f7f28a606a",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_32ee2742d612ff23dcf6602f95da",
+      "event_name": "毛泽东：1月25日晚上，在中南海菊香书屋主持召开中共中央政治局常委会议，讨论毛泽东离京后的工作安排，…",
+      "event_type": "meeting",
+      "date": "1961-01-25",
+      "document_id": "mao_zedong_chronology_volume_7",
+      "pdf_page": 537,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_7",
+          "document_title": "毛泽东年谱 第7卷（1959.04-1961.06）",
+          "volume": "第7卷",
+          "pdf_page_start": 537,
+          "pdf_page_end": 537,
+          "quote": "1 月\n25 日\n晚上，在中南海菊香书屋主持召开中共中央政\n治局常委会议，讨论毛泽东离京后的工作安排，并听取周恩来关\n于同德意志民主共和国政府贸易代表团会谈情况的汇报。刘少\n奇、周恩来、陈云、邓小平出席会议，彭真、杨尚昆列席会议。\n会后，毛泽东乘专列离开北京南下。"
+        }
+      ],
+      "case_checksum": "a3a38e1684bcd7335a44351eaae870409f29ffcc84d64ddc4fb55d8b5c082bf0",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-9b7a4e06ef8129fb",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_ba463a806a5f6d100ac2f45d45b4",
+      "event_name": "林彪：11时，毛泽东对周恩来送审的中央给全国农村人民公社贫下中农和各级干部的信稿批示：林彪同志阅后…",
+      "event_type": "activity",
+      "date": "1967-02-20",
+      "document_id": "lin_biao_chronology",
+      "pdf_page": 1303,
+      "evidence": [
+        {
+          "document_id": "lin_biao_chronology",
+          "document_title": "林彪年谱",
+          "volume": null,
+          "pdf_page_start": 1303,
+          "pdf_page_end": 1303,
+          "quote": "11时，毛泽东对周恩来送审的中央给全国农村人民公社\n贫下中农和各级干部的信稿批示：林彪同志阅后，退汪东兴照办。中\n共中央当日发出。\n毛泽东在《中央军委八条命令的通知稿》上批示：总理：同意，\n照办。在《通矢吗》开列的不许由外单位人员接管，的机关名单中，\n毛泽东加写了“各级银行，几个字。"
+        }
+      ],
+      "case_checksum": "aeb1443f566ad46cc683ca9d208bc9e1c577447a8c80916233eb51f0ca671898",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-1ab880d8b09674f2",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "peng_dehuai",
+      "other_person_name": "彭德怀",
+      "source_event_id": "evt_3e9c10f6f044e53de6b3c61046a6",
+      "event_name": "毛泽东：同日和彭德怀致电李克农，通报国民党各派政治主张及东征战况",
+      "event_type": "correspondence",
+      "date": "1936-02-28",
+      "document_id": "mao_zedong_chronology_volume_1",
+      "pdf_page": 525,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_1",
+          "document_title": "毛泽东年谱 第1卷（1893.12-1937.06）",
+          "volume": "第1卷",
+          "pdf_page_start": 525,
+          "pdf_page_end": 525,
+          "quote": "同日\n和彭德怀致电李克农，通报国民党各派政治主张及东\n征战况。指出：周继吾、张子华(1) 昨日到瓦窑堡。据谈，蒋介\n石系陈果夫主张联红反日，曾扩情主张联日反红，此外孙科、千\n右任、张群、冯玉祥等均主张联俄联共，并云蒋介石亦有与红军\n妥协反日的倾向。我方所组织抗日东征军，连日突破东岸二百里\n封锁线，消灭与击溃杨耀芳、杨澄源(2) 、李生达等部共三个旅、\n占领石楼、中阳、孝义、隔县、永和五县广大地区。"
+        }
+      ],
+      "case_checksum": "bfad5f8b47c36827179a45dfdb627a59bfe7ad9fe8bd4a68f9d7dbb407d7cf41",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-37aa229e4e72d9c6",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_0660c4df41cc9ee5ed43396254de",
+      "event_name": "周恩来：出席于本月二十五日开始的中共中央工作会议",
+      "event_type": "meeting",
+      "date": "1962-07-28",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 978,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 978,
+          "pdf_page_end": 978,
+          "quote": "出席于本月二十五日开始的中共中央工作会议。会议成立了有毛泽东、刘少奇、周恩来、朱\n德、邓小平及国务院各口负责人、各中央局书记参加的中心小组。毛泽东在八月六日的大会上讲话，\n提出阶级（即究竟有没有阶级。社会主义社会究竟存不存在阶级）、形势（即国际国内形势究竟怎\n么看，国内形势是不是一片黑暗，还是有点光明）、矛盾（即社会主义社会是不是就投有矛盾了，\n有些什么矛盾）三个问题。以后，毛泽东又多次在中心小组会议上讲这三个问题，把一些中央同志\n春天对经济形势的估计批评为“黑暗风”，把支持“包产到户”的主张批评为“单干风”。把彭德怀\n等要求党中央重新审查自己的历史、进行甄别平反的要求批判为“翻案风”。毛泽东要求会议讨论\n上述问题，使得中央工作会议的原定议题受到冲击。会议期间，周恩来主要就计划问题和农村形势\n问题讲话。在讨论毛泽东提出的三个问题时，周恩来说：毛主席提出的三个问题五个矛盾，很尖锐，\n重要和适时，提出了阶级斗争是长期的，阶级贯穿在各个时期，形势一改变，我们的同志就模糊了，\n以为搞了几十年，还讲什么阶级斗争长期性，讲什么阶级。还说：农民的问题，主要是单干的问题，\n农民过去主要是单干，但是现在主张单干的不多；包产到户要分清界限，不都是单干，有些取得成\n绩也是主要的；农村形势，虽然我们一开始把困难估计得多了一点，采取了一系列的措施，但是我\n们的困难问题并不是漆黑一团。"
+        }
+      ],
+      "case_checksum": "a54746b7824c4fee582dd1db527c837d88a871789b5703505a33bb55e95aaa81",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-371ce24a70cf7715",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_61a67a643032f5e351e22cbc2739",
+      "event_name": "林彪：总政治部在人民大会堂举行4万人参加的拥政爱民联欢晚会，林彪与毛泽东、刘少奇、周恩来出席",
+      "event_type": "meeting",
+      "date": "1962-02-04",
+      "document_id": "lin_biao_chronology",
+      "pdf_page": 1083,
+      "evidence": [
+        {
+          "document_id": "lin_biao_chronology",
+          "document_title": "林彪年谱",
+          "volume": null,
+          "pdf_page_start": 1083,
+          "pdf_page_end": 1083,
+          "quote": "总政治部在人民大会堂举行4万人参加的拥政爱民联欢晚\n会，林彪与毛泽东、刘少奇、周恩来出席。"
+        }
+      ],
+      "case_checksum": "9ebfb88e97332114a987e50a0bcc8d9ab89e2c7b9a352f39e321a5ac99bd757d",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-2faf1ec7d132b8ca",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_3a0f7d521102a4e158672e1d7890",
+      "event_name": "毛泽东：10月8日晚上，在中南海颐年堂主持召开中共八届中央政治局常委第一次会议（扩大），刘少奇、周恩…",
+      "event_type": "meeting",
+      "date": "1956-10-08",
+      "document_id": "mao_zedong_chronology_volume_6",
+      "pdf_page": 13,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_6",
+          "document_title": "毛泽东年谱 第6卷（1956.10-1959.03）",
+          "volume": "第6卷",
+          "pdf_page_start": 13,
+          "pdf_page_end": 13,
+          "quote": "10 月\n8\n日\n晚上，在中南海颐年堂主持召开中共八届中央\n政治局常委第一次会议（扩大），刘少奇、周恩来、邓小平、彭"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_6",
+          "document_title": "毛泽东年谱 第6卷（1956.10-1959.03）",
+          "volume": "第6卷",
+          "pdf_page_start": 14,
+          "pdf_page_end": 14,
+          "quote": "真、李富春(1) 、彭德怀、李先念、陆定一、陈伯达、薄一\n波(2 ）、王稼祥、胡乔木、罗瑞卿(3) 出席。会议讨论书记处成员\n的分工问题、经济问题、军事问题、台湾问题、波兰形势问题\n等。会后，毛泽东同刘少奇、周恩来、邓小平、彭真谈话。"
+        }
+      ],
+      "case_checksum": "a61ce8ea5fd3a440a79155044d07e106c7b0fd397a1f579e4cbc84d05d5a8441",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-dfc026a6cfd77795",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_7969104a35fe98806ec566716670",
+      "event_name": "毛泽东：4月10日下午，在武昌再次会见由榜田里见率领的日本共产党代表团，王任重、赵毅敏等在座",
+      "event_type": "meeting",
+      "date": "1964-04-10",
+      "document_id": "mao_zedong_chronology_volume_8",
+      "pdf_page": 342,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_8",
+          "document_title": "毛泽东年谱 第8卷（1961.07-1966.09）",
+          "volume": "第8卷",
+          "pdf_page_start": 342,
+          "pdf_page_end": 342,
+          "quote": "4 月\n10 日\n下午，在武昌再次会见由榜田里见率领的日本\n共产党代表团，王任重、赵毅敏等在座。毛泽东说：你们看了苏\n联的材料(1) 吗？没有新的东西。我们只批评赫鲁晓夫一个人，\n他批评了我们七八个人。有我，有刘少奇、周恩来、邓小平同\n志，还有刘宁一、刘长胜、陶铸和陈毅等同志。他这一炮放得不\n响。他还要采取“集体措施“，还要开会。我们准备起草一个提\n纲，在中苏两党会谈中提出来，准备作为世界共产党会议的一个\n决议草案。单靠我们一个党是不行的，如果有日本、印尼、朝\n鲜、越南等党参加起草就比较好。公开论战首先是对国内的党有\n好处，使中国人民、中国共产党员和干部知道世界上有两种共产\n主义；其次是国际上的。要感谢赫鲁晓夫去年七月十四日的公开\n信，这使我们好办了。在七月十四日以前，我们也不好公开批评\n他们，只能指桑骂槐。公开论战是他们自己挑起的，现在他们又\n很害怕公开论战。我们敢于发表他们的文件，他们则不敢。对他\n们四月三日发表的苏斯洛夫的报告，我们要发表，要替他们广\n播。至于国际会议，我看几年之内开不成。开分裂的会，还不如"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_8",
+          "document_title": "毛泽东年谱 第8卷（1961.07-1966.09）",
+          "volume": "第8卷",
+          "pdf_page_start": 343,
+          "pdf_page_end": 343,
+          "quote": "不开。维持表面上的关系，比在表面上搞破裂要好得多。一九六\n二年八月，我们讨论了党的整个路线，包括国内的和国际的，开\n了十中全会，发表了全会的公报。那时我们党内有一部分同志在国\n际问题上强调三和一少，在国内问题上提出三自一包。中央各部，\n每个部都不是太平的，都可以一分为二。地方上也不是太平的，有\n两条道路的斗争。所以看中国不能尽看好的，有光明的一面，这是\n主要的一面；也有黑暗的一面，这是次要的一面，但不可忽视。"
+        }
+      ],
+      "case_checksum": "3dea8809e791b40b37c217882a3ab45cbaf91c95aa0c133d59eac1a29feb5d3a",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-6a077e3e6348bc76",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_b8e5cd0d55f7f8cab8b3e11b247e",
+      "event_name": "毛泽东：同日上午十一时，在中南海颐年堂同各民主党派负责人和无党派民主人士谈话，刘少奇、周恩来、朱德、…",
+      "event_type": "meeting",
+      "date": "1957-12-08",
+      "document_id": "mao_zedong_chronology_volume_6",
+      "pdf_page": 266,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_6",
+          "document_title": "毛泽东年谱 第6卷（1956.10-1959.03）",
+          "volume": "第6卷",
+          "pdf_page_start": 266,
+          "pdf_page_end": 266,
+          "quote": "同日\n上午十一时，在中南海颐年堂同各民主党派负责人和\n无党派民主人士谈话，刘少奇、周恩来、朱德、邓小平、彭真等\n参加。毛泽东谈三个问题。（一）关于莫斯科会议。莫斯科会议\n有很深远的意义。人们对世界被压迫人民的力量和共产党的力量\n常常是看不上眼的。对客观形势的估计不足，是值得大家注意\n的。莫斯科会议的两个宣言，讲的都是原理原则的事，没有规定\n什么具体任务。重申马列主义的原理原则和对国际形势作出估\n计，有必要。许多人往往过高估计西方力量，以为美国了不起。\n我在六十八国会议上举了十个证据，证明世界形势到了新的转折\n点，资本主义远远地抛在我们后面了。这些事实，都表现了反帝\n国主义的力量超过了帝国主义的力量。国际形势对我们有利，但"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_6",
+          "document_title": "毛泽东年谱 第6卷（1956.10-1959.03）",
+          "volume": "第6卷",
+          "pdf_page_start": 267,
+          "pdf_page_end": 267,
+          "quote": "也要估计到有少数疯子闹乱子。基本的情况是帝国主义不敢打。\n两方面都怕，只说帝国主义怕我们不合事实，我们也怕他们。我\n看，帝国主义怕我们多一点。归根结底是争取十五年和平。在全\n国人民中要进行教育，各民主党派也要进行教育，要有革命的乐\n观主义，要长自己的志气、灭他人的威风。（二）关千十五年赶\n上英国的问题。以十五年或稍多一些时间，在钢铁和其他重要工\n业产品的产量方面赶上或超过英国，是可能的。电力：英国现有\n九百多亿度，二千四百万千瓦；我们只有一百九十亿度，四百多\n万千瓦。我们如有年增百分之十八点二的速度，就能在十五年后\n赶上英国。我国有丰富的水力资源可用来发电，英国则很少水力\n· 资源。煤：英国一九五六年产煤两亿二千万吨，但挖得差不多\n了；我们一九五六年产煤一亿二千万吨，今后可发展。我国地下\n资源丰富。钢：英国一九五六年已达两千一百万吨；我们一九五\n七年五百二十万吨，第二个五年计划（到一九六二年）可达一千\n二百万至一千五百万吨，到一九七二年可能超过四千万吨，英国\n是不能达到这个水平的。重要的是搞农业。工农业像一个人的两\n只脚，缺了一只就成跋子。工业生产，在第二个五年计划中，百\n分之九十至九十五的机器可以自己制造，到第三个五年计划时全\n部都可以造了。再过十年八年，卫星、火箭都可以造。最难造的\n是棉花和粮食，要把衣业切实搞一下。沁发展农业希望各民主党派\n和知识分子都要注意。（周恩来：要争取在十五年后，工业超过\n西方的英国，农业单位面积产量超过东方的日本。）（三）对右派\n分子的处理。右派同我们唱了对台戏。对台戏也有两种，一种是\n不相容的，一种是和平共处的。等几个月，要同右派谈谈，指出\n两条路，坚持右派立场，或者接受多数人的意见进行改造。要化\n无用为有用，化消极因素为积极因素。右派中可能有部分人会分\n化的，我看可给他们充分的时间。对右派的处理，现在就要准备，"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_6",
+          "document_title": "毛泽东年谱 第6卷（1956.10-1959.03）",
+          "volume": "第6卷",
+          "pdf_page_start": 268,
+          "pdf_page_end": 268,
+          "quote": "希望各民主党派研究。第一，要处理，要处分，否则会脱离群众；\n第二，处分过严也不利，要批判从严、处理从宽，除个别很坏的\n以外，选举权不取消，有一些还给他一些地位。这样做的理由，\n一是为了争取中间。在知识分子中，有大量的人看我们如何处理\n右派，处理过分了，会伤他们的心，会不高兴。二是为了分化右\n派，希望三七开，十个人大概有七个人可争取。给他们五年、七\n年的时间，那时思想有觉悟，改造好了，右派帽子可以取消。"
+        }
+      ],
+      "case_checksum": "de3524e87d0ceaef411228ebf57245f2fa8a2a77bb909bc87ad7fddae65d39a9",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-d7b451a7eef90a48",
+      "person_id": "zhou_enlai",
+      "person_name": "周恩来",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_636da4514b00aebb94f06d46b91f",
+      "event_name": "毛泽东：10月9日下午，和刘少奇、周恩来、朱德去中南海东八所投票选举北京市西单区人大代表",
+      "event_type": "activity",
+      "date": "1956-10-09",
+      "document_id": "mao_zedong_chronology_volume_6",
+      "pdf_page": 14,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_6",
+          "document_title": "毛泽东年谱 第6卷（1956.10-1959.03）",
+          "volume": "第6卷",
+          "pdf_page_start": 14,
+          "pdf_page_end": 14,
+          "quote": "10 月\n9 日\n下午，和刘少奇、周恩来、朱德去中南海东八\n所投票选举北京市西单区人大代表。"
+        }
+      ],
+      "case_checksum": "751ccde01f9d57929d31b3bbbcc30cd83a16bf87abc29ce4b7092ed9d0073ccb",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-eb821d4f4206fec6",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_3d6752dd36b4942a1e8bd342ecd6",
+      "event_name": "周恩来：主持国务院业务组会议",
+      "event_type": "correspondence",
+      "date": "1970-12-16",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 1318,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 1318,
+          "pdf_page_end": 1318,
+          "quote": "主持国务院业务组会议。听取有关部门关于葛洲坝工程设计情况的汇报。会上，逐字逐句审\n查、询问湖北省革命委员会负责人作的《长江葛洲坝水电工程简要说明》，提出；葛洲坝工程方案\n要放在非常可靠、安全的基础上，要加强领导，实事求是，走群众路线，领导和群众相结合；提纲\n中要把可能出现的问题写进去，不能回避矛盾，要暴露矛盾，解决矛盾。允许唱反调，摆明两种不\n同观点；投资要节约。在目前条件下，在“四五”计划期间，三峡和葛洲坝两个工程不可能同时都\n上。二十四日，致信毛泽东、林彪，报告葛洲坝工程酝酿、论证情况，提出：“在‘四五’计划中\n兴建葛洲坝水利工程是可行的”，“施工过程中，还可精心校正，精心设计，力求避免二十年修水\n坝的许多错误”。“至于三峡大坝，需视国际形势和国内防空炸的技术力量的增长，修高坝经验的\n积累，再在‘四五’期间考虑何时兴建。”随信附有《中共中央关于兴建宜昌长江葛洲坝水利枢纽\n工程的批复》送审稿等。毛泽东阅后批：“赞成兴建此坝。现在文件设想是一回事。兴建过程中将\n要遇到一些现在想不到的困难问题，那又是一回事。那时，要准备修改设计。”十二月三十日，葛\n洲坝工程正式开工。"
+        }
+      ],
+      "case_checksum": "0ebe00d03710f8bad7f1eada79359d28c9d0bc4fb4a90c7708c28e7a5840a420",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-41a602d8dae24ddc",
+      "person_id": "zhou_enlai",
+      "person_name": "周恩来",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_eef07c72213798defd7c663eff20",
+      "event_name": "林彪：毛泽东、朱德、周恩来、张国焘、彭德怀、贺龙、林彪等联名致电张学良、杨虎城，表示“坚决赞助二将…",
+      "event_type": "correspondence",
+      "date": "1936-12-14",
+      "document_id": "lin_biao_chronology",
+      "pdf_page": 264,
+      "evidence": [
+        {
+          "document_id": "lin_biao_chronology",
+          "document_title": "林彪年谱",
+          "volume": null,
+          "pdf_page_start": 264,
+          "pdf_page_end": 264,
+          "quote": "毛泽东、朱德、周恩来、张国焘、彭德怀、贺龙、林\n彪等联名致电张学良、杨虎城，表示“坚决赞助二将军领导之革命事\n业”并建议立即由东北军、第17路军和中国红军三方组织西北抗日援绥\n联军，以应急变。"
+        }
+      ],
+      "case_checksum": "6548533490a0b8239b4230e5d632bcb65b67893aef313b01d0a49a054f2a1eef",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-7ce8eeae23e21dc2",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_18a46e2eb1d9e44c18f880c5eb00",
+      "event_name": "毛泽东：5月27日晚上，主持召开中共中央书记处会议，刘少奇、朱德、周恩来、陈云出席，薄一波、李富春列…",
+      "event_type": "meeting",
+      "date": "1952-05-27",
+      "document_id": "mao_zedong_chronology_volume_4",
+      "pdf_page": 564,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_4",
+          "document_title": "毛泽东年谱 第4卷（1949.10-1952.12）",
+          "volume": "第4卷",
+          "pdf_page_start": 564,
+          "pdf_page_end": 564,
+          "quote": "5 月27 日\n晚上，主持召开中共中央书记处会议，刘少奇、\n朱德、周恩来、陈云出席，薄一波、李富春列席。\n、"
+        }
+      ],
+      "case_checksum": "afafa3b5d34e038d0349b5d9a17a1ba544b9d2824de7aca25f679a638b9b05bb",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-1da192e79810798e",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_0c6831cabffa15ba57216fe43947",
+      "event_name": "周恩来：毛泽东、刘少奇、周恩来、朱德、任弼时、林伯渠、董必武等接见并宴请第四野战军师以上干部，欢送他…",
+      "event_type": "activity",
+      "date": "1949-03-31",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 423,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 423,
+          "pdf_page_end": 423,
+          "quote": "毛泽东、刘少奇、周恩来、朱德、任弼时、林伯渠、董必武等接见并宴请第四野战军师以上\n干部，欢送他们“打过长江去，解放全中国！”"
+        }
+      ],
+      "case_checksum": "8c595a9b111e9a7d99b47adeffc3bccab84060fa3182f64f9c498efe7d798009",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-a7a75abd2eec0c64",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_62d5ce38f124c359d3a4bde7a4b1",
+      "event_name": "毛泽东：2月11日晨，同周恩来谈话",
+      "event_type": "activity",
+      "date": "1972-02-11",
+      "document_id": "mao_zedong_chronology_volume_9",
+      "pdf_page": 432,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_9",
+          "document_title": "毛泽东年谱 第9卷（1966.10-1976.09）",
+          "volume": "第9卷",
+          "pdf_page_start": 432,
+          "pdf_page_end": 432,
+          "quote": "2 月\n11 日\n晨，同周恩来谈话。"
+        }
+      ],
+      "case_checksum": "796cc0f2706a07c8c0a0b75b0c0d12daa4b5dc5cbf4db7bcba30cf190dc957a5",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-969d5ddf24cbe264",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_0d82bd563e5a7dc8a1f5b4072a04",
+      "event_name": "周恩来：和毛泽东出席蒋介石的午宴",
+      "event_type": "meeting",
+      "date": "1945-09-12",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 321,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 321,
+          "pdf_page_end": 321,
+          "quote": "和毛泽东出席蒋介石的午宴。"
+        }
+      ],
+      "case_checksum": "88a7ade18a12c7dc551e937dc60767667694a3cdcec5fe705684a899997a042b",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-fc10572b1f885a30",
+      "person_id": "mao_zedong",
+      "person_name": "毛泽东",
+      "other_person_id": "peng_dehuai",
+      "other_person_name": "彭德怀",
+      "source_event_id": "evt_f5c693933f8ced6e1ef476ec472e",
+      "event_name": "毛泽东：4月9日致电乔冠华并告金日成、彭德怀(2):“现将朝中两国政府建议的说明信稿(3)发给你们",
+      "event_type": "correspondence",
+      "date": "1953-04-09",
+      "document_id": "mao_zedong_chronology_volume_5",
+      "pdf_page": 84,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 84,
+          "pdf_page_end": 84,
+          "quote": "4 月\n9 日\n致电乔冠华并告金日成、彭德怀(2):“ 现将朝中\n两国政府建议的说明信稿(3) 发给你们。这一说明是以南日同志\n名义发给哈利逊的。可于明（十）日在联络官会上面交对方，并\n于明晚在平壤、北京两地广播，十一日登报。有了这一说明，我\n方可更主动地要求对方在关于交换病伤战俘的协定达成协议后，"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 85,
+          "pdf_page_end": 85,
+          "quote": "接着商定恢复双方代表团会议的日期。”"
+        }
+      ],
+      "case_checksum": "8f408956df1a9d7e1a1a40a712839fcc06263172ca69de25649864cfed9f0a61",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-2f06f7c1cae7ab55",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_980e8af32011eb370b050b0ead48",
+      "event_name": "林彪：林彪、周恩来会见张治中，表示国民党如有具体办法，愿意继续谈，或由蒋召见周、林谈，以便回延安报…",
+      "event_type": "speech",
+      "date": "1943-02",
+      "document_id": "lin_biao_chronology",
+      "pdf_page": 389,
+      "evidence": [
+        {
+          "document_id": "lin_biao_chronology",
+          "document_title": "林彪年谱",
+          "volume": null,
+          "pdf_page_start": 389,
+          "pdf_page_end": 389,
+          "quote": "林彪、周恩来会见张治中，表示国民党如有具体办法，\n愿意继续谈，或由蒋召见周、林谈，以便回延安报告。张治中答：如\n承认“皓电”精神，尚可继续谈，具体办法须待何应钦由印度回后才能\n答复。"
+        }
+      ],
+      "case_checksum": "89c0a8fb383b3f4355f3e5a6e04494cf6a871a6a6b652bdd071eae6382d78625",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-97273d7af141a89b",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "zhou_enlai",
+      "other_person_name": "周恩来",
+      "source_event_id": "evt_776a3089ab3f611db863805c7146",
+      "event_name": "毛泽东：11月13日下午三时，在中南海颐年堂主持召开中共中央书记处会议，刘少奇、周恩来、朱德、陈云出…",
+      "event_type": "meeting",
+      "date": "1953-11-13",
+      "document_id": "mao_zedong_chronology_volume_5",
+      "pdf_page": 198,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 198,
+          "pdf_page_end": 198,
+          "quote": "11 月\n13 日\n下午三时，在中南海颐年堂主持召开中共中央\n书记处会议，刘少奇、周恩来、朱德、陈云出席，高岗、彭德\n怀、邓小平列席。"
+        }
+      ],
+      "case_checksum": "8dced2e1d0d4700c22858367a9b8a647ab8e74431e728377f2cac22acdc4fff6",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-ad3c27d002559e1d",
+      "person_id": "liu_shaoqi",
+      "person_name": "刘少奇",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_f68a6d2641f1095ca42c97950741",
+      "event_name": "毛泽东：同日和刘少奇、周恩来致电祝贺苏联连续成功地发射“东方三号”、“东方四号“载人卫星式宇宙飞船",
+      "event_type": "correspondence",
+      "date": "1962-08-15",
+      "document_id": "mao_zedong_chronology_volume_8",
+      "pdf_page": 141,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_8",
+          "document_title": "毛泽东年谱 第8卷（1961.07-1966.09）",
+          "volume": "第8卷",
+          "pdf_page_start": 141,
+          "pdf_page_end": 141,
+          "quote": "同日\n和刘少奇、周恩来致电祝贺苏联连续成功地发射“东\n方三号”、“东方四号“载人卫星式宇宙飞船。"
+        }
+      ],
+      "case_checksum": "a3b5d1ff1e2f9cfaca00bed675d38fe225119304f395a1bc4d29bd1d94a5c151",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-ad89bdb1e4a484d0",
+      "person_id": "deng_xiaoping",
+      "person_name": "邓小平",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_e975a817ec32a8fe1bc1bbcbbfa5",
+      "event_name": "毛泽东：12月16日晚上，在中南海游泳池住处召集刘少奇、周恩来、陈云、邓小平、陈伯达开会",
+      "event_type": "meeting",
+      "date": "1954-12-16",
+      "document_id": "mao_zedong_chronology_volume_5",
+      "pdf_page": 328,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_5",
+          "document_title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+          "volume": "第5卷",
+          "pdf_page_start": 328,
+          "pdf_page_end": 328,
+          "quote": "12 月\n16 日\n晚上，在中南海游泳池住处召集刘少奇、周恩\n来、陈云、邓小平、陈伯达开会。"
+        }
+      ],
+      "case_checksum": "639344c273e1d92826cf2ebd611d5f84ff9bfe4db9470f1f3a537da4f1f4abf3",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-2cd080244a8e4f5e",
+      "person_id": "zhou_enlai",
+      "person_name": "周恩来",
+      "other_person_id": "zhu_de",
+      "other_person_name": "朱德",
+      "source_event_id": "evt_a3cc0493c2cc75c39a7c2c1211f1",
+      "event_name": "周恩来：为准备对付国民党的磨擦，毛泽东、朱德、周恩来致电董必武，主张恢复给蒋介石、何应钦发战报，由重…",
+      "event_type": "correspondence",
+      "date": "1943-12-19",
+      "document_id": "zhou_enlai_chronology_1949_1976",
+      "pdf_page": 295,
+      "evidence": [
+        {
+          "document_id": "zhou_enlai_chronology_1949_1976",
+          "document_title": "周恩来年谱（1949—1976）",
+          "volume": "上、中、下卷",
+          "pdf_page_start": 295,
+          "pdf_page_end": 295,
+          "quote": "为准备对付国民党的磨擦，毛泽东、朱德、周恩来致电董必武，主张恢复给蒋介石、何应钦\n发战报，由重庆办事处抄转备案，“以便必要时作为反驳的根据”；并嘱董必武将国民党搞磨擦的事\n件随时电告，以便向蒋介石、何应钦抗议。"
+        }
+      ],
+      "case_checksum": "615cd11b4800abbd18e9234bc1911b218baee5c6e4ca762c29802baacc860cbc",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    },
+    {
+      "id": "blind-b503ec477b2ebb27",
+      "person_id": "lin_biao",
+      "person_name": "林彪",
+      "other_person_id": "mao_zedong",
+      "other_person_name": "毛泽东",
+      "source_event_id": "evt_34ee363dd65137cdcaf9bb61d9a6",
+      "event_name": "毛泽东：9月1日和林彪、周恩来致电孙德胜、．黎笋、长征C1)、范文同，祝贺越南民主共和国成立二十六周…",
+      "event_type": "correspondence",
+      "date": "1971-09-01",
+      "document_id": "mao_zedong_chronology_volume_9",
+      "pdf_page": 402,
+      "evidence": [
+        {
+          "document_id": "mao_zedong_chronology_volume_9",
+          "document_title": "毛泽东年谱 第9卷（1966.10-1976.09）",
+          "volume": "第9卷",
+          "pdf_page_start": 402,
+          "pdf_page_end": 402,
+          "quote": "9 月\n1\n日\n和林彪、周恩来致电孙德胜、．黎笋、长征C 1) 、\n范文同，祝贺越南民主共和国成立二十六周年。贺电指出：美国"
+        },
+        {
+          "document_id": "mao_zedong_chronology_volume_9",
+          "document_title": "毛泽东年谱 第9卷（1966.10-1976.09）",
+          "volume": "第9卷",
+          "pdf_page_start": 403,
+          "pdf_page_end": 403,
+          "quote": "侵略者推行的所谓“尼克松主义”和“战争越南化”的阴谋已经\n破产。尽管美帝国主义还在竭力挣扎，但是，它的失败已成定\n局，是任何力量也无法改变的。胜利一定属千印度支那三国人\n民。"
+        }
+      ],
+      "case_checksum": "8b9af4440a5308cfe76da90869a38d481a63661504588fd5c6021f2501623d79",
+      "annotation": {
+        "expected": null,
+        "reason": "",
+        "reviewed_by": "",
+        "reviewed_at": ""
+      }
+    }
+  ]
+}

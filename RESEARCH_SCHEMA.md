@@ -220,6 +220,8 @@ HTTP 接口为 `GET /api/people/{person_id}/timeline`，查询参数为 `start_y
 
 规则 v4 新增 `match_method=grouped_attendance`：只识别来源首证据页开头、活动前置叙述后紧邻“参加会见的，中方有……，苏方有……”的受控句式；动作必须对应，名单项必须完整，且共同动作参与者只能取年谱主体和中方名单，或中方名单内的两人，不能把苏方名单成员自动归为中方共同参与者。带职衔的复杂名单、其他国家分组及跨页活动仍可能漏检。人物抽取匹配规范姓名时忽略 PDF 排版空白，例如 `刘少\n奇` 仍登记为刘少奇；原始证据文本保持不变。跨页毛年谱证据继续记录整条事件的抽取方法集合，以维持既有证据 ID 的不可变内容。
 
+独立评测采用两阶段文件。`prepare-intersection-review` 直接扫描源证据中的规范姓名并忽略排版空白，不依赖现有人物索引；排除开发集源事件后固定种子抽样。盲审包包含人物、事件、日期、文献、完整证据页清单和空白 `annotation`，不输出当前规则预测或抽样分层。每项的 `case_checksum` 覆盖除标注外的全部内容。`finalize-intersection-review` 要求校验和不变，且每项都有布尔判断、依据、复核者和日期，并验证锚点页属于原证据，才生成 `cohort=independent` 的标准评测集。`eval intersections --case-set ...` 可评测指定文件。独立样本一旦用于改规则，必须降级为回归集。
+
 ## 12. 结构化聊天路由
 
 `POST /api/questions` 在混合检索之前识别明确的年度人物时间线与双人交集问题。返回沿用 `AnswerResponse`，`retrieval_mode` 分别为 `structured_timeline` / `structured_intersection`。这两条路由固定为证据摘录模式，`llm_status=not_applicable`，无模型调用；有候选时 `evidence_status=partial`，不把规则候选提升为 supported。
