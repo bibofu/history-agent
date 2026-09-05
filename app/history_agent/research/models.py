@@ -17,6 +17,7 @@ YEAR_VALUE = re.compile(r"^(?:18|19|20)\d{2}$")
 MONTH_VALUE = re.compile(r"^(?:18|19|20)\d{2}-(?:0[1-9]|1[0-2])$")
 HIGH_RISK_RELATION_TYPES = {"direct_subordinate"}
 EVENT_REQUIRED_RELATION_TYPES = {"co_attended"}
+ORGANIZATION_RELATION_TYPES = {"held_position", "member_of", "direct_subordinate"}
 
 
 class PersonAlias(BaseModel):
@@ -219,6 +220,14 @@ class HistoricalRelationship(BaseModel):
         ):
             raise ValueError(
                 "confirmed high-risk relationship requires organization and time context"
+            )
+        if (
+            self.relation_type in ORGANIZATION_RELATION_TYPES
+            and self.review_status == "confirmed"
+            and (not self.organization_name or self.start.precision == "unknown")
+        ):
+            raise ValueError(
+                "confirmed organization relationship requires organization and time context"
             )
         return self
 

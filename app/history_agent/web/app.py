@@ -16,6 +16,10 @@ from history_agent.research.intersections import (
     PersonIntersectionResponse,
     get_person_intersections,
 )
+from history_agent.research.organization import (
+    OrganizationRelationResponse,
+    get_organization_relationships,
+)
 from history_agent.research.timeline import (
     PersonTimelineResponse,
     TimelineReviewStatus,
@@ -134,6 +138,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 start_year=start_year if start_year is not None else lower,
                 end_year=end_year if end_year is not None else upper,
                 event_types=event_type,
+                review_statuses=review_status,
+                limit=limit,
+                offset=offset,
+            )
+        except ResearchDataError as exc:
+            status_code = 404 if str(exc).startswith("unknown person_id") else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+    @api.get(
+        "/api/people/{person_id}/relationships",
+        response_model=OrganizationRelationResponse,
+    )
+    def person_relationships(
+        person_id: str,
+        at: Annotated[str | None, Query()] = None,
+        relation_type: Annotated[list[str] | None, Query()] = None,
+        review_status: Annotated[list[str] | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> OrganizationRelationResponse:
+        if at is not None:
+            try:
+                year = int(at[:4])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, "at must begin with a four-digit year") from exc
+            lower, upper = active_settings.research_start.year, active_settings.research_end.year
+            if not lower <= year <= upper:
+                raise HTTPException(422, f"at must be within the research range {lower}-{upper}")
+        try:
+            return get_organization_relationships(
+                Database(active_settings.database_path),
+                person_id=person_id,
+                at=at,
+                relation_types=relation_type,
                 review_statuses=review_status,
                 limit=limit,
                 offset=offset,

@@ -258,6 +258,20 @@ def test_temporal_and_high_risk_relationship_validation() -> None:
             extraction_confidence=1.0,
             review_status="confirmed",
         )
+    with pytest.raises(ValidationError, match="organization and time context"):
+        HistoricalRelationship(
+            relationship_id="relation_three",
+            relation_type="held_position",
+            subject_person_id="person_alpha",
+            subject_mention_text="甲某",
+            organization_name="测试委员会",
+            role_title="委员",
+            evidence=[_evidence()],
+            extraction_method="manual",
+            extraction_confidence=1.0,
+            review_status="confirmed",
+            reviewed_by="reviewer",
+        )
 
 
 def test_event_and_relationship_require_shared_evidence(work_path: Path) -> None:

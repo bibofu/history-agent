@@ -484,9 +484,13 @@ POST /api/questions       基于本地资料问答
 GET  /api/health          查看双索引、生成模式和研究时间范围
 GET  /api/people/{person_id}/timeline
                            查询去重后的人物时间线和页码证据
+GET  /api/people/{person_id}/intersections/{other_person_id}
+                           查询两人的共同动作候选和逐来源证据
+GET  /api/people/{person_id}/relationships
+                           按时间点查询组织任职候选和页码证据
 ```
 
-人物时间线接口已实现；人物交集和组织关系接口将在后续结构化查询阶段加入。目前会话问答仍通过统一问答接口进入混合 RAG，下一阶段再让会话 Agent 自动调用结构化时间线。
+人物时间线、人物交集和组织任职接口均已实现。组织关系接口的 `at` 参数接受 `YYYY`、`YYYY-MM` 或 `YYYY-MM-DD`；没有结束时间证据时只匹配史料明确记载的任职日期范围，不能据此推断此后持续在任。时间线和人物交集已经接入会话路由，组织关系当前先通过 CLI/API 查询。
 
 问答接口应返回结构化证据，而不只返回一段文本：
 
@@ -594,4 +598,5 @@ GET  /api/people/{person_id}/timeline
 - [x] 实现人物交集候选 CLI/API：逐来源检查共同动作、保留双方角色和证据；v4 支持紧邻普通名单成员及“中方有……、苏方有……”分组名单。26 条、9 组人物的 PDF 视觉核对定向样本为 TP=16、FP=0、FN=0、TN=10（开发集，非全库准确率），详见 [交集验收](evals/INTERSECTION_BASELINE.md)
 - [-] 已冻结 v4 开发集并生成 40 条预测盲化的独立复核包，覆盖 10 组人物、10 份文献和 23 个年份，与开发源事件零重合；等待未参与规则开发的复核者填写标签后再计算独立指标，详见 [独立复核说明](evals/INTERSECTION_INDEPENDENT_REVIEW.md)
 - [x] 接入保守的时间线/交集聊天路由：保留候选状态、显示总数与截断、按实际共同动作证据引用；不支持的条件要求澄清，详见 [聊天路由验收](evals/STRUCTURED_CHAT_BASELINE.md)
+- [x] 完成组织任职候选抽取与时间点查询：从 5,282 条相关事件抽取 72 条带日期、机构、源事件和 PDF 页码的候选，幂等复跑零改动；CLI/API 不外推缺少结束证据的任期，跨 3 份 PDF 的 5 页视觉抽查通过，详见 [组织关系验收](evals/ORGANIZATION_RELATION_BASELINE.md)
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比

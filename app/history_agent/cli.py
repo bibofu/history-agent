@@ -41,6 +41,10 @@ from history_agent.research.model_extraction import (
     enrich_events_with_model,
     list_review_queue,
 )
+from history_agent.research.organization import (
+    extract_organization_relationships,
+    get_organization_relationships,
+)
 from history_agent.research.people import (
     propose_person_merge,
     resolve_person,
@@ -597,6 +601,85 @@ def research_timeline(
         typer.echo(
             f"{date_text} [{item.verification_level}/{item.record_kind}] {item.name} | {sources}"
         )
+
+
+@research_app.command("extract-relationships")
+def research_extract_relationships(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without saving."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Extract conservative, evidence-backed organization relationship candidates."""
+
+    settings = get_settings()
+    database = Database(settings.database_path)
+    sync_relation_types(database, load_relation_type_catalog(settings.relation_types_path))
+    try:
+        summary = extract_organization_relationships(database, dry_run=dry_run)
+    except ResearchDataError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        typer.echo(summary.model_dump_json(indent=2))
+        return
+    typer.echo(
+        f"events: {summary.events_scanned}; candidates: {summary.candidates}; "
+        f"created: {summary.created}; updated: {summary.updated}; skipped: {summary.skipped}"
+    )
+
+
+@research_app.command("relationships")
+def research_relationships(
+    person: Annotated[str, typer.Argument(help="Person ID, canonical name, or alias.")],
+    at: Annotated[
+        str | None,
+        typer.Option("--at", help="Point or period: YYYY, YYYY-MM, or YYYY-MM-DD."),
+    ] = None,
+    relation_type: Annotated[list[str] | None, typer.Option("--relation-type")] = None,
+    review_status: Annotated[list[str] | None, typer.Option("--review-status")] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 50,
+    offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Query time-aware organization relationships with source evidence."""
+
+    settings = get_settings()
+    database = Database(settings.database_path)
+    resolution = resolve_person(database, person)
+    if resolution.status == "ambiguous":
+        raise typer.BadParameter("ambiguous person; use a stable person ID")
+    if resolution.status == "resolved":
+        candidate = resolution.candidates[0]
+        person_id = candidate.merged_into_person_id or candidate.person_id
+    else:
+        person_id = person
+    try:
+        result = get_organization_relationships(
+            database,
+            person_id=person_id,
+            at=at,
+            relation_types=relation_type,
+            review_statuses=review_status,
+            limit=limit,
+            offset=offset,
+        )
+    except ResearchDataError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    typer.echo(
+        f"{result.canonical_name} ({result.person_id}): "
+        f"showing {len(result.relationships)} of {result.total} relationships"
+    )
+    for item in result.relationships:
+        sources = ", ".join(
+            f"{evidence.document_title} PDF {evidence.pdf_page_start}"
+            for evidence in item.evidence
+        )
+        typer.echo(
+            f"{item.start.value} [{item.verification_level}] "
+            f"{item.organization_name} / {item.role_title or item.relation_label} | {sources}"
+        )
+    typer.echo(result.limitation)
 
 
 @eval_app.command("intersections")

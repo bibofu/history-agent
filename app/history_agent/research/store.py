@@ -168,6 +168,166 @@ class ResearchStore:
                     f"Cannot save relationship {relationship.relationship_id}: {exc}"
                 ) from exc
 
+    def sync_generated_relationships(
+        self, relationships: list[HistoricalRelationship]
+    ) -> tuple[int, int, int]:
+        """Idempotently sync rule candidates without replacing reviewed records."""
+
+        self.database.initialize()
+        if not relationships:
+            return 0, 0, 0
+        created = 0
+        updated = 0
+        skipped = 0
+        for relationship in relationships:
+            with self.database.connect() as connection:
+                existing = connection.execute(
+                    "SELECT * FROM person_relationships WHERE relationship_id = ?",
+                    (relationship.relationship_id,),
+                ).fetchone()
+                matches = (
+                    existing is not None
+                    and self._relationship_matches(connection, existing, relationship)
+                )
+            if existing is None:
+                self.save_relationship(relationship)
+                created += 1
+                continue
+            if matches:
+                skipped += 1
+                continue
+            replaceable = (
+                existing["extraction_method"] == "rule"
+                and existing["extractor_version"] == relationship.extractor_version
+                and existing["review_status"] in {"unreviewed", "needs_review"}
+            )
+            if not replaceable:
+                skipped += 1
+                continue
+            with self.database.connect() as connection:
+                person_ids = [relationship.subject_person_id]
+                if relationship.object_person_id:
+                    person_ids.append(relationship.object_person_id)
+                self._require_active_people(connection, person_ids)
+                relation_type = connection.execute(
+                    "SELECT * FROM relation_types WHERE relation_type = ?",
+                    (relationship.relation_type,),
+                ).fetchone()
+                if relation_type is None:
+                    raise ResearchDataError(
+                        f"unknown relation_type: {relationship.relation_type}"
+                    )
+                self._validate_relationship_policy(relation_type, relationship)
+                now = utc_now()
+                connection.execute(
+                    """
+                    UPDATE person_relationships SET
+                        relation_type = ?, subject_person_id = ?,
+                        subject_mention_text = ?, object_person_id = ?,
+                        object_mention_text = ?, organization_name = ?, role_title = ?,
+                        start_value = ?, start_precision = ?, start_certainty = ?,
+                        start_original_text = ?, end_value = ?, end_precision = ?,
+                        end_certainty = ?, end_original_text = ?, event_id = ?,
+                        description = ?, extraction_method = ?, extraction_confidence = ?,
+                        review_status = ?, reviewed_by = ?, extractor_version = ?, updated_at = ?
+                    WHERE relationship_id = ?
+                    """,
+                    (
+                        relationship.relation_type,
+                        relationship.subject_person_id,
+                        relationship.subject_mention_text,
+                        relationship.object_person_id,
+                        relationship.object_mention_text,
+                        relationship.organization_name,
+                        relationship.role_title,
+                        *_temporal_values(relationship.start),
+                        *_temporal_values(relationship.end),
+                        relationship.event_id,
+                        relationship.description,
+                        relationship.extraction_method,
+                        relationship.extraction_confidence,
+                        relationship.review_status,
+                        relationship.reviewed_by,
+                        relationship.extractor_version,
+                        now,
+                        relationship.relationship_id,
+                    ),
+                )
+                connection.execute(
+                    "DELETE FROM relationship_evidence WHERE relationship_id = ?",
+                    (relationship.relationship_id,),
+                )
+                for evidence in relationship.evidence:
+                    self._save_evidence(connection, evidence, now)
+                    connection.execute(
+                        """
+                        INSERT INTO relationship_evidence (relationship_id, evidence_id)
+                        VALUES (?, ?)
+                        """,
+                        (relationship.relationship_id, evidence.evidence_id),
+                    )
+            updated += 1
+        return created, updated, skipped
+
+    @staticmethod
+    def _relationship_matches(
+        connection: sqlite3.Connection,
+        existing: sqlite3.Row,
+        relationship: HistoricalRelationship,
+    ) -> bool:
+        expected = (
+            relationship.relation_type,
+            relationship.subject_person_id,
+            relationship.subject_mention_text,
+            relationship.object_person_id,
+            relationship.object_mention_text,
+            relationship.organization_name,
+            relationship.role_title,
+            *_temporal_values(relationship.start),
+            *_temporal_values(relationship.end),
+            relationship.event_id,
+            relationship.description,
+            relationship.extraction_method,
+            relationship.extraction_confidence,
+            relationship.review_status,
+            relationship.reviewed_by,
+            relationship.extractor_version,
+        )
+        columns = (
+            "relation_type",
+            "subject_person_id",
+            "subject_mention_text",
+            "object_person_id",
+            "object_mention_text",
+            "organization_name",
+            "role_title",
+            "start_value",
+            "start_precision",
+            "start_certainty",
+            "start_original_text",
+            "end_value",
+            "end_precision",
+            "end_certainty",
+            "end_original_text",
+            "event_id",
+            "description",
+            "extraction_method",
+            "extraction_confidence",
+            "review_status",
+            "reviewed_by",
+            "extractor_version",
+        )
+        if tuple(existing[column] for column in columns) != expected:
+            return False
+        actual_evidence = {
+            str(row["evidence_id"])
+            for row in connection.execute(
+                "SELECT evidence_id FROM relationship_evidence WHERE relationship_id = ?",
+                (relationship.relationship_id,),
+            ).fetchall()
+        }
+        return actual_evidence == {item.evidence_id for item in relationship.evidence}
+
     @staticmethod
     def _insert_event(
         connection: sqlite3.Connection, event: HistoricalEvent, now: str
