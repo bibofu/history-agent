@@ -2,9 +2,11 @@
 
 ## 当前状态
 
-M6.7 的规则开发集已经冻结。首批独立复核包位于 `evals/person_intersections_blind_review.json`，包含 40 条未标注案例，覆盖 10 组人物、10 份文献和 23 个年份；与开发集使用的 16 个源事件零重合。文件没有当前规则的预测结果，也没有预填正确答案。
+M6.7 的规则开发集已经冻结。首批独立复核包位于 `evals/person_intersections_blind_review.json`，包含 40 条案例，覆盖 10 组人物、10 份文献和 23 个年份；与开发集使用的 16 个源事件零重合。生成时文件没有当前规则的预测结果，也没有预填正确答案。
 
-这一步尚未产生独立评测分数。只有未参与规则开发的复核者完成标注并通过定稿校验后，才能运行独立评测。
+复核者已确认 40 条标签均为正例，并明确授权不再补充逐案例依据。定稿产物位于 `evals/person_intersections_independent.json`，元数据记录为 `reviewer_confirmed_without_case_rationales`、`reason_quality: waived`，不能描述为可审计的逐页独立金标准。
+
+v4 在该集合中命中 20 条、漏报 20 条，Recall=50%。由于没有负例，无法评估误报率；结果只说明现有保守规则仍有明显漏报，不代表全库准确率。
 
 ## 复核要求
 
@@ -31,6 +33,10 @@ M6.7 的规则开发集已经冻结。首批独立复核包位于 `evals/person_
 ```powershell
 .\.venv\Scripts\history-agent.exe eval finalize-intersection-review
 ```
+
+如果复核者明确确认全部标签、但决定不提供逐案例依据，可以在获得其明确授权后使用
+`--accept-generic-reasons`。输出会记录 `reason_quality: waived` 和不同的
+`review_method`，不得把这种结果描述为可审计的逐页独立金标准。
 
 缺少任何判断、理由、复核者或日期时，命令会失败且不会生成评测集。定稿成功后运行：
 

@@ -748,6 +748,14 @@ def finalize_intersection_review(
         typer.Option("--output", help="Final case-set path relative to project root."),
     ] = "evals/person_intersections_independent.json",
     overwrite: bool = typer.Option(False, "--overwrite"),
+    accept_generic_reasons: bool = typer.Option(
+        False,
+        "--accept-generic-reasons",
+        help=(
+            "Finalize reviewer-confirmed labels without case-specific rationales; "
+            "records the waiver in output metadata."
+        ),
+    ),
 ) -> None:
     """Validate completed independent annotations and emit an evaluation case set."""
     settings = get_settings()
@@ -755,7 +763,10 @@ def finalize_intersection_review(
     if output_path.exists() and not overwrite:
         raise typer.BadParameter("output already exists; use --overwrite to replace it")
     try:
-        result = finalize_intersection_review_packet(settings.project_root / packet)
+        result = finalize_intersection_review_packet(
+            settings.project_root / packet,
+            accept_generic_reasons=accept_generic_reasons,
+        )
     except (OSError, ValueError, ResearchDataError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     output_path.parent.mkdir(parents=True, exist_ok=True)

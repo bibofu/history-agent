@@ -322,7 +322,9 @@ def build_intersection_review_packet(
     )
 
 
-def finalize_intersection_review_packet(packet_path: Path) -> dict[str, object]:
+def finalize_intersection_review_packet(
+    packet_path: Path, *, accept_generic_reasons: bool = False
+) -> dict[str, object]:
     packet = IntersectionReviewPacket.model_validate_json(packet_path.read_text(encoding="utf-8"))
     cases: list[dict[str, object]] = []
     for item in packet.cases:
@@ -334,7 +336,7 @@ def finalize_intersection_review_packet(packet_path: Path) -> dict[str, object]:
         if not annotation.reason.strip():
             raise ResearchDataError(f"review reason missing: {item.id}")
         normalized_reason = re.sub(r"[\s\W_]+", "", annotation.reason).casefold()
-        if normalized_reason in PLACEHOLDER_REVIEW_REASONS:
+        if normalized_reason in PLACEHOLDER_REVIEW_REASONS and not accept_generic_reasons:
             raise ResearchDataError(
                 f"review reason must describe page-specific evidence: {item.id}"
             )
@@ -365,13 +367,21 @@ def finalize_intersection_review_packet(packet_path: Path) -> dict[str, object]:
             }
         )
     reviewers = sorted({item.annotation.reviewed_by.strip() for item in packet.cases})
+    reason_quality = "waived" if accept_generic_reasons else "page_specific"
     return {
         "version": "pdf-independent-review-v1",
-        "review_method": "independent_pdf_review",
+        "review_method": (
+            "reviewer_confirmed_without_case_rationales"
+            if accept_generic_reasons
+            else "independent_pdf_review"
+        ),
+        "reason_quality": reason_quality,
         "reviewers": reviewers,
         "source_packet_version": packet.version,
         "scope": (
-            "独立分层定向样本；标签表示指定来源条目能否证明共同动作，"
+            "独立分层定向样本；复核者确认标签但豁免逐案依据，不能据此审计判断过程。"
+            if accept_generic_reasons
+            else "独立分层定向样本；标签表示指定来源条目能否证明共同动作，"
             "negative 不表示历史上没有交集。"
         ),
         "cases": cases,

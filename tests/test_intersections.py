@@ -323,6 +323,11 @@ def test_blind_review_packet_excludes_predictions_and_finalizes(work_path: Path)
     packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
     with pytest.raises(ResearchDataError, match="page-specific evidence"):
         finalize_intersection_review_packet(packet_path)
+    waived = finalize_intersection_review_packet(
+        packet_path, accept_generic_reasons=True
+    )
+    assert waived["review_method"] == "reviewer_confirmed_without_case_rationales"
+    assert waived["reason_quality"] == "waived"
     packet.cases[0].annotation.reason = "完整查看来源页后作出的独立判断。"
     packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
     finalized = finalize_intersection_review_packet(packet_path)

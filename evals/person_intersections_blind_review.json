@@ -42,10 +42,10 @@
       ],
       "case_checksum": "e40e102710a1769a0e0e8e4740bf12c8a2426a1dd57ffef12da0716d81bc8af0",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "毛泽东邓小平一起开听取国民经济计划的会议",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -80,10 +80,10 @@
       ],
       "case_checksum": "46c6e181b25cb8dd0587d4ce01ffe5b9259986318d52298e7aa8b1a6afcdf6c1",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "毛泽东周恩来一起开政治局常委扩大会议",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -126,10 +126,10 @@
       ],
       "case_checksum": "0867dd6d2b5a5e66a24f4c44b07be28a4eb2657df41b966caac0cec5ab70e9d9",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "毛泽东朱德",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -156,10 +156,10 @@
       ],
       "case_checksum": "5f63d9a6fbbcaaffbd2c9dcf69df3f2d3b0592ad34917b8017d663aaf70f46d0",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connectred",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -194,10 +194,10 @@
       ],
       "case_checksum": "d26ae0da69017e647be7c1b0a56f3af70ea18dd07c173e0be15aa36f4320efdf",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connectred",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -232,10 +232,10 @@
       ],
       "case_checksum": "d98218d8a7c3aa2c0e7b748310dcf9447afc2685b78cc8883ef05ba76285be85",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connectred",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -262,10 +262,10 @@
       ],
       "case_checksum": "4ec9a350a9480341429aa7499281a6a57db14292dfc86f4281a04f32b42317fb",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -292,10 +292,10 @@
       ],
       "case_checksum": "92b021e21ecd520d4de369ec5473afdebf796be0fc334b52f7d2f664c694a4a8",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -322,10 +322,10 @@
       ],
       "case_checksum": "7d0884b2821773ebf1ab4335e5fc5ae8c825fcadc41a06403c1f4f7dd2dbb8b4",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -352,10 +352,10 @@
       ],
       "case_checksum": "d4a7ea3e7933c62be4094b74c7a0a4d7ff7f75b9c5bb01030e5b25ca79598b53",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -382,10 +382,10 @@
       ],
       "case_checksum": "1a8f8ca565e4ab244c02da1d4c6e3afa8df99f7c2dc3a39427c183cc978148ed",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -412,10 +412,10 @@
       ],
       "case_checksum": "c5e1d256b17ef1048e5255eac1a732c4dc61045042f623d2350ff74686d3b664",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -458,10 +458,10 @@
       ],
       "case_checksum": "6cd79ec29fe706125ee9e5966c7b97d2e5a1a5954d3bdb443eb5a805655605fc",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -488,10 +488,10 @@
       ],
       "case_checksum": "0614633a0136941e0ab55b1f234eaf5d8dd21069490e4e290561ab2aee4fa059",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -518,10 +518,10 @@
       ],
       "case_checksum": "5e73596d8d67995943e3c105ad9602f83e1c0914a784ba955dea4385505d98c4",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -548,10 +548,10 @@
       ],
       "case_checksum": "1f25dd2ca4d091d9a3eea0c28802faa03b11e6398162095ccb702c0c798a2f49",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -578,10 +578,10 @@
       ],
       "case_checksum": "5d3b5f689f9ceb2688a03dcba474be42a27b0e2424bda0f74bfc57f22b4edd86",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -608,10 +608,10 @@
       ],
       "case_checksum": "399c40cfd94dd4500a566c80183e7bb250568c2b83c58429ba1dba9209fa114d",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -638,10 +638,10 @@
       ],
       "case_checksum": "a3a38e1684bcd7335a44351eaae870409f29ffcc84d64ddc4fb55d8b5c082bf0",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -668,10 +668,10 @@
       ],
       "case_checksum": "aeb1443f566ad46cc683ca9d208bc9e1c577447a8c80916233eb51f0ca671898",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -698,10 +698,10 @@
       ],
       "case_checksum": "bfad5f8b47c36827179a45dfdb627a59bfe7ad9fe8bd4a68f9d7dbb407d7cf41",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -728,10 +728,10 @@
       ],
       "case_checksum": "a54746b7824c4fee582dd1db527c837d88a871789b5703505a33bb55e95aaa81",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -758,10 +758,10 @@
       ],
       "case_checksum": "9ebfb88e97332114a987e50a0bcc8d9ab89e2c7b9a352f39e321a5ac99bd757d",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -796,10 +796,10 @@
       ],
       "case_checksum": "a61ce8ea5fd3a440a79155044d07e106c7b0fd397a1f579e4cbc84d05d5a8441",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -834,10 +834,10 @@
       ],
       "case_checksum": "3dea8809e791b40b37c217882a3ab45cbaf91c95aa0c133d59eac1a29feb5d3a",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -880,10 +880,10 @@
       ],
       "case_checksum": "de3524e87d0ceaef411228ebf57245f2fa8a2a77bb909bc87ad7fddae65d39a9",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -910,10 +910,10 @@
       ],
       "case_checksum": "751ccde01f9d57929d31b3bbbcc30cd83a16bf87abc29ce4b7092ed9d0073ccb",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -940,10 +940,10 @@
       ],
       "case_checksum": "0ebe00d03710f8bad7f1eada79359d28c9d0bc4fb4a90c7708c28e7a5840a420",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -970,10 +970,10 @@
       ],
       "case_checksum": "6548533490a0b8239b4230e5d632bcb65b67893aef313b01d0a49a054f2a1eef",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1000,10 +1000,10 @@
       ],
       "case_checksum": "afafa3b5d34e038d0349b5d9a17a1ba544b9d2824de7aca25f679a638b9b05bb",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1030,10 +1030,10 @@
       ],
       "case_checksum": "8c595a9b111e9a7d99b47adeffc3bccab84060fa3182f64f9c498efe7d798009",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1060,10 +1060,10 @@
       ],
       "case_checksum": "796cc0f2706a07c8c0a0b75b0c0d12daa4b5dc5cbf4db7bcba30cf190dc957a5",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1090,10 +1090,10 @@
       ],
       "case_checksum": "88a7ade18a12c7dc551e937dc60767667694a3cdcec5fe705684a899997a042b",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1128,10 +1128,10 @@
       ],
       "case_checksum": "8f408956df1a9d7e1a1a40a712839fcc06263172ca69de25649864cfed9f0a61",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1158,10 +1158,10 @@
       ],
       "case_checksum": "89c0a8fb383b3f4355f3e5a6e04494cf6a871a6a6b652bdd071eae6382d78625",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1188,10 +1188,10 @@
       ],
       "case_checksum": "8dced2e1d0d4700c22858367a9b8a647ab8e74431e728377f2cac22acdc4fff6",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1218,10 +1218,10 @@
       ],
       "case_checksum": "a3b5d1ff1e2f9cfaca00bed675d38fe225119304f395a1bc4d29bd1d94a5c151",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1248,10 +1248,10 @@
       ],
       "case_checksum": "639344c273e1d92826cf2ebd611d5f84ff9bfe4db9470f1f3a537da4f1f4abf3",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1278,10 +1278,10 @@
       ],
       "case_checksum": "615cd11b4800abbd18e9234bc1911b218baee5c6e4ca762c29802baacc860cbc",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     },
     {
@@ -1316,10 +1316,10 @@
       ],
       "case_checksum": "8b9af4440a5308cfe76da90869a38d481a63661504588fd5c6021f2501623d79",
       "annotation": {
-        "expected": null,
-        "reason": "",
-        "reviewed_by": "",
-        "reviewed_at": ""
+        "expected": true,
+        "reason": "connected",
+        "reviewed_by": "bibo",
+        "reviewed_at": "2026-09-06"
       }
     }
   ]
