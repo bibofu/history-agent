@@ -216,6 +216,8 @@ HTTP 接口为 `GET /api/people/{person_id}/timeline`，查询参数为 `start_y
 
 后续更新（规则 v2）：对于已识别的年谱抽取器且文献主体唯一的源记录，也可从文献配置恢复主体，避免其在后文显名时丢失开头省略主语；仍只用于来源首证据页开头。样本清单与复算入口见 `evals/person_intersections.json` 和 `eval intersections`。
 
+规则 v3 新增 `match_method=adjacent_attendance`：仅将同一来源首证据页开头、紧邻的活动叙述与明确参与名单相连，活动类型必须对应；证据不得跨页，也不越过插入句、引文或脚注。活动主语来自显式姓名或受约束的年谱主体，名单成员必须是完整姓名项；“主持会议”区分主持者与参会者，“会见”不自动升格为主持。`supporting_text` 原样保留两句，最多 420 字符，保证聊天引用同时包含活动和名单；超过上限放弃命中，不截掉关键名单。旧单句结果的 `match_method` 为 `single_clause`。所有结果仍待复核。分组名单、带职衔的复杂名单及跨页活动仍可能漏检。
+
 ## 12. 结构化聊天路由
 
 `POST /api/questions` 在混合检索之前识别明确的年度人物时间线与双人交集问题。返回沿用 `AnswerResponse`，`retrieval_mode` 分别为 `structured_timeline` / `structured_intersection`。这两条路由固定为证据摘录模式，`llm_status=not_applicable`，无模型调用；有候选时 `evidence_status=partial`，不把规则候选提升为 supported。

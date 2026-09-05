@@ -16,7 +16,7 @@ from history_agent.research.timeline import (
     get_person_timeline,
 )
 
-RULE_VERSION = "joint-action-rules-v2"
+RULE_VERSION = "joint-action-rules-v3"
 _ACTION_ROLES = {
     "出席": "共同出席者",
     "参加": "共同参加者",
@@ -47,6 +47,7 @@ class JointActionEvidence(BaseModel):
     supporting_text: str
     roles: dict[str, str]
     subject_basis: Literal["explicit", "chronology_subject"]
+    match_method: Literal["single_clause", "adjacent_attendance"] = "single_clause"
 
 
 class IntersectionEvent(BaseModel):
@@ -162,6 +163,86 @@ def _match_action(
     return None
 
 
+def _match_adjacent_attendance(
+    text: str,
+    first: str,
+    second: str,
+    subject_name: str | None,
+) -> tuple[str, str, dict[str, str], Literal["explicit", "chronology_subject"]] | None:
+    """Bind only the opening activity to its immediately following explicit roster.
+
+    The returned span contains BOTH sentences verbatim and fits the chat quote budget.
+    No look-back over quotations, footnotes, intervening events, or pages is allowed.
+    """
+    sentences = re.match(r"\A\s*(?P<lead>[^。！？!?；;]+)。\s*(?P<roster>[^。！？!?；;]+)。", text)
+    if sentences is None:
+        return None
+    supporting_text = sentences.group().strip()
+    if len(supporting_text) > 420:
+        return None
+    compact = re.sub(r"\s+", "", supporting_text)
+    if (
+        _NON_ASSERTION.search(compact)
+        or re.search(r'[“”‘’「」『』"\[\]〔〕（）()《》]', compact)
+        or re.search(r"次日|翌日|后来|另[一场次]|随后|此前|之后|改由|委托|代为", compact)
+    ):
+        return None
+    lead = re.sub(r"\s+", "", sentences["lead"])
+    lead = re.sub(r"^(?:(?:\d{4}年)?(?:\d{1,2}月)?\d{1,2}日|同日|当日)?", "", lead)
+    lead = re.sub(
+        r"^(?:上午|下午|晚上|晚间|晚|晨|中午)?"
+        r"(?:[一二三四五六七八九十两\d]{1,3}时(?:[一二三四五六七八九十\d]{1,3}分)?)?[，,]?",
+        "",
+        lead,
+    )
+    basis: Literal["explicit", "chronology_subject"] = "chronology_subject"
+    actor = subject_name
+    for name in (first, second):
+        if lead.startswith(name):
+            actor, lead, basis = name, lead[len(name) :], "explicit"
+            break
+    if actor not in {first, second}:
+        return None
+    activity = re.fullmatch(
+        r"(?:(?:在|于)[\u4e00-\u9fff]{2,16}?)?"
+        r"(?P<action>会见|接见|主持(?:召开)?)(?P<body>[^：:]+)",
+        lead,
+    )
+    if activity is None:
+        return None
+    action = activity["action"]
+    noun = "会议" if action.startswith("主持") else action
+    if noun == "会议" and activity["body"].count("会议") != 1:
+        return None
+    # A second activity in the lead would make the following roster ambiguous.
+    if re.search(r"会见|接见|主持|另行|转赴", activity["body"]):
+        return None
+    roster = re.sub(r"\s+", "", sentences["roster"])
+    roster_match = re.fullmatch(
+        rf"(?:参加|出席){noun}(?:和宴请)?的(?:还)?有[：:]?(?P<names>.+)",
+        roster,
+    )
+    if roster_match is None:
+        return None
+    if "和宴请" in roster and "宴请" not in activity["body"]:
+        return None
+    names = roster_match["names"].removesuffix("等")
+    # Other unregistered names are allowed only as clean 2-4 character list items.
+    if re.fullmatch(r"[\u4e00-\u9fff]{2,4}(?:[、和与][\u4e00-\u9fff]{2,4})*", names) is None:
+        return None
+    participants = set(re.split(r"[、和与]", names))
+    other = second if actor == first else first
+    if other not in participants:
+        return None
+    assert actor is not None
+    roles = (
+        {actor: "主持者", other: "参会者"}
+        if noun == "会议"
+        else {actor: _ACTION_ROLES[action], other: _ACTION_ROLES[action]}
+    )
+    return supporting_text, "主持" if noun == "会议" else action, roles, basis
+
+
 def get_person_intersections(
     database: Database,
     *,
@@ -263,6 +344,29 @@ def get_person_intersections(
                     for e in event.evidence
                     if e.source_event_id == evidence.source_event_id
                 )
+                if evidence.pdf_page_start == first_page == evidence.pdf_page_end:
+                    adjacent = _match_adjacent_attendance(
+                        evidence.quote,
+                        first_name,
+                        second_name,
+                        subjects.get(evidence.source_event_id),
+                    )
+                    if adjacent is not None:
+                        span, action, named_roles, basis = adjacent
+                        proofs.append(
+                            JointActionEvidence(
+                                evidence_id=evidence.evidence_id,
+                                source_event_id=evidence.source_event_id,
+                                action=action,
+                                supporting_text=span,
+                                roles={
+                                    person_id: named_roles[first_name],
+                                    other_person_id: named_roles[second_name],
+                                },
+                                subject_basis=basis,
+                                match_method="adjacent_attendance",
+                            )
+                        )
                 for clause in _unquoted_clauses(evidence.quote):
                     matched = _match_action(
                         clause,

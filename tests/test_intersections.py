@@ -9,7 +9,10 @@ from history_agent.cli import app
 from history_agent.config import Settings
 from history_agent.errors import ResearchDataError
 from history_agent.evaluation.intersections import evaluate_intersections
-from history_agent.research.intersections import get_person_intersections
+from history_agent.research.intersections import (
+    _match_adjacent_attendance,
+    get_person_intersections,
+)
 from history_agent.web.app import create_app
 from test_timeline import _prepare_database, _prepare_timeline, _save_event
 from typer.testing import CliRunner
@@ -237,3 +240,110 @@ def test_intersection_evaluation_checks_sources_and_metrics(work_path: Path) -> 
     cases_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ResearchDataError, match="gold source/page missing"):
         evaluate_intersections(database, cases_path)
+
+
+@pytest.mark.parametrize(
+    "text,subject,expected",
+    [
+        ("毛泽东在北京会见外国代表。参加会见的有周恩来、彭真等。", None, True),
+        (
+            "3月14日下午六时，在北京会见并宴请外国代表，同他们交谈。参加会见和宴请的有周恩来、彭真。",
+            "毛泽东",
+            True,
+        ),
+        (
+            "2月14日下午，主持召开中央政治局扩大会议，讨论重要问题。出席会议的有：刘少奇、周恩来、彭真。",
+            "毛泽东",
+            True,
+        ),
+        ("周恩来主持会议，讨论工作。出席会议的有毛泽东、陈云。", None, True),
+        ("毛泽东接见代表团成员。参加接见的还有周恩来、彭真等。", None, True),
+        ("毛泽东准备会见外国代表。参加会见的有周恩来。", None, False),
+        ("毛泽东没有会见外国代表。参加会见的有周恩来。", None, False),
+        ("毛泽东委托林彪会见外国代表。参加会见的有周恩来。", None, False),
+        ("林彪会见外国代表。参加会见的有周恩来。", "毛泽东", False),
+        ("毛泽东会见外国代表。次日参加会见的有周恩来。", None, False),
+        ("毛泽东会见外国代表。参加另一场会见的有周恩来。", None, False),
+        ("毛泽东会见外国代表。参加会议的有周恩来。", None, False),
+        ("毛泽东会见外国代表。参加会见的有周恩来的秘书。", None, False),
+        ("毛泽东会见外国代表。参加会见的有林彪。", None, False),
+        ("毛泽东会见外国代表。名单包括周恩来。", None, False),
+        ("毛泽东会见外国代表。另召开会议。参加会见的有周恩来。", None, False),
+        ("毛泽东说：会见外国代表。参加会见的有周恩来。", None, False),
+        ("“毛泽东会见外国代表。参加会见的有周恩来。”", None, False),
+        ("毛泽东会见外国代表。[注]参加会见的有周恩来。", None, False),
+        ("毛泽东会见外国代表。参加会见的有周恩来，但未到场。", None, False),
+        ("毛泽东会见外国代表。参加会见的有周恩来", None, False),
+        ("会见外国代表。参加会见的有周恩来。", None, False),
+    ],
+    ids=[f"adjacent-{i}" for i in range(22)],
+)
+def test_adjacent_attendance_guards(text: str, subject: str | None, expected: bool) -> None:
+    result = _match_adjacent_attendance(text, "毛泽东", "周恩来", subject)
+    assert (result is not None) is expected
+    if result:
+        span, action, roles, basis = result
+        assert span in text
+        assert "。" in span[:-1]
+        assert len(span) <= 420
+        assert set(roles) == {"毛泽东", "周恩来"}
+        assert _match_adjacent_attendance(text, "周恩来", "毛泽东", subject) == result
+        if action == "主持":
+            assert set(roles.values()) == {"主持者", "参会者"}
+        else:
+            assert "主持者" not in roles.values()
+
+
+def test_adjacent_evidence_is_source_local_single_page_and_chat_complete(work_path: Path) -> None:
+    database = _prepare_database(work_path)
+    text = "在北京会见外国代表。参加会见的有毛泽东、彭真等。"
+    _save_event(
+        database,
+        event_id="adjacent",
+        document_id="zhou_enlai_chronology_1949_1976",
+        date_value="1956-01-01",
+        description=text,
+        event_type="meeting",
+        review_status="needs_review",
+        page=20,
+        include_lin=False,
+    )
+    result = get_person_intersections(
+        database, person_id="mao_zedong", other_person_id="zhou_enlai"
+    )
+    proof = result.events[0].joint_evidence[0]
+    assert proof.match_method == "adjacent_attendance"
+    assert proof.supporting_text == text
+    settings = Settings(
+        _env_file=None,
+        project_root=work_path,
+        data_dir=work_path / "data",
+        database_path=database.path,
+    )
+    response = TestClient(create_app(settings)).post(
+        "/api/questions", json={"question": "毛泽东和周恩来在1956年有哪些交集"}
+    )
+    assert response.status_code == 200
+    assert response.json()["citations"][0]["quote"] == text
+    assert response.json()["citations"][0]["pdf_page"] == 20
+    assert response.json()["evidence_status"] == "partial"
+    with database.connect() as connection:
+        connection.execute("UPDATE evidence_records SET pdf_page_end=21")
+    assert (
+        get_person_intersections(
+            database, person_id="mao_zedong", other_person_id="zhou_enlai"
+        ).total
+        == 0
+    )
+
+
+def test_adjacent_does_not_build_oversized_proof() -> None:
+    assert (
+        _match_adjacent_attendance(
+            "毛泽东会见外国代表，" + "进行工作交谈，" * 60 + "讨论事宜。参加会见的有周恩来。",
+            "毛泽东",
+            "周恩来",
+            None,
+        )
+        is None
+    )

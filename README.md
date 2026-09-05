@@ -164,7 +164,7 @@ uv sync --extra ocr --extra vector --extra app --group dev
 # 查询两个人的共同动作候选；不是人名共现统计，全部仍需复核
 .\.venv\Scripts\history-agent.exe research intersections 毛泽东 周恩来 --year 1949 --json
 
-# 复算经原页视觉核对的 10 条定向交集样本（JSON，不调用模型）
+# 复算经原页视觉核对的 14 条定向交集样本（JSON，不调用模型）
 .\.venv\Scripts\history-agent.exe eval intersections
 
 # 查看最近一次扫描结果
@@ -588,6 +588,6 @@ GET  /api/people/{person_id}/timeline
 - [x] 完成跨来源事件去重：从 15,393 条源事件生成 69 个可逆规范事件组（18 个高置信、51 个待审），保留 139 条来源成员快照和证据链接；幂等复跑零改动
 - [x] 实现人物时间线 CLI 与 API：联合规范事件和独立源事件，支持年份、类型、复核状态及分页过滤，并返回参与者、来源差异和 PDF 页码证据
 - [x] 扩充毛泽东年谱九卷：新增 13,729 条待复核事件；现有源事件 29,122 条、活跃规范组 278 个（前述 69 组为首批基线）
-- [x] 实现人物交集候选 CLI/API：逐来源检查共同动作、保留双方角色和证据；建立 10 条 PDF 视觉核对样本，规则 v2 命中 5 条正例、漏报 1 条、4 条负例零误报（非全库准确率），详见 [交集验收](evals/INTERSECTION_BASELINE.md)
+- [x] 实现人物交集候选 CLI/API：逐来源检查共同动作、保留双方角色和证据；v3 支持紧邻的活动叙述与参与名单，14 条 PDF 视觉核对样本中命中 7 条正例、漏报 1 条、6 条负例零误报（非全库准确率），详见 [交集验收](evals/INTERSECTION_BASELINE.md)
 - [x] 接入保守的时间线/交集聊天路由：保留候选状态、显示总数与截断、按实际共同动作证据引用；不支持的条件要求澄清，详见 [聊天路由验收](evals/STRUCTURED_CHAT_BASELINE.md)
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比

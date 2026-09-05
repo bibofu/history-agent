@@ -1,5 +1,5 @@
 {
-  "version": "pdf-spot-check-v1",
+  "version": "pdf-spot-check-v2",
   "review_method": "agent_visual_pdf_review_2026-09-05",
   "scope": "定向小样本；非独立专家金标准；negative 表示指定条目不足以证明共同参与，不表示历史上没有交集。",
   "cases": [
@@ -8,10 +8,14 @@
     {"id":"subject-named-later", "source_event_id":"evt_0a9401a685d1be9d745062cadb9d", "document_id":"mao_zedong_chronology_volume_3", "pdf_page":467, "year":1949, "expected":true, "reason":"同日另条会见傅作义、邓宝珊，后文明确毛泽东；主体不因后文显名而丢失。"},
     {"id":"joint-telegram-mao", "source_event_id":"evt_744c05dda4b3dff6f435de963dfd", "document_id":"mao_zedong_chronology_volume_5", "pdf_page":551, "year":1956, "expected":true, "reason":"同日和刘少奇、周恩来联名致电波兰领导人。"},
     {"id":"joint-telegram-zhou", "source_event_id":"evt_4bc00dd50010fda3b611fb8dcd73", "document_id":"zhou_enlai_chronology_1949_1976", "pdf_page":695, "year":1956, "expected":true, "reason":"3月13日毛泽东、刘少奇、周恩来联名致电。"},
-    {"id":"split-attendance", "source_event_id":"evt_77940c95fde335455365cfaa1f6d", "document_id":"mao_zedong_chronology_volume_5", "pdf_page":551, "year":1956, "expected":true, "reason":"3月14日年谱主体主持会见，后句参加会见和宴请名单包括周恩来；保留为复杂句式漏报。"},
+    {"id":"split-attendance", "source_event_id":"evt_77940c95fde335455365cfaa1f6d", "document_id":"mao_zedong_chronology_volume_5", "pdf_page":551, "year":1956, "expected":true, "reason":"3月14日年谱主体会见并宴请外宾，紧邻后句参加会见和宴请名单包括周恩来；v2 的已知漏报回归样本。"},
     {"id":"same-page-letter", "source_event_id":"evt_770007d233a48bdcf04060f9e895", "document_id":"mao_zedong_chronology_volume_3", "pdf_page":455, "year":1949, "expected":false, "reason":"页上前条新闻稿、公函不能因后条出现周恩来便视为毛周共同活动。"},
     {"id":"separate-office-report", "source_event_id":"evt_011d465226a4c538e3a4b67d2e50", "document_id":"mao_zedong_chronology_volume_5", "pdf_page":551, "year":1956, "expected":false, "reason":"3月13日晚八时听取第七办公室汇报，不能因同页另条共同致电便推定周恩来在场。"},
     {"id":"separate-science-report", "source_event_id":"evt_d504b4254b0b0f14d7d1997a85d1", "document_id":"zhou_enlai_chronology_1949_1976", "pdf_page":695, "year":1956, "expected":false, "reason":"3月12日周恩来听取科学规划汇报，不与次日联名致电混为共同事件。"},
-    {"id":"separate-military-meeting", "source_event_id":"evt_9802a3cf67f6eae00f917f14e8f1", "document_id":"zhou_enlai_chronology_1949_1976", "pdf_page":695, "year":1956, "expected":false, "reason":"3月14日周恩来主持军委会议，条目并未证明毛泽东出席。"}
+    {"id":"separate-military-meeting", "source_event_id":"evt_9802a3cf67f6eae00f917f14e8f1", "document_id":"zhou_enlai_chronology_1949_1976", "pdf_page":695, "year":1956, "expected":false, "reason":"3月14日周恩来主持军委会议，条目并未证明毛泽东出席。"},
+    {"id":"additional-host-roster", "source_event_id":"evt_392c601b6bac55bdc8945fa8a350", "document_id":"mao_zedong_chronology_volume_4", "pdf_page":307, "year":1951, "expected":true, "reason":"原页印刷302：2月14日主持中央政治局扩大会议，紧邻出席名单有周恩来；主持者和参会者角色不同。"},
+    {"id":"additional-grouped-roster", "source_event_id":"evt_ab066cc5ee12d250c59a25aa331b", "document_id":"mao_zedong_chronology_volume_7", "pdf_page":193, "year":1959, "expected":true, "reason":"原页印刷188：10月1日会见赫鲁晓夫，中方名单有周恩来；分组名单与活动前的叙述暂不纳入保守规则，保留漏报。"},
+    {"id":"additional-other-host-roster", "source_event_id":"evt_5189072eb697bc60d0f7ba2d1e6c", "document_id":"zhou_enlai_chronology_1949_1976", "pdf_page":820, "year":1958, "expected":false, "reason":"原页印刷812：9月14日周恩来召开钢铁生产汇报会，名单并无毛泽东；不能从同页其他条目借用毛泽东。"},
+    {"id":"additional-circulation-not-attendance", "source_event_id":"evt_c492992c1eed27986db05895c893", "document_id":"mao_zedong_chronology_volume_7", "pdf_page":193, "year":1959, "expected":false, "reason":"原页印刷188：9月批示中的刘、周等是传阅名单，不是同页10月1日会见的参与证据。"}
   ]
 }
