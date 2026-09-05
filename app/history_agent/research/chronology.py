@@ -35,6 +35,7 @@ CHRONOLOGY_EXTRACTOR_VERSION = "chronology-rules-v1"
 DEFAULT_CHRONOLOGIES = (
     "zhou_enlai_chronology_1949_1976",
     "lin_biao_chronology",
+    *(f"mao_zedong_chronology_volume_{volume}" for volume in range(1, 10)),
 )
 
 ZHOU_DATE_MARKER = re.compile(r"【(?P<label>[^】]{2,48})】")
@@ -173,6 +174,7 @@ class ChronologyDocumentResult(BaseModel):
     database_skipped: int
     skipped_short: int
     skipped_out_of_scope: int
+    skipped_context: int = 0
     date_precision_counts: dict[str, int]
     rule_flag_counts: dict[str, int]
     event_type_counts: dict[str, int]
@@ -182,6 +184,7 @@ class ChronologyDocumentResult(BaseModel):
 
 class ChronologyExtractionSummary(BaseModel):
     run_id: str
+    dry_run: bool = False
     extractor_version: str = CHRONOLOGY_EXTRACTOR_VERSION
     documents: list[ChronologyDocumentResult]
     samples: list[dict[str, object]] = Field(default_factory=list)
@@ -197,6 +200,7 @@ class ChronologyExtractionSummary(BaseModel):
             "database_updated": sum(item.database_updated for item in self.documents),
             "database_skipped": sum(item.database_skipped for item in self.documents),
             "skipped_short": sum(item.skipped_short for item in self.documents),
+            "skipped_context": sum(item.skipped_context for item in self.documents),
             "skipped_out_of_scope": sum(
                 item.skipped_out_of_scope for item in self.documents
             ),
@@ -211,7 +215,7 @@ class ChronologyProfile:
     document_id: str
     subject_person_id: str
     subject_name: str
-    layout: Literal["zhou", "lin"]
+    layout: Literal["zhou", "lin", "mao"]
 
 
 @dataclass
@@ -223,6 +227,9 @@ class RawChronologyEntry:
     file_sha256: str
     text_parts: list[str] = field(default_factory=list)
     page_methods: dict[int, str] = field(default_factory=dict)
+    page_text_parts: dict[int, list[str]] = field(default_factory=dict)
+    extractor_version: str = CHRONOLOGY_EXTRACTOR_VERSION
+    rule_flags: list[str] = field(default_factory=list)
 
     def append(self, text: str, page: PageRecord) -> None:
         value = text.strip()
@@ -230,6 +237,7 @@ class RawChronologyEntry:
             return
         self.text_parts.append(value)
         self.page_methods[page.pdf_page] = page.extraction_method
+        self.page_text_parts.setdefault(page.pdf_page, []).append(value)
 
     @property
     def text(self) -> str:
@@ -254,6 +262,14 @@ PROFILES = {
         layout="lin",
     ),
 }
+
+PROFILES.update({
+    document_id: ChronologyProfile(
+        document_id=document_id, subject_person_id="mao_zedong",
+        subject_name="毛泽东", layout="mao",
+    )
+    for document_id in DEFAULT_CHRONOLOGIES if document_id.startswith("mao_zedong_")
+})
 
 
 def _compact_date_text(value: str) -> str:
@@ -867,9 +883,12 @@ def _stable_ids(entry: RawChronologyEntry) -> tuple[str, str]:
             str(entry.pages[0]),
             str(entry.pages[-1]),
             body_hash,
-            CHRONOLOGY_EXTRACTOR_VERSION,
+            entry.extractor_version,
         )
     )
+    if entry.document_id.startswith("mao_zedong_chronology_"):
+        identity += "|" + entry.temporal.start.model_dump_json()
+        identity += "|" + (entry.temporal.end.model_dump_json() if entry.temporal.end else "")
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:28]
     return f"evt_{digest}", f"evd_{digest}"
 
@@ -887,7 +906,7 @@ def _build_candidate(
     text = entry.text
     if len(re.sub(r"\s+", "", text)) < 12 or not entry.pages:
         return None
-    flags = list(entry.temporal.rule_flags)
+    flags = [*entry.temporal.rule_flags, *entry.rule_flags]
     if len(entry.pages) > 1:
         flags.append("cross_page")
     participants = resolver.participants(
@@ -910,6 +929,36 @@ def _build_candidate(
         }.intersection(flags)
         else "unreviewed"
     )
+    evidence = [
+        EvidenceReference(
+            evidence_id=evidence_id,
+            document_id=entry.document_id,
+            pdf_page_start=entry.pages[0], pdf_page_end=entry.pages[-1],
+            quote=quote, extraction_methods=sorted(set(entry.page_methods.values())),
+        )
+    ]
+    if entry.document_id.startswith("mao_zedong_chronology_"):
+        review_status = "needs_review"
+        evidence = [
+            EvidenceReference(
+                evidence_id=f"{evidence_id}_p{page}", document_id=entry.document_id,
+                pdf_page_start=(
+                    page if len("\n".join(entry.page_text_parts[page])) >= 12 else entry.pages[0]
+                ),
+                pdf_page_end=(
+                    page if len("\n".join(entry.page_text_parts[page])) >= 12 else entry.pages[-1]
+                ),
+                quote=(
+                    "\n".join(entry.page_text_parts[page])[:1200]
+                    if len("\n".join(entry.page_text_parts[page])) >= 12 else quote
+                ),
+                extraction_methods=(
+                    [entry.page_methods[page]]
+                    if len("\n".join(entry.page_text_parts[page])) >= 12
+                    else sorted(set(entry.page_methods.values()))
+                ),
+            ) for page in entry.pages
+        ]
     event = HistoricalEvent(
         event_id=event_id,
         name=_event_name(entry.subject_name, text),
@@ -919,20 +968,11 @@ def _build_candidate(
         location_text=_location_text(text),
         description=text,
         participants=participants,
-        evidence=[
-            EvidenceReference(
-                evidence_id=evidence_id,
-                document_id=entry.document_id,
-                pdf_page_start=entry.pages[0],
-                pdf_page_end=entry.pages[-1],
-                quote=quote,
-                extraction_methods=sorted(set(entry.page_methods.values())),
-            )
-        ],
+        evidence=evidence,
         extraction_method="rule",
         extraction_confidence=_confidence(entry, flags),
         review_status=review_status,
-        extractor_version=CHRONOLOGY_EXTRACTOR_VERSION,
+        extractor_version=entry.extractor_version,
     )
     return ChronologyEventCandidate(
         event=event,
@@ -972,7 +1012,7 @@ def _document_samples(
             "end": item.event.end.model_dump() if item.event.end else None,
             "pdf_pages": [
                 item.event.evidence[0].pdf_page_start,
-                item.event.evidence[0].pdf_page_end,
+                item.event.evidence[-1].pdf_page_end,
             ],
             "subject": item.event.participants[0].model_dump(),
             "event_type": item.event.event_type,
@@ -995,6 +1035,7 @@ def _extract_document(
     resolver: PersonMentionResolver,
     research_start: int,
     research_end: int,
+    dry_run: bool = False,
 ) -> tuple[ChronologyDocumentResult, list[ChronologyEventCandidate]]:
     base_path = pages_dir / f"{profile.document_id}.jsonl"
     if not base_path.is_file():
@@ -1013,18 +1054,30 @@ def _extract_document(
             research_start=research_start,
             research_end=research_end,
         )
-        raw_entries = _extract_lin_entries(
-            pages, repeated_lines, profile, year_pages
-        )
+        if profile.layout == "mao":
+            from history_agent.research.mao_chronology import extract_mao_entries
+
+            raw_entries = extract_mao_entries(pages, profile, year_pages)
+        else:
+            raw_entries = _extract_lin_entries(
+                pages, repeated_lines, profile, year_pages
+            )
 
     candidates: list[ChronologyEventCandidate] = []
     skipped_short = 0
     skipped_out_of_scope = 0
+    skipped_context = 0
     for entry in raw_entries:
         year = _entry_year(entry)
         if year is None or not research_start <= year <= research_end:
             skipped_out_of_scope += 1
             continue
+        if profile.layout == "mao":
+            from history_agent.research.mao_chronology import is_subject_entry
+
+            if not is_subject_entry(entry):
+                skipped_context += 1
+                continue
         candidate = _build_candidate(entry, resolver)
         if candidate is None:
             skipped_short += 1
@@ -1032,10 +1085,12 @@ def _extract_document(
         candidates.append(candidate)
 
     output_path = events_dir / f"{profile.document_id}.jsonl"
-    _write_jsonl(output_path, candidates)
-    created, updated, skipped = ResearchStore(database).sync_generated_events(
-        [candidate.event for candidate in candidates]
-    )
+    created = updated = skipped = 0
+    if not dry_run:
+        _write_jsonl(output_path, candidates)
+        created, updated, skipped = ResearchStore(database).sync_generated_events(
+            [candidate.event for candidate in candidates]
+        )
     precision_counts = Counter(
         candidate.event.start.precision for candidate in candidates
     )
@@ -1054,6 +1109,7 @@ def _extract_document(
         database_skipped=skipped,
         skipped_short=skipped_short,
         skipped_out_of_scope=skipped_out_of_scope,
+        skipped_context=skipped_context,
         date_precision_counts=dict(sorted(precision_counts.items())),
         rule_flag_counts=dict(sorted(flag_counts.items())),
         event_type_counts=dict(sorted(event_type_counts.items())),
@@ -1078,6 +1134,7 @@ def extract_chronology_events(
     research_start: int,
     research_end: int,
     document_ids: list[str] | None = None,
+    dry_run: bool = False,
 ) -> ChronologyExtractionSummary:
     selected = list(document_ids or DEFAULT_CHRONOLOGIES)
     unsupported = sorted(set(selected) - set(PROFILES))
@@ -1111,11 +1168,13 @@ def extract_chronology_events(
             resolver=resolver,
             research_start=research_start,
             research_end=research_end,
+            dry_run=dry_run,
         )
         results.append(result)
         samples.extend(_document_samples(document_id, candidates))
     summary = ChronologyExtractionSummary(
         run_id=run_id,
+        dry_run=dry_run,
         documents=results,
         samples=samples,
     )

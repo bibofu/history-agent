@@ -165,6 +165,18 @@ def test_chronology_extraction_is_page_audited_and_idempotent(work_path: Path) -
     aliases_path = Path.cwd() / "config" / "person_aliases.json"
     sync_person_catalog(database, load_person_catalog(aliases_path))
 
+    preview = extract_chronology_events(
+        database=database, pages_dir=pages_dir, ocr_dir=ocr_dir,
+        structure_dir=structure_dir, events_dir=events_dir, reports_dir=reports_dir,
+        person_aliases_path=aliases_path, run_id="preview",
+        research_start=1921, research_end=1978, dry_run=True,
+        document_ids=["zhou_enlai_chronology_1949_1976", "lin_biao_chronology"],
+    )
+    assert preview.dry_run and preview.totals["candidates"] == 8
+    assert not list(events_dir.iterdir())
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM historical_events").fetchone()[0] == 0
+
     first = extract_chronology_events(
         database=database,
         pages_dir=pages_dir,
@@ -174,6 +186,7 @@ def test_chronology_extraction_is_page_audited_and_idempotent(work_path: Path) -
         reports_dir=reports_dir,
         person_aliases_path=aliases_path,
         run_id="first",
+        document_ids=["zhou_enlai_chronology_1949_1976", "lin_biao_chronology"],
         research_start=1921,
         research_end=1978,
     )
@@ -225,6 +238,7 @@ def test_chronology_extraction_is_page_audited_and_idempotent(work_path: Path) -
         reports_dir=reports_dir,
         person_aliases_path=aliases_path,
         run_id="second",
+        document_ids=["zhou_enlai_chronology_1949_1976", "lin_biao_chronology"],
         research_start=1921,
         research_end=1978,
     )

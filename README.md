@@ -73,7 +73,7 @@ uv run history-agent process chunks
 uv run history-agent index build-keyword
 uv run history-agent index build-vector
 
-# 初始化研究表，并从两部年谱生成带页码证据的事件候选
+# 初始化研究表，从周、林年谱及毛泽东年谱九卷生成带页码证据的事件候选
 uv run history-agent research init
 uv run history-agent research extract-chronologies
 
@@ -135,7 +135,7 @@ uv sync --extra ocr --extra vector --extra app --group dev
 # 将历史别名解析为稳定 person_id；歧义名称不会被强制合并
 .\.venv\Scripts\history-agent.exe research people resolve "伍豪" --json
 
-# 从《周恩来年谱》《林彪年谱》抽取事件；重复运行会跳过相同记录
+# 从已支持的十一份年谱 PDF 抽取事件；可加 --dry-run 预览，重复运行跳过相同记录
 .\.venv\Scripts\history-agent.exe research extract-chronologies
 
 # 先预览候选；下一条命令会把所选事件的短证据发送给 DeepSeek
@@ -270,7 +270,7 @@ DEEPSEEK_API_KEY=你的密钥
 
 文献目录中的可选 `ocr_pages` 指定需要重新 OCR 的 PDF 物理页码，即使页面已有文字层也会执行；`full_required` 则要求整本重新识别。修改清单后执行 `corpus scan`、`extract text`、`extract ocr`、`extract report`、`process chunks` 和两个 `index build-*` 命令即可重建。页码必须在文献页数以内，已完成且版本一致的 OCR 结果会复用。
 
-《毛泽东年谱》的逐页筛查清单不等于逐页人工校对，已有 OCR 文字层仍可能存在错别字，重要引文应回到 PDF 核验。本次接入用于检索和证据问答；结构化事件抽取目前仍只支持《周恩来年谱》《林彪年谱》，不会把新年谱直接当成已经复核的事件库。
+《毛泽东年谱》的逐页筛查清单不等于逐页人工校对，已有 OCR 文字层仍可能存在错别字，重要引文应回到 PDF 核验。九卷已新增 13,729 条结构化事件候选，全部标为待复核；当前源事件共 29,122 条，活跃规范事件组 278 个。抽取方法、幂等性与限制见 [毛泽东年谱事件抽取验收](evals/MAO_EVENT_EXTRACTION.md)。人名提及不能直接当作共同参与证据。
 
 ### 文献版本原则
 

@@ -95,7 +95,7 @@ extraction_methods
 # 解析标准姓名或历史别名
 .\.venv\Scripts\history-agent.exe research people resolve "伍豪" --json
 
-# 生成两部年谱的事件候选、SQLite 记录和质量报告；命令幂等
+# 生成周、林年谱及毛泽东年谱九卷的事件候选、SQLite 记录和质量报告；命令幂等
 .\.venv\Scripts\history-agent.exe research extract-chronologies
 
 # 提议合并，不立即修改数据

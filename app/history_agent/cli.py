@@ -225,6 +225,7 @@ def research_extract_chronologies(
             help="Extract one supported chronology. Repeat for multiple documents.",
         ),
     ] = None,
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview without saving events."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Extract auditable event candidates from supported chronology layouts."""
@@ -239,9 +240,10 @@ def research_extract_chronologies(
     )
     try:
         database = Database(settings.database_path)
-        sync_person_catalog(
-            database, load_person_catalog(settings.person_aliases_path)
-        )
+        if not dry_run:
+            sync_person_catalog(
+                database, load_person_catalog(settings.person_aliases_path)
+            )
         summary = extract_chronology_events(
             database=database,
             pages_dir=settings.pages_dir,
@@ -254,6 +256,7 @@ def research_extract_chronologies(
             research_start=settings.research_start.year,
             research_end=settings.research_end.year,
             document_ids=document_id,
+            dry_run=dry_run,
         )
         payload = summary.model_dump()
         payload["totals"] = summary.totals
