@@ -14,6 +14,7 @@ from history_agent.corpus.catalog import load_catalog
 from history_agent.corpus.exporter import export_diff, export_manifest, load_latest_diff
 from history_agent.corpus.scanner import scan_corpus
 from history_agent.db import Database
+from history_agent.errors import ResearchDataError
 from history_agent.evaluation.answers import evaluate_answers
 from history_agent.evaluation.retrieval import evaluate_retrieval
 from history_agent.extraction.benchmark import benchmark_parsers
@@ -30,6 +31,7 @@ from history_agent.research.event_deduplication import (
     merge_duplicate_events,
     review_event_merge,
 )
+from history_agent.research.intersections import get_person_intersections
 from history_agent.research.model_extraction import (
     enrich_events_with_model,
     list_review_queue,
@@ -241,9 +243,7 @@ def research_extract_chronologies(
     try:
         database = Database(settings.database_path)
         if not dry_run:
-            sync_person_catalog(
-                database, load_person_catalog(settings.person_aliases_path)
-            )
+            sync_person_catalog(database, load_person_catalog(settings.person_aliases_path))
         summary = extract_chronology_events(
             database=database,
             pages_dir=settings.pages_dir,
@@ -478,9 +478,7 @@ def research_merge_review_queue(
     """List uncertain canonical-event merges awaiting human review."""
 
     settings = get_settings()
-    rows = list_event_merge_review_queue(
-        Database(settings.database_path), limit=limit
-    )
+    rows = list_event_merge_review_queue(Database(settings.database_path), limit=limit)
     if json_output:
         typer.echo(json.dumps(rows, ensure_ascii=False, indent=2))
         return
@@ -525,12 +523,8 @@ def research_timeline(
         typer.Argument(help="Stable person ID, canonical name, or unambiguous alias."),
     ],
     year: Annotated[int | None, typer.Option("--year", min=1, max=9999)] = None,
-    start_year: Annotated[
-        int | None, typer.Option("--start-year", min=1, max=9999)
-    ] = None,
-    end_year: Annotated[
-        int | None, typer.Option("--end-year", min=1, max=9999)
-    ] = None,
+    start_year: Annotated[int | None, typer.Option("--start-year", min=1, max=9999)] = None,
+    end_year: Annotated[int | None, typer.Option("--end-year", min=1, max=9999)] = None,
     event_type: Annotated[
         list[str] | None,
         typer.Option("--event-type", help="Filter by event type; repeat as needed."),
@@ -593,13 +587,77 @@ def research_timeline(
     for item in timeline.events:
         date_text = item.start.value or item.start.original_text or "date unknown"
         sources = ", ".join(
-            f"{evidence.document_title} PDF {evidence.pdf_page_start}"
-            for evidence in item.evidence
+            f"{evidence.document_title} PDF {evidence.pdf_page_start}" for evidence in item.evidence
         )
         typer.echo(
-            f"{date_text} [{item.verification_level}/{item.record_kind}] "
-            f"{item.name} | {sources}"
+            f"{date_text} [{item.verification_level}/{item.record_kind}] {item.name} | {sources}"
         )
+
+
+@research_app.command("intersections")
+def research_intersections(
+    person: Annotated[str, typer.Argument(help="Person ID, canonical name, or alias.")],
+    other_person: Annotated[str, typer.Argument(help="The second person.")],
+    year: Annotated[int | None, typer.Option("--year", min=1, max=9999)] = None,
+    start_year: Annotated[int | None, typer.Option("--start-year", min=1, max=9999)] = None,
+    end_year: Annotated[int | None, typer.Option("--end-year", min=1, max=9999)] = None,
+    event_type: Annotated[list[str] | None, typer.Option("--event-type")] = None,
+    review_status: Annotated[list[str] | None, typer.Option("--review-status")] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1, max=200)] = 50,
+    offset: Annotated[int, typer.Option("--offset", min=0)] = 0,
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Find source-supported joint-action candidates for two people."""
+    if year is not None and (start_year is not None or end_year is not None):
+        raise typer.BadParameter("--year cannot be combined with --start-year/--end-year")
+    settings = get_settings()
+    lower, upper = settings.research_start.year, settings.research_end.year
+    start = year if year is not None else (start_year if start_year is not None else lower)
+    end = year if year is not None else (end_year if end_year is not None else upper)
+    if not lower <= start <= upper or not lower <= end <= upper:
+        raise typer.BadParameter(f"year must be within the research range {lower}-{upper}")
+    database = Database(settings.database_path)
+    person_ids = []
+    for name in (person, other_person):
+        resolution = resolve_person(database, name)
+        if resolution.status == "ambiguous":
+            raise typer.BadParameter("ambiguous person; use a stable person ID")
+        if resolution.status == "resolved":
+            candidate = resolution.candidates[0]
+            person_ids.append(candidate.merged_into_person_id or candidate.person_id)
+        else:
+            person_ids.append(name)
+    try:
+        result = get_person_intersections(
+            database,
+            person_id=person_ids[0],
+            other_person_id=person_ids[1],
+            start_year=start,
+            end_year=end,
+            event_types=event_type,
+            review_statuses=review_status,
+            limit=limit,
+            offset=offset,
+        )
+    except ResearchDataError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        typer.echo(result.model_dump_json(indent=2))
+        return
+    typer.echo(
+        f"{result.canonical_name} / {result.other_canonical_name}: "
+        f"{result.total} candidates (needs_review)"
+    )
+    for item in result.events:
+        typer.echo(f"{item.event.start.value} {item.event.name}")
+        evidence_by_id = {e.evidence_id: e for e in item.event.evidence}
+        for proof in item.joint_evidence:
+            evidence = evidence_by_id[proof.evidence_id]
+            typer.echo(
+                f"  {evidence.document_title} PDF {evidence.pdf_page_start}: "
+                f"{proof.supporting_text}"
+            )
+    typer.echo(result.limitation)
 
 
 @people_app.command("resolve")
@@ -616,11 +674,7 @@ def people_resolve(
         return
     typer.echo(f"status: {resolution.status}")
     for candidate in resolution.candidates:
-        suffix = (
-            f" -> {candidate.merged_into_person_id}"
-            if candidate.merged_into_person_id
-            else ""
-        )
+        suffix = f" -> {candidate.merged_into_person_id}" if candidate.merged_into_person_id else ""
         typer.echo(
             f"{candidate.person_id}: {candidate.canonical_name} "
             f"(matched: {candidate.matched_form}; {candidate.status}{suffix})"
@@ -1101,9 +1155,7 @@ def eval_answers(
     typer.echo(f"answer evaluation run: {payload['run_id']}")
     typer.echo(f"questions: {payload['questions']}; passed: {payload['passed']}")
     typer.echo(f"gold page hit rate: {float(metrics['gold_page_hit_rate']):.2%}")
-    typer.echo(
-        f"citation page accuracy: {float(metrics['citation_page_accuracy']):.2%}"
-    )
+    typer.echo(f"citation page accuracy: {float(metrics['citation_page_accuracy']):.2%}")
     typer.echo(f"refusal accuracy: {float(metrics['refusal_accuracy']):.2%}")
     typer.echo(str(settings.reports_dir / "mvp_eval_latest.md"))
 
@@ -1175,18 +1227,14 @@ def search(
     if json_output:
         typer.echo(response.model_dump_json(indent=2))
         return
-    typer.echo(
-        f"intent: {response.query_intent}; query terms: {', '.join(response.query_terms)}"
-    )
+    typer.echo(f"intent: {response.query_intent}; query terms: {', '.join(response.query_terms)}")
     if not response.hits:
         typer.echo("No matching local evidence.")
         return
     for hit in response.hits:
         section = " > ".join(hit.section_path)
         preview = hit.text.replace("\n", " ")[:220]
-        typer.echo(
-            f"#{hit.rank} score={hit.score:.4f} {hit.title} PDF p.{hit.pdf_page_start}"
-        )
+        typer.echo(f"#{hit.rank} score={hit.score:.4f} {hit.title} PDF p.{hit.pdf_page_start}")
         if section:
             typer.echo(f"   {section}")
         typer.echo(f"   {preview}")
@@ -1228,9 +1276,7 @@ def search_vector(
     for hit in response.hits:
         section = " > ".join(hit.section_path)
         preview = hit.text.replace("\n", " ")[:220]
-        typer.echo(
-            f"#{hit.rank} score={hit.score:.4f} {hit.title} PDF p.{hit.pdf_page_start}"
-        )
+        typer.echo(f"#{hit.rank} score={hit.score:.4f} {hit.title} PDF p.{hit.pdf_page_start}")
         if section:
             typer.echo(f"   {section}")
         typer.echo(f"   {preview}")
@@ -1275,8 +1321,7 @@ def search_hybrid(
         preview = hit.text.replace("\n", " ")[:220]
         ranks = f"keyword={hit.keyword_rank or '-'}, vector={hit.vector_rank or '-'}"
         typer.echo(
-            f"#{hit.rank} score={hit.score:.4f} ({ranks}) "
-            f"{hit.title} PDF p.{hit.pdf_page_start}"
+            f"#{hit.rank} score={hit.score:.4f} ({ranks}) {hit.title} PDF p.{hit.pdf_page_start}"
         )
         if section:
             typer.echo(f"   {section}")

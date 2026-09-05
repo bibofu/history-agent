@@ -1,0 +1,182 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from history_agent.cli import app
+from history_agent.config import Settings
+from history_agent.errors import ResearchDataError
+from history_agent.research.intersections import get_person_intersections
+from history_agent.web.app import create_app
+from test_timeline import _prepare_database, _prepare_timeline, _save_event
+from typer.testing import CliRunner
+
+
+@pytest.mark.parametrize(
+    "description,expected",
+    [
+        ("毛泽东和周恩来出席会议并听取工作汇报。", True),
+        ("毛泽东、林彪和周恩来在西柏坡共同出席会议。", True),
+        ("同日 和毛泽东在西柏坡会见有关方面的代表。", True),
+        ("出席毛泽东主持的中共中央政治局工作会议。", True),
+        ("林彪参加活动，和毛泽东共同出席关于工作的会议。", False),
+        ("周恩来、毛泽东共同签署关于工作的文件。", True),
+        ("毛泽东会见周恩来，商谈有关工作安排。", True),
+        ("10月1日 下午和毛泽东共同出席会议并听取汇报。", True),
+        ("周恩来出席会议。毛泽东在另一地点讲话。", False),
+        ("周恩来出席会议，毛泽东在另一地点讲话。", False),
+        ("周恩来谈到毛泽东的讲话并出席会议。", False),
+        ("周恩来致电毛泽东，报告关于会议的准备工作。", False),
+        ("周恩来说：“毛泽东和周恩来出席会议。”", False),
+        ("周恩来回忆：毛泽东和周恩来出席会议。", False),
+        ("毛泽东和周恩来准备共同出席有关会议。", False),
+        ("毛泽东和周恩来没有出席有关工作会议。", False),
+    ],
+    ids=[f"case-{index}" for index in range(16)],
+)
+def test_joint_action_not_name_cooccurrence(
+    work_path: Path, description: str, expected: bool
+) -> None:
+    database = _prepare_database(work_path)
+    _save_event(
+        database,
+        event_id="test",
+        document_id="zhou_enlai_chronology_1949_1976",
+        date_value="1956-01-01",
+        description=description,
+        event_type="meeting",
+        review_status="confirmed",
+        page=20,
+        include_lin=False,
+    )
+    result = get_person_intersections(
+        database, person_id="mao_zedong", other_person_id="zhou_enlai"
+    )
+    assert result.co_mention_total == 1
+    assert result.total == int(expected)
+    if expected:
+        item = result.events[0]
+        assert item.verification_status == "needs_review"
+        assert item.joint_evidence[0].supporting_text in description
+        assert set(item.joint_evidence[0].roles) == {"mao_zedong", "zhou_enlai"}
+        reverse = get_person_intersections(
+            database, person_id="zhou_enlai", other_person_id="mao_zedong"
+        )
+        assert reverse.events == result.events
+
+
+def test_intersections_dedup_pagination_and_no_recipient_promotion(work_path: Path) -> None:
+    database, canonical_id = _prepare_timeline(work_path)
+    for index in range(3):
+        _save_event(
+            database,
+            event_id=f"joint{index}",
+            document_id="zhou_enlai_chronology_1949_1976",
+            date_value=f"1943-03-0{index + 1}",
+            description="周恩来和林彪共同出席会议并听取工作汇报。",
+            event_type="meeting",
+            review_status="needs_review",
+            page=21,
+            include_lin=True,
+        )
+    result = get_person_intersections(
+        database, person_id="zhou_enlai", other_person_id="lin_biao", limit=1
+    )
+    assert result.total == 4
+    assert result.events[0].event.event_id == canonical_id
+    assert len(result.events[0].joint_evidence) == 2
+    assert result.has_more
+    page = get_person_intersections(
+        database, person_id="zhou_enlai", other_person_id="lin_biao", offset=1, limit=2
+    )
+    assert [e.event.event_id for e in page.events] == ["joint0", "joint1"]
+    assert page.has_more
+    filtered = get_person_intersections(
+        database, person_id="zhou_enlai", other_person_id="lin_biao", event_types=["meeting"]
+    )
+    assert filtered.total == 3
+    no_recipient = get_person_intersections(
+        database, person_id="mao_zedong", other_person_id="lin_biao"
+    )
+    assert no_recipient.total == 0
+    with pytest.raises(ResearchDataError, match="different people"):
+        get_person_intersections(database, person_id="lin_biao", other_person_id="lin_biao")
+    with pytest.raises(ResearchDataError, match="unknown person_id"):
+        get_person_intersections(database, person_id="lin_biao", other_person_id="missing")
+
+
+def test_intersection_api_and_cli(work_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database, _ = _prepare_timeline(work_path)
+    settings = Settings(
+        _env_file=None,
+        project_root=work_path,
+        data_dir=work_path / "data",
+        database_path=database.path,
+    )
+    client = TestClient(create_app(settings))
+    url = "/api/people/zhou_enlai/intersections/lin_biao"
+    response = client.get(url, params={"start_year": 1943, "end_year": 1943})
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert client.get(url, params={"start_year": 1900}).status_code == 422
+    assert client.get(url, params={"limit": 0}).status_code == 422
+    assert client.get(url, params={"start_year": 1950, "end_year": 1940}).status_code == 400
+    assert client.get("/api/people/zhou_enlai/intersections/missing").status_code == 404
+    monkeypatch.setattr("history_agent.cli.get_settings", lambda: settings)
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["research", "intersections", "周恩来", "林彪", "--year", "1943", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["total"] == 1
+    assert (
+        runner.invoke(
+            app, ["research", "intersections", "周恩来", "林彪", "--year", "1900"]
+        ).exit_code
+        != 0
+    )
+
+
+def test_canonical_members_cannot_manufacture_joint_evidence(work_path: Path) -> None:
+    database, _ = _prepare_timeline(work_path)
+    with database.connect() as connection:
+        connection.execute(
+            "UPDATE evidence_records SET quote='周恩来出席会议并听取有关工作的详细汇报。' "
+            "WHERE evidence_id='evidence_event_zhou_message'"
+        )
+        connection.execute(
+            "UPDATE evidence_records SET quote='林彪出席会议并听取有关工作的详细汇报。' "
+            "WHERE evidence_id='evidence_event_lin_message'"
+        )
+    result = get_person_intersections(database, person_id="zhou_enlai", other_person_id="lin_biao")
+    assert result.co_mention_total == 1
+    assert result.total == 0
+
+
+def test_joint_pagination_crosses_candidate_batch_boundary(work_path: Path) -> None:
+    database = _prepare_database(work_path)
+    for index in range(202):
+        _save_event(
+            database,
+            event_id=f"event{index:03}",
+            document_id="zhou_enlai_chronology_1949_1976",
+            date_value="1956-01-01",
+            description=(
+                "周恩来和毛泽东出席会议并听取详细汇报。"
+                if index >= 199
+                else "周恩来出席会议。毛泽东在其他地方进行工作。"
+            ),
+            event_type="meeting",
+            review_status="needs_review",
+            page=20,
+            include_lin=False,
+        )
+    result = get_person_intersections(
+        database, person_id="zhou_enlai", other_person_id="mao_zedong", offset=1, limit=1
+    )
+    assert result.total == 3
+    assert result.co_mention_total == 202
+    assert result.events[0].event.event_id == "event200"
+    assert result.has_more

@@ -174,6 +174,7 @@ def _load_event_rows(
     end_year: int | None,
     event_types: Sequence[str],
     review_statuses: Sequence[str],
+    other_person_id: str | None = None,
 ) -> list[sqlite3.Row]:
     canonical_filters, canonical_parameters = _event_filters(
         "c",
@@ -213,6 +214,11 @@ def _load_event_rows(
               WHERE cp.canonical_event_id = c.canonical_event_id
                 AND cp.person_id = ?
           )
+          AND (? IS NULL OR EXISTS (
+              SELECT 1 FROM canonical_event_participants cp2
+              WHERE cp2.canonical_event_id = c.canonical_event_id
+                AND cp2.person_id = ?
+          ))
         UNION ALL
         SELECT
             e.event_id AS record_id, 'source' AS record_kind,
@@ -228,6 +234,10 @@ def _load_event_rows(
               SELECT 1 FROM event_participants ep
               WHERE ep.event_id = e.event_id AND ep.person_id = ?
           )
+          AND (? IS NULL OR EXISTS (
+              SELECT 1 FROM event_participants ep2
+              WHERE ep2.event_id = e.event_id AND ep2.person_id = ?
+          ))
           AND NOT EXISTS (
               SELECT 1
               FROM canonical_event_members cm
@@ -240,8 +250,12 @@ def _load_event_rows(
         (
             *canonical_parameters,
             person_id,
+            other_person_id,
+            other_person_id,
             *source_parameters,
             person_id,
+            other_person_id,
+            other_person_id,
             *active_canonical_parameters,
         ),
     ).fetchall()
@@ -379,6 +393,7 @@ def get_person_timeline(
     review_statuses: Sequence[str] | None = None,
     limit: int = 50,
     offset: int = 0,
+    other_person_id: str | None = None,
 ) -> PersonTimelineResponse:
     event_type_filter = sorted(set(event_types or []))
     status_filter = cast(
@@ -412,6 +427,7 @@ def get_person_timeline(
             end_year=end_year,
             event_types=event_type_filter,
             review_statuses=status_filter,
+            other_person_id=other_person_id,
         )
         selected = all_rows[offset : offset + limit]
         canonical_ids = _selected_ids(selected, "canonical")

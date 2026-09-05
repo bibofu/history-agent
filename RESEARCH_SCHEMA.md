@@ -203,3 +203,13 @@ M6.4 不让模型从整份文献自由生成事件，而是从已有规则事件
 ```
 
 HTTP 接口为 `GET /api/people/{person_id}/timeline`，查询参数为 `start_year`、`end_year`、可重复的 `event_type` 与 `review_status`、`limit` 和 `offset`。API 只接受稳定 `person_id`，年份必须位于项目研究范围内。真实库验收见 `evals/TIMELINE_BASELINE.md`。
+
+## 11. 人物交集候选查询
+
+入口：`research intersections 毛泽东 周恩来 --year 1949 --json`；HTTP 为 `GET /api/people/{person_id}/intersections/{other_person_id}`，筛选参数与时间线相同，默认限定项目研究年份。CLI 支持无歧义别名，API 使用稳定 ID。
+
+先筛选同时关联两人的事件，再在每条来源证据内核对共同动作。多人名单必须由已登记的规范姓名组成；支持共同出席、会见、联名致电等保守句式。年谱隐含主语只从源记录的 `chronology_subject` 继承，且只用于该来源首证据页开头，不能继承规范事件参与者并集。引号内容与冒号转述不用于匹配；不会拼接不同页、不同来源的分别提及。被驳回的来源不能支撑共同动作。
+
+返回 `co_mention_total`（预筛事件数）、`total`（命中规则的候选数）及分页结果。每项的 `event` 复用时间线字段，保留规范/源事件类型、时间精度、地点（未知为 null）和来源差异；`joint_evidence` 提供证据 ID、来源事件 ID、原文片段、动作、双方角色及主语依据。分页在动作核验后进行。
+
+交集自己的 `verification_status` 固定为 `needs_review`，不继承事件或合并的“已确认”状态。相同史实尚未成功去重时仍可能返回多条源候选，不额外强制合并。当前仅识别有限句式，不识别所有别名、复杂名单和跨页动作；零结果必须解释为“当前规则未找到”，不能宣称没有交集。没有新增确定关系记录，也尚未改变聊天问答的检索路由。

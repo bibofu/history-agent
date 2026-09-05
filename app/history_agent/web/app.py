@@ -12,6 +12,10 @@ from history_agent.answering.service import answer_question
 from history_agent.config import Settings, get_settings
 from history_agent.db import Database
 from history_agent.errors import ResearchDataError, RetrievalError
+from history_agent.research.intersections import (
+    PersonIntersectionResponse,
+    get_person_intersections,
+)
 from history_agent.research.timeline import (
     PersonTimelineResponse,
     TimelineReviewStatus,
@@ -38,9 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @api.get("/app.js", include_in_schema=False)
     def javascript() -> FileResponse:
-        return FileResponse(
-            str(static_dir.joinpath("app.js")), media_type="application/javascript"
-        )
+        return FileResponse(str(static_dir.joinpath("app.js")), media_type="application/javascript")
 
     @api.get("/api/health")
     def health() -> dict[str, object]:
@@ -69,9 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except RetrievalError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @api.get(
-        "/api/people/{person_id}/timeline", response_model=PersonTimelineResponse
-    )
+    @api.get("/api/people/{person_id}/timeline", response_model=PersonTimelineResponse)
     def person_timeline(
         person_id: str,
         start_year: Annotated[int | None, Query(ge=1, le=9999)] = None,
@@ -99,6 +99,40 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 person_id=person_id,
                 start_year=start_year,
                 end_year=end_year,
+                event_types=event_type,
+                review_statuses=review_status,
+                limit=limit,
+                offset=offset,
+            )
+        except ResearchDataError as exc:
+            status_code = 404 if str(exc).startswith("unknown person_id") else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+    @api.get(
+        "/api/people/{person_id}/intersections/{other_person_id}",
+        response_model=PersonIntersectionResponse,
+    )
+    def person_intersections(
+        person_id: str,
+        other_person_id: str,
+        start_year: Annotated[int | None, Query(ge=1, le=9999)] = None,
+        end_year: Annotated[int | None, Query(ge=1, le=9999)] = None,
+        event_type: Annotated[list[str] | None, Query()] = None,
+        review_status: Annotated[list[TimelineReviewStatus] | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> PersonIntersectionResponse:
+        lower, upper = active_settings.research_start.year, active_settings.research_end.year
+        for value in (start_year, end_year):
+            if value is not None and not lower <= value <= upper:
+                raise HTTPException(422, f"year must be within the research range {lower}-{upper}")
+        try:
+            return get_person_intersections(
+                Database(active_settings.database_path),
+                person_id=person_id,
+                other_person_id=other_person_id,
+                start_year=start_year if start_year is not None else lower,
+                end_year=end_year if end_year is not None else upper,
                 event_types=event_type,
                 review_statuses=review_status,
                 limit=limit,
