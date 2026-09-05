@@ -23,7 +23,9 @@ def test_mao_dates_footnotes_and_page_evidence() -> None:
 0 月
 随后向到会群众讲话并接受代表致意。
 10月2日—5日 在北京连续召开会议研究有关工作。
-10月6日 致信有关部门研究下一阶段工作。"""),
+10月6日 致信有关部门研究下一阶段工作。""").model_copy(
+            update={"extraction_method": "ocr"}
+        ),
     }
     entries = extract_mao_entries(pages, PROFILES[DOC], {6: 1949, 7: 1949})
     assert len(entries) == 4
@@ -38,6 +40,10 @@ def test_mao_dates_footnotes_and_page_evidence() -> None:
     candidate = _build_candidate(entries[1], resolver)
     assert candidate.event.review_status == "needs_review"
     assert [e.pdf_page_start for e in candidate.event.evidence] == [6, 7]
+    assert all(
+        e.extraction_methods == ["ocr", "pymupdf_text_layer"]
+        for e in candidate.event.evidence
+    )
     assert not any(p.person_id == "deng_xiaoping" for p in candidate.event.participants)
     assert candidate.event.participants[0].mention_source == "chronology_subject"
     assert _build_candidate(entries[1], resolver).event == candidate.event

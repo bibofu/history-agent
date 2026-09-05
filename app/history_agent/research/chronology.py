@@ -201,12 +201,8 @@ class ChronologyExtractionSummary(BaseModel):
             "database_skipped": sum(item.database_skipped for item in self.documents),
             "skipped_short": sum(item.skipped_short for item in self.documents),
             "skipped_context": sum(item.skipped_context for item in self.documents),
-            "skipped_out_of_scope": sum(
-                item.skipped_out_of_scope for item in self.documents
-            ),
-            "location_candidates": sum(
-                item.location_candidates for item in self.documents
-            ),
+            "skipped_out_of_scope": sum(item.skipped_out_of_scope for item in self.documents),
+            "location_candidates": sum(item.location_candidates for item in self.documents),
         }
 
 
@@ -263,13 +259,18 @@ PROFILES = {
     ),
 }
 
-PROFILES.update({
-    document_id: ChronologyProfile(
-        document_id=document_id, subject_person_id="mao_zedong",
-        subject_name="毛泽东", layout="mao",
-    )
-    for document_id in DEFAULT_CHRONOLOGIES if document_id.startswith("mao_zedong_")
-})
+PROFILES.update(
+    {
+        document_id: ChronologyProfile(
+            document_id=document_id,
+            subject_person_id="mao_zedong",
+            subject_name="毛泽东",
+            layout="mao",
+        )
+        for document_id in DEFAULT_CHRONOLOGIES
+        if document_id.startswith("mao_zedong_")
+    }
+)
 
 
 def _compact_date_text(value: str) -> str:
@@ -435,13 +436,9 @@ def parse_chronology_date(
     if not has_date_component:
         flags.append("inherited_date")
         if inherited_from is not None:
-            start = _point_with_expression(
-                inherited_from.start, original, certainty="inferred"
-            )
+            start = _point_with_expression(inherited_from.start, original, certainty="inferred")
             end = (
-                _point_with_expression(
-                    inherited_from.end, original, certainty="inferred"
-                )
+                _point_with_expression(inherited_from.end, original, certainty="inferred")
                 if inherited_from.end is not None
                 else None
             )
@@ -571,9 +568,7 @@ def parse_chronology_date(
     )
 
 
-def _prepare_page_text(
-    record: PageRecord, repeated_lines: set[str], *, layout: str
-) -> str:
+def _prepare_page_text(record: PageRecord, repeated_lines: set[str], *, layout: str) -> str:
     lines: list[str] = []
     for raw_line in record.normalized_text.splitlines():
         line = re.sub(r"[ \t\u3000]+", " ", raw_line).strip()
@@ -746,22 +741,23 @@ class PersonMentionResolver:
             for form in (person.canonical_name, *(alias.name for alias in person.aliases)):
                 forms.setdefault(form, []).append(person.person_id)
         self.unique_forms = {
-            form: person_ids[0]
-            for form, person_ids in forms.items()
-            if len(set(person_ids)) == 1
+            form: person_ids[0] for form, person_ids in forms.items() if len(set(person_ids)) == 1
         }
 
     def participants(
         self, text: str, *, subject_person_id: str, subject_name: str
     ) -> list[EventParticipant]:
         matches: dict[str, tuple[int, str]] = {}
+        compact_text = re.sub(r"\s+", "", text)
         for form, person_id in self.unique_forms.items():
-            index = text.find(form)
+            index = compact_text.find(re.sub(r"\s+", "", form))
             if index < 0:
                 continue
             current = matches.get(person_id)
-            if current is None or index < current[0] or (
-                index == current[0] and len(form) > len(current[1])
+            if (
+                current is None
+                or index < current[0]
+                or (index == current[0] and len(form) > len(current[1]))
             ):
                 matches[person_id] = (index, form)
         result: list[EventParticipant] = []
@@ -830,9 +826,7 @@ def _location_text(text: str) -> str | None:
             found.append((match.start("place"), normalized))
     unique: list[str] = []
     for _, location in sorted(found):
-        overlapping = next(
-            (index for index, prior in enumerate(unique) if prior in location), None
-        )
+        overlapping = next((index for index, prior in enumerate(unique) if prior in location), None)
         if overlapping is not None:
             unique[overlapping] = location
         elif location not in unique and not any(location in prior for prior in unique):
@@ -933,15 +927,18 @@ def _build_candidate(
         EvidenceReference(
             evidence_id=evidence_id,
             document_id=entry.document_id,
-            pdf_page_start=entry.pages[0], pdf_page_end=entry.pages[-1],
-            quote=quote, extraction_methods=sorted(set(entry.page_methods.values())),
+            pdf_page_start=entry.pages[0],
+            pdf_page_end=entry.pages[-1],
+            quote=quote,
+            extraction_methods=sorted(set(entry.page_methods.values())),
         )
     ]
     if entry.document_id.startswith("mao_zedong_chronology_"):
         review_status = "needs_review"
         evidence = [
             EvidenceReference(
-                evidence_id=f"{evidence_id}_p{page}", document_id=entry.document_id,
+                evidence_id=f"{evidence_id}_p{page}",
+                document_id=entry.document_id,
                 pdf_page_start=(
                     page if len("\n".join(entry.page_text_parts[page])) >= 12 else entry.pages[0]
                 ),
@@ -950,14 +947,12 @@ def _build_candidate(
                 ),
                 quote=(
                     "\n".join(entry.page_text_parts[page])[:1200]
-                    if len("\n".join(entry.page_text_parts[page])) >= 12 else quote
-                ),
-                extraction_methods=(
-                    [entry.page_methods[page]]
                     if len("\n".join(entry.page_text_parts[page])) >= 12
-                    else sorted(set(entry.page_methods.values()))
+                    else quote
                 ),
-            ) for page in entry.pages
+                extraction_methods=sorted(set(entry.page_methods.values())),
+            )
+            for page in entry.pages
         ]
     event = HistoricalEvent(
         event_id=event_id,
@@ -999,9 +994,7 @@ def _document_samples(
     if len(candidates) <= count:
         selected = candidates
     else:
-        indexes = {
-            round(index * (len(candidates) - 1) / (count - 1)) for index in range(count)
-        }
+        indexes = {round(index * (len(candidates) - 1) / (count - 1)) for index in range(count)}
         selected = [candidates[index] for index in sorted(indexes)]
     return [
         {
@@ -1059,9 +1052,7 @@ def _extract_document(
 
             raw_entries = extract_mao_entries(pages, profile, year_pages)
         else:
-            raw_entries = _extract_lin_entries(
-                pages, repeated_lines, profile, year_pages
-            )
+            raw_entries = _extract_lin_entries(pages, repeated_lines, profile, year_pages)
 
     candidates: list[ChronologyEventCandidate] = []
     skipped_short = 0
@@ -1091,12 +1082,8 @@ def _extract_document(
         created, updated, skipped = ResearchStore(database).sync_generated_events(
             [candidate.event for candidate in candidates]
         )
-    precision_counts = Counter(
-        candidate.event.start.precision for candidate in candidates
-    )
-    flag_counts = Counter(
-        flag for candidate in candidates for flag in candidate.rule_flags
-    )
+    precision_counts = Counter(candidate.event.start.precision for candidate in candidates)
+    flag_counts = Counter(flag for candidate in candidates for flag in candidate.rule_flags)
     event_type_counts = Counter(candidate.event.event_type for candidate in candidates)
     result = ChronologyDocumentResult(
         document_id=profile.document_id,
@@ -1139,9 +1126,7 @@ def extract_chronology_events(
     selected = list(document_ids or DEFAULT_CHRONOLOGIES)
     unsupported = sorted(set(selected) - set(PROFILES))
     if unsupported:
-        raise ExtractionError(
-            "Unsupported chronology document IDs: " + ", ".join(unsupported)
-        )
+        raise ExtractionError("Unsupported chronology document IDs: " + ", ".join(unsupported))
     catalog = load_person_catalog(person_aliases_path)
     known_people = {person.person_id for person in catalog.people}
     missing_subjects = [

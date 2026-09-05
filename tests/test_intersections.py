@@ -11,6 +11,7 @@ from history_agent.errors import ResearchDataError
 from history_agent.evaluation.intersections import evaluate_intersections
 from history_agent.research.intersections import (
     _match_adjacent_attendance,
+    _match_grouped_attendance,
     get_person_intersections,
 )
 from history_agent.web.app import create_app
@@ -347,3 +348,61 @@ def test_adjacent_does_not_build_oversized_proof() -> None:
         )
         is None
     )
+
+
+def test_adjacent_roster_supports_two_non_subject_attendees() -> None:
+    result = _match_adjacent_attendance(
+        "主持召开中央政治局扩大会议。出席会议的有刘少奇、周恩来、陈云。",
+        "刘少奇",
+        "周恩来",
+        "毛泽东",
+    )
+    assert result is not None
+    assert result[2] == {"刘少奇": "参会者", "周恩来": "参会者"}
+
+
+@pytest.mark.parametrize(
+    "first,second,subject,expected",
+    [
+        ("毛泽东", "周恩来", "毛泽东", True),
+        ("毛泽东", "邓小平", "毛泽东", True),
+        ("周恩来", "邓小平", "毛泽东", True),
+        ("毛泽东", "苏斯洛夫", "毛泽东", False),
+        ("周恩来", "苏斯洛夫", "毛泽东", False),
+    ],
+)
+def test_grouped_attendance_uses_only_domestic_roster(
+    first: str,
+    second: str,
+    subject: str,
+    expected: bool,
+) -> None:
+    text = (
+        "10月1日上午，去天安门参加中华人民共和国成立十周年庆祝大会前，"
+        "在中南海颐年堂会见赫鲁晓夫。"
+        "参加会见的，中方有刘少奇、朱德、周恩来、邓小平，苏方有苏斯洛夫。"
+    )
+    result = _match_grouped_attendance(text, first, second, subject)
+    assert (result is not None) is expected
+    if result is not None:
+        assert result[0] == text
+        assert result[1] == "会见"
+        assert set(result[2]) == {first, second}
+        assert result[3] == "chronology_subject"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "10月1日上午，准备去天安门参加庆祝大会前，在颐年堂会见赫鲁晓夫。"
+        "参加会见的，中方有周恩来，苏方有苏斯洛夫。",
+        "10月1日上午，去天安门参加庆祝大会前，在颐年堂会见赫鲁晓夫。"
+        "参加接见的，中方有周恩来，苏方有苏斯洛夫。",
+        "10月1日上午，去天安门参加庆祝大会前，在颐年堂会见赫鲁晓夫。"
+        "参加会见的，中方有周恩来的秘书，苏方有苏斯洛夫。",
+        "10月1日上午，去天安门参加庆祝大会前，在颐年堂会见赫鲁晓夫。"
+        "随后参加会见的，中方有周恩来，苏方有苏斯洛夫。",
+    ],
+)
+def test_grouped_attendance_guards(text: str) -> None:
+    assert _match_grouped_attendance(text, "毛泽东", "周恩来", "毛泽东") is None

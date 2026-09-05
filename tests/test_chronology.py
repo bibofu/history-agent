@@ -7,9 +7,11 @@ from history_agent.db import Database
 from history_agent.extraction.models import PageRecord
 from history_agent.research.catalog import load_person_catalog
 from history_agent.research.chronology import (
+    PersonMentionResolver,
     extract_chronology_events,
     parse_chronology_date,
 )
+from history_agent.research.models import PersonCatalog
 from history_agent.research.people import sync_person_catalog
 
 
@@ -166,10 +168,17 @@ def test_chronology_extraction_is_page_audited_and_idempotent(work_path: Path) -
     sync_person_catalog(database, load_person_catalog(aliases_path))
 
     preview = extract_chronology_events(
-        database=database, pages_dir=pages_dir, ocr_dir=ocr_dir,
-        structure_dir=structure_dir, events_dir=events_dir, reports_dir=reports_dir,
-        person_aliases_path=aliases_path, run_id="preview",
-        research_start=1921, research_end=1978, dry_run=True,
+        database=database,
+        pages_dir=pages_dir,
+        ocr_dir=ocr_dir,
+        structure_dir=structure_dir,
+        events_dir=events_dir,
+        reports_dir=reports_dir,
+        person_aliases_path=aliases_path,
+        run_id="preview",
+        research_start=1921,
+        research_end=1978,
+        dry_run=True,
         document_ids=["zhou_enlai_chronology_1949_1976", "lin_biao_chronology"],
     )
     assert preview.dry_run and preview.totals["candidates"] == 8
@@ -245,3 +254,27 @@ def test_chronology_extraction_is_page_audited_and_idempotent(work_path: Path) -
     assert second.totals["database_created"] == 0
     assert second.totals["database_updated"] == 0
     assert second.totals["database_skipped"] == 8
+
+
+def test_person_resolver_matches_names_split_across_pdf_lines() -> None:
+    resolver = PersonMentionResolver(
+        PersonCatalog.model_validate(
+            {
+                "people": [
+                    {"person_id": "mao_zedong", "canonical_name": "毛泽东"},
+                    {"person_id": "liu_shaoqi", "canonical_name": "刘少奇"},
+                    {"person_id": "deng_xiaoping", "canonical_name": "邓小平"},
+                ]
+            }
+        )
+    )
+    participants = resolver.participants(
+        "出席会议的有刘少\n奇、邓小\n平。",
+        subject_person_id="mao_zedong",
+        subject_name="毛泽东",
+    )
+    assert [(item.person_id, item.mention_source) for item in participants] == [
+        ("mao_zedong", "chronology_subject"),
+        ("liu_shaoqi", "explicit"),
+        ("deng_xiaoping", "explicit"),
+    ]
