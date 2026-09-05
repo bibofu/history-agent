@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "version": "m8.1-comprehensive-v1",
+  "description": "统一登记问答、人物时间线、人物交集和组织关系评估题；来源文件保持各自可独立运行。",
+  "sources": {
+    "answer_questions": "evals/retrieval_questions.json",
+    "intersection_questions": "evals/person_intersections_independent.json",
+    "structured_questions": "evals/structured_questions.json"
+  },
+  "minimum_questions": 100,
+  "category_minimums": {
+    "timeline": 10,
+    "intersection": 10,
+    "viewpoint": 6,
+    "event": 5,
+    "organization": 6,
+    "conflict": 4,
+    "refusal": 3
+  }
+}

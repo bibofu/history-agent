@@ -16,6 +16,10 @@ from history_agent.corpus.scanner import scan_corpus
 from history_agent.db import Database
 from history_agent.errors import ResearchDataError
 from history_agent.evaluation.answers import evaluate_answers
+from history_agent.evaluation.comprehensive import (
+    audit_comprehensive_question_set,
+    evaluate_structured_questions,
+)
 from history_agent.evaluation.intersections import (
     build_intersection_review_packet,
     evaluate_intersections,
@@ -695,6 +699,59 @@ def eval_intersections(
         Database(settings.database_path), settings.project_root / case_set
     )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@eval_app.command("comprehensive")
+def eval_comprehensive(
+    manifest: Annotated[
+        str,
+        typer.Option("--manifest", help="Manifest path relative to project root."),
+    ] = "evals/comprehensive_evaluation.json",
+    verify_structured: bool = typer.Option(
+        False,
+        "--verify-structured",
+        help="Run the 18 timeline and organization questions against the research DB.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Audit the size, category coverage, evidence, and review metadata of M8.1."""
+    settings = get_settings()
+    try:
+        payload = audit_comprehensive_question_set(
+            project_root=settings.project_root,
+            manifest_path=settings.project_root / manifest,
+        )
+        if verify_structured:
+            manifest_payload = json.loads(
+                (settings.project_root / manifest).read_text(encoding="utf-8")
+            )
+            structured_path = settings.project_root / manifest_payload["sources"][
+                "structured_questions"
+            ]
+            structured_result = evaluate_structured_questions(
+                database=Database(settings.database_path),
+                question_set_path=structured_path,
+            )
+            payload["structured_verification"] = structured_result
+            payload["passed"] = bool(payload["passed"]) and bool(
+                structured_result["passed"]
+            )
+    except (OSError, ValueError, ResearchDataError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    typer.echo(f"comprehensive evaluation: {payload['version']}")
+    typer.echo(
+        f"questions: {payload['question_count']}; "
+        f"evidence: {payload['evidence_questions']}; passed: {payload['passed']}"
+    )
+    categories = payload["category_counts"]
+    assert isinstance(categories, dict)
+    typer.echo(
+        "categories: "
+        + ", ".join(f"{key}={value}" for key, value in categories.items())
+    )
 
 
 @eval_app.command("prepare-intersection-review")

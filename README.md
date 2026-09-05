@@ -191,12 +191,15 @@ uv sync --extra ocr --extra vector --extra app --group dev
 .\.venv\Scripts\history-agent.exe search-vector "毛泽东关于调查研究的观点" --top-k 5
 .\.venv\Scripts\history-agent.exe search-hybrid "毛泽东和周恩来在长征期间的交集" --top-k 8
 
-# 运行 35 道可回答题的目标文献/年份检索基线（另含 3 道拒答题）
+# 运行 39 道可回答题的目标文献/年份检索基线（另含 3 道拒答题）
 .\.venv\Scripts\history-agent.exe eval retrieval --top-k 10
 
-# 运行 38 题页码、引用、事实覆盖与拒答的 MVP 验收
+# 运行 42 题页码、引用、事实覆盖与拒答的回答验收
 # 默认使用确定性的证据摘录模式，不消耗 DeepSeek Token
 .\.venv\Scripts\history-agent.exe eval answers --top-k 10
+
+# 审计 M8.1 的 100 题综合评估集，并回归 18 个结构化查询
+.\.venv\Scripts\history-agent.exe eval comprehensive --verify-structured
 
 # 如需同时评估 DeepSeek 生成结果
 .\.venv\Scripts\history-agent.exe eval answers --top-k 10 --with-llm
@@ -599,4 +602,5 @@ GET  /api/people/{person_id}/relationships
 - [x] 完成人物交集独立包定稿：40 条覆盖 10 组人物、10 份文献和 23 个年份，与开发源事件零重合；复核者确认标签但授权豁免逐案理由，结果明确标为不可审计的确认集。40 条均为正例，v4 命中 20 条、Recall=50%；没有负例，不能评估误报率，详见 [独立复核说明](evals/INTERSECTION_INDEPENDENT_REVIEW.md)
 - [x] 接入保守的时间线/交集聊天路由：保留候选状态、显示总数与截断、按实际共同动作证据引用；不支持的条件要求澄清，详见 [聊天路由验收](evals/STRUCTURED_CHAT_BASELINE.md)
 - [x] 完成组织任职候选抽取与时间点查询：从 5,282 条相关事件抽取 72 条带日期、机构、源事件和 PDF 页码的候选，幂等复跑零改动；CLI/API 不外推缺少结束证据的任期，跨 3 份 PDF 的 5 页视觉抽查通过，详见 [组织关系验收](evals/ORGANIZATION_RELATION_BASELINE.md)
+- [x] 完成 M8.1 综合评估集：统一登记 100 个带证据问题，覆盖时间线、事件、观点、交集、组织关系、冲突和拒答；清单审计通过，18/18 个结构化问题命中指定源事件与 PDF 页码，39 个可回答题的检索 Recall@10=100%，详见 [综合评估验收](evals/M8_COMPREHENSIVE_BASELINE.md)
 - [ ] 加入可选交叉编码器重排并与当前 RRF 做效果/性能对比
