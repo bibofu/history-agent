@@ -319,6 +319,11 @@ def test_blind_review_packet_excludes_predictions_and_finalizes(work_path: Path)
     with pytest.raises(ResearchDataError, match="review date must be ISO"):
         finalize_intersection_review_packet(packet_path)
     packet.cases[0].annotation.reviewed_at = "2026-09-06"
+    packet.cases[0].annotation.reason = "connected"
+    packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
+    with pytest.raises(ResearchDataError, match="page-specific evidence"):
+        finalize_intersection_review_packet(packet_path)
+    packet.cases[0].annotation.reason = "完整查看来源页后作出的独立判断。"
     packet_path.write_text(packet.model_dump_json(indent=2), encoding="utf-8")
     finalized = finalize_intersection_review_packet(packet_path)
     assert finalized["reviewers"] == ["reviewer-a"]

@@ -17,6 +17,20 @@ from history_agent.errors import ResearchDataError
 from history_agent.research.chronology import PROFILES
 from history_agent.research.intersections import RULE_VERSION, get_person_intersections
 
+PLACEHOLDER_REVIEW_REASONS = {
+    "connected",
+    "connectred",
+    "connection",
+    "yes",
+    "no",
+    "true",
+    "false",
+    "有关联",
+    "有联系",
+    "是",
+    "否",
+}
+
 
 class IntersectionCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -319,6 +333,11 @@ def finalize_intersection_review_packet(packet_path: Path) -> dict[str, object]:
             raise ResearchDataError(f"review label missing: {item.id}")
         if not annotation.reason.strip():
             raise ResearchDataError(f"review reason missing: {item.id}")
+        normalized_reason = re.sub(r"[\s\W_]+", "", annotation.reason).casefold()
+        if normalized_reason in PLACEHOLDER_REVIEW_REASONS:
+            raise ResearchDataError(
+                f"review reason must describe page-specific evidence: {item.id}"
+            )
         if not annotation.reviewed_by.strip() or not annotation.reviewed_at.strip():
             raise ResearchDataError(f"reviewer metadata missing: {item.id}")
         try:
