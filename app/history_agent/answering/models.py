@@ -22,6 +22,7 @@ class Citation(BaseModel):
     document: str
     volume: str | None = None
     pdf_page: int = Field(ge=1)
+    pdf_page_end: int | None = Field(default=None, ge=1)
     section: list[str]
     quote: str
     source_type: str

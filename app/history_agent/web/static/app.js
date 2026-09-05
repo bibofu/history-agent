@@ -21,12 +21,13 @@ function addMessage(role, html) {
 }
 
 function renderAnswer(data) {
+  const structured = data.retrieval_mode.startsWith("structured_");
   const mode = data.generator_mode === "llm"
     ? `DeepSeek ${escapeHtml(data.model_name || "V4")} · 证据约束生成`
-    : "本地证据摘录";
+    : structured ? "结构化研究 · 候选与原文核查" : "本地证据摘录";
   const evidence = data.citations.map(item => `
     <details>
-      <summary>[${escapeHtml(item.evidence_id)}] 《${escapeHtml(item.document)}》PDF 第 ${item.pdf_page} 页</summary>
+      <summary>[${escapeHtml(item.evidence_id)}] 《${escapeHtml(item.document)}》PDF 第 ${item.pdf_page}${item.pdf_page_end && item.pdf_page_end !== item.pdf_page ? `—${item.pdf_page_end}` : ""} 页</summary>
       <p class="meta">${escapeHtml(item.section.join(" › ") || "章节未识别")} · ${escapeHtml(item.source_type)} · ${escapeHtml(item.verification_status)}</p>
       <p class="quote">${escapeHtml(item.quote)}</p>
     </details>`).join("");

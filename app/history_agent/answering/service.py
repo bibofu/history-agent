@@ -8,6 +8,7 @@ from typing import Any, Literal
 import httpx
 
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
+from history_agent.answering.structured import answer_structured_question
 from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.retrieval.hybrid import search_hybrid_index
@@ -303,6 +304,9 @@ def check_deepseek_connection(settings: Settings) -> dict[str, object]:
 
 
 def answer_question(settings: Settings, request: QuestionRequest) -> AnswerResponse:
+    structured = answer_structured_question(settings, request)
+    if structured is not None:
+        return structured
     retrieval = search_hybrid_index(
         keyword_index_path=settings.keyword_index_path,
         vector_index_path=settings.vector_index_path,
