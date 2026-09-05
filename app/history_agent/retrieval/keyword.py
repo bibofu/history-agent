@@ -305,7 +305,7 @@ def search_keyword_index(
             "EXISTS (SELECT 1 FROM json_each(m.year_mentions_json) WHERE value BETWEEN ? AND ?)"
         )
         parameters.extend(query_year_range)
-    elif not include_out_of_scope:
+    if not include_out_of_scope:
         conditions.append("m.scope_status != 'out_of_scope'")
     for person in filter_people:
         conditions.append(

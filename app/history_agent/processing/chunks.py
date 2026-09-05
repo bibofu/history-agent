@@ -280,7 +280,13 @@ def build_document_chunks(
                     character_count=len(text),
                     year_mentions=years,
                     date_mentions=dates,
-                    scope_status=scope_status(years, research_start, research_end),
+                    scope_status=scope_status(
+                        section_years
+                        if document["source_type"] == "chronology" and len(section_years) == 1
+                        else years,
+                        research_start,
+                        research_end,
+                    ),
                     people=people,
                     extraction_methods=[page_record.extraction_method],
                     content_hash=content_hash,

@@ -24,9 +24,9 @@ def test_catalog_rejects_duplicate_document_ids(work_path: Path) -> None:
         load_catalog(path)
 
 
-def test_project_catalog_has_seven_unique_documents() -> None:
+def test_project_catalog_has_sixteen_unique_documents() -> None:
     root = Path(__file__).resolve().parents[1]
     catalog = load_catalog(root / "config" / "corpus_catalog.json")
 
-    assert len(catalog.documents) == 7
-    assert len({document.document_id for document in catalog.documents}) == 7
+    assert len(catalog.documents) == 16
+    assert len({document.document_id for document in catalog.documents}) == 16

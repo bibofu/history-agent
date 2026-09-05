@@ -208,7 +208,7 @@ def _query_filter(
                 range=models.Range(gte=query_year_range[0], lte=query_year_range[1]),
             )
         )
-    elif not include_out_of_scope:
+    if not include_out_of_scope:
         must_not.append(
             models.FieldCondition(
                 key="scope_status", match=models.MatchValue(value="out_of_scope")

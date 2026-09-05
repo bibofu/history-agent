@@ -2,10 +2,165 @@
   "schema_version": 1,
   "documents": [
     {
+      "document_id": "mao_zedong_chronology_volume_1",
+      "filename": "毛泽东年谱_第1卷（1893.12-1937.06）.pdf",
+      "title": "毛泽东年谱 第1卷（1893.12-1937.06）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第1卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 700,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。1921年前章节默认不参与检索。",
+      "ocr_pages": [1, 2, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 23, 25, 26, 27, 30, 31, 32, 33, 36, 37, 44, 50, 52, 56, 61, 62, 76, 80, 85, 86, 101, 118, 129, 137, 139, 157, 174, 185, 238, 269, 302, 322, 339, 373, 402, 428, 451, 468, 478, 488, 489, 511, 518, 529, 543, 593, 604, 607, 608, 612, 641, 644, 646, 647, 649, 650, 672, 699, 700]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_2",
+      "filename": "毛泽东年谱_第2卷（1937.07-1945.08）.pdf",
+      "title": "毛泽东年谱 第2卷（1937.07-1945.08）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第2卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 626,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 3, 4, 5, 6, 7, 11, 12, 49, 51, 53, 85, 93, 108, 109, 118, 140, 163, 224, 242, 250, 251, 259, 275, 287, 303, 315, 337, 360, 380, 382, 383, 395, 421, 422, 428, 496, 501, 503, 529, 578, 626]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_3",
+      "filename": "毛泽东年谱_第3卷（1945.08-1949.09）.pdf",
+      "title": "毛泽东年谱 第3卷（1945.08-1949.09）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第3卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 588,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 3, 4, 5, 6, 32, 54, 56, 58, 59, 79, 95, 131, 135, 137, 138, 139, 151, 163, 174, 190, 192, 195, 216, 228, 238, 239, 250, 259, 268, 276, 319, 328, 329, 337, 354, 360, 364, 367, 374, 375, 379, 382, 393, 402, 405, 411, 413, 415, 431, 435, 438, 489, 494, 510, 511, 541, 543, 568, 586, 588]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_4",
+      "filename": "毛泽东年谱_第4卷（1949.10-1952.12）.pdf",
+      "title": "毛泽东年谱 第4卷（1949.10-1952.12）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第4卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 654,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 4, 5, 6, 8, 10, 11, 16, 19, 20, 25, 39, 50, 53, 70, 71, 109, 110, 111, 122, 126, 128, 134, 136, 137, 138, 141, 147, 166, 199, 200, 205, 211, 240, 269, 273, 280, 316, 332, 355, 376, 408, 419, 450, 451, 463, 479, 484, 549, 550, 562, 585, 612, 614, 635, 654]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_5",
+      "filename": "毛泽东年谱_第5卷（1953.01-1956.09）.pdf",
+      "title": "毛泽东年谱 第5卷（1953.01-1956.09）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第5卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 650,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 3, 4, 5, 6, 7, 8, 11, 17, 18, 20, 21, 25, 36, 72, 79, 82, 89, 98, 114, 128, 134, 152, 156, 186, 191, 192, 204, 205, 211, 212, 219, 235, 240, 248, 251, 252, 266, 267, 282, 283, 302, 309, 332, 333, 337, 339, 370, 413, 441, 448, 474, 475, 484, 503, 510, 511, 512, 595, 597, 605, 607, 613, 614, 649, 650]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_6",
+      "filename": "毛泽东年谱_第6卷（1956.10-1959.03）.pdf",
+      "title": "毛泽东年谱 第6卷（1956.10-1959.03）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第6卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 666,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 4, 5, 6, 40, 48, 56, 64, 65, 66, 67, 69, 74, 102, 124, 132, 146, 156, 158, 168, 182, 187, 196, 197, 202, 204, 232, 239, 264, 271, 277, 285, 286, 291, 292, 312, 346, 348, 355, 358, 361, 368, 377, 393, 413, 453, 472, 513, 566, 567, 577, 579, 582, 621, 665, 666]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_7",
+      "filename": "毛泽东年谱_第7卷（1959.04-1961.06）.pdf",
+      "title": "毛泽东年谱 第7卷（1959.04-1961.06）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第7卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 616,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 4, 5, 6, 7, 17, 34, 38, 67, 70, 81, 83, 95, 109, 161, 163, 295, 303, 318, 332, 402, 455, 499, 519, 520, 615, 616]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_8",
+      "filename": "毛泽东年谱_第8卷（1961.07-1966.09）.pdf",
+      "title": "毛泽东年谱 第8卷（1961.07-1966.09）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第8卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 638,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 4, 5, 6, 18, 40, 54, 68, 69, 70, 71, 72, 75, 92, 95, 110, 116, 161, 183, 184, 185, 197, 277, 305, 322, 336, 376, 417, 458, 464, 465, 490, 515, 518, 529, 550, 556, 568, 575, 576, 585, 586, 591, 611, 612, 618, 632, 633, 634, 638]
+    },
+    {
+      "document_id": "mao_zedong_chronology_volume_9",
+      "filename": "毛泽东年谱_第9卷（1966.10-1976.09）.pdf",
+      "title": "毛泽东年谱 第9卷（1966.10-1976.09）",
+      "creators": [
+        "中共中央党史和文献研究院"
+      ],
+      "source_type": "chronology",
+      "edition": "中央文献出版社九卷本（本地扫描文件，版权页版本待核）",
+      "volume": "第9卷",
+      "verification_status": "edition_labeled",
+      "enabled": true,
+      "ocr_strategy": "partial_required",
+      "expected_page_count": 668,
+      "notes": "保留 PDF 物理页码及年份书签；ocr_pages 为文字层比例/碎片异常和书签起始页的重识别清单，不代表逐页人工校对。",
+      "ocr_pages": [1, 2, 3, 4, 5, 6, 7, 10, 14, 26, 28, 29, 33, 34, 36, 42, 43, 45, 48, 64, 67, 68, 69, 75, 80, 86, 89, 104, 106, 123, 124, 126, 128, 141, 150, 154, 164, 191, 192, 214, 230, 231, 256, 283, 293, 318, 321, 363, 370, 378, 379, 428, 468, 469, 483, 485, 523, 554, 567, 571, 584, 590, 603, 639, 640, 644, 661, 662, 663, 664, 666, 667, 668]
+    },
+    {
       "document_id": "cpc_history_volume_1",
       "filename": "中国共产党历史•第1卷（1921-1949).pdf",
       "title": "中国共产党历史 第一卷（1921—1949）",
-      "creators": ["中共中央党史研究室"],
+      "creators": [
+        "中共中央党史研究室"
+      ],
       "source_type": "official_history",
       "edition": "本地文件所载版本",
       "volume": "第一卷",
@@ -19,7 +174,9 @@
       "document_id": "cpc_history_volume_2",
       "filename": "中国共产党历史•第2卷（1949-1978).pdf",
       "title": "中国共产党历史 第二卷（1949—1978）",
-      "creators": ["中共中央党史研究室"],
+      "creators": [
+        "中共中央党史研究室"
+      ],
       "source_type": "official_history",
       "edition": "本地文件所载版本",
       "volume": "第二卷",
@@ -33,11 +190,17 @@
       "document_id": "mao_selected_works_combined",
       "filename": "毛泽东选集.pdf",
       "title": "毛泽东选集",
-      "creators": ["毛泽东"],
+      "creators": [
+        "毛泽东"
+      ],
       "source_type": "selected_works",
       "edition": "民间整合版",
       "volume": "第一至第七卷合订",
-      "source_series": ["静火", "赤旗", "草堂"],
+      "source_series": [
+        "静火",
+        "赤旗",
+        "草堂"
+      ],
       "verification_status": "edition_labeled",
       "enabled": true,
       "ocr_strategy": "partial_if_needed",
@@ -48,7 +211,9 @@
       "document_id": "zhou_enlai_chronology_1949_1976",
       "filename": "周恩来年谱1949-1976上中下.pdf",
       "title": "周恩来年谱（1949—1976）",
-      "creators": ["中共中央文献研究室"],
+      "creators": [
+        "中共中央文献研究室"
+      ],
       "source_type": "chronology",
       "edition": "上中下卷合订本地文件",
       "volume": "上、中、下卷",
@@ -62,7 +227,9 @@
       "document_id": "lin_biao_chronology",
       "filename": "林彪年谱.pdf",
       "title": "林彪年谱",
-      "creators": ["李德（文件标示主编，待核）"],
+      "creators": [
+        "李德（文件标示主编，待核）"
+      ],
       "source_type": "chronology",
       "edition": "本地文件版本待核",
       "verification_status": "source_pending",
@@ -75,7 +242,9 @@
       "document_id": "deng_xiaoping_selected_works",
       "filename": "邓小平文选 (全3卷).pdf",
       "title": "邓小平文选",
-      "creators": ["邓小平"],
+      "creators": [
+        "邓小平"
+      ],
       "source_type": "selected_works",
       "edition": "全三卷合订本地文件",
       "volume": "第一至第三卷",
@@ -89,7 +258,10 @@
       "document_id": "red_star_over_china",
       "filename": "西行漫记（红星照耀中国).pdf",
       "title": "西行漫记（红星照耀中国）",
-      "creators": ["埃德加·斯诺", "董乐山（译）"],
+      "creators": [
+        "埃德加·斯诺",
+        "董乐山（译）"
+      ],
       "source_type": "contemporary_observation",
       "edition": "本地扫描版",
       "verification_status": "metadata_checked",
@@ -100,4 +272,3 @@
     }
   ]
 }
-

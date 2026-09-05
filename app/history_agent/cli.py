@@ -736,6 +736,10 @@ def extract_text(
             document_ids=document_id,
             rebuild=rebuild,
             parser_name=parser_name,
+            ocr_pages_by_document={
+                item.document_id: item.ocr_pages
+                for item in load_catalog(settings.catalog_path).documents
+            },
         )
         payload = summary.model_dump()
         payload["totals"] = summary.totals

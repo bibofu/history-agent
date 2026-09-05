@@ -91,6 +91,25 @@ def _write_final_records(path: Path, records: dict[int, PageRecord]) -> None:
     os.replace(temporary_path, path)
 
 
+def _apply_ocr_policy(record: PageRecord, file_record: dict[str, Any]) -> None:
+    from history_agent.extraction.text import classify_extracted_text
+
+    if record.status == "failed":
+        return
+    policy_flags = {"catalog_full_ocr_required", "catalog_page_ocr_required"}
+    if policy_flags.intersection(record.quality_flags):
+        record.status, _ = classify_extracted_text(
+            record.normalized_text, image_object_count=record.image_object_count
+        )
+        record.quality_flags = [f for f in record.quality_flags if f not in policy_flags]
+    if file_record.get("ocr_strategy") == "full_required":
+        record.status = "ocr_required"
+        record.quality_flags.append("catalog_full_ocr_required")
+    elif record.pdf_page in file_record.get("ocr_pages", []):
+        record.status = "ocr_required"
+        record.quality_flags.append("catalog_page_ocr_required")
+
+
 def extract_document(
     *,
     file_record: dict[str, Any],
@@ -133,6 +152,7 @@ def extract_document(
     with partial_path.open("a", encoding="utf-8", newline="\n") as partial_stream:
         for pdf_page in range(1, total_pages + 1):
             if pdf_page in records:
+                _apply_ocr_policy(records[pdf_page], file_record)
                 continue
             try:
                 extraction_method: ExtractionMethod
@@ -189,6 +209,7 @@ def extract_document(
                         exc=combined_exc,
                         extractor_version=extractor_version,
                     )
+            _apply_ocr_policy(record, file_record)
             records[pdf_page] = record
             partial_stream.write(record.model_dump_json() + "\n")
             processed_pages += 1
@@ -233,6 +254,7 @@ def extract_all_text(
     document_ids: list[str] | None = None,
     rebuild: bool = False,
     parser_name: ParserName = "pymupdf",
+    ocr_pages_by_document: dict[str, list[int]] | None = None,
 ) -> FullExtractionSummary:
     started_at = utc_now()
     files = current_files(database)
@@ -243,6 +265,12 @@ def extract_all_text(
 
     results: list[DocumentExtractionResult] = []
     for document_id in selected_ids:
+        files[document_id]["ocr_pages"] = (ocr_pages_by_document or {}).get(document_id, [])
+        if any(
+            not 1 <= page <= int(files[document_id]["page_count"])
+            for page in files[document_id]["ocr_pages"]
+        ):
+            raise ExtractionError(f"OCR page outside PDF bounds for {document_id}")
         results.append(
             extract_document(
                 file_record=files[document_id],

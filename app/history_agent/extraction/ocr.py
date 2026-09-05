@@ -67,6 +67,7 @@ def create_paddle_ocr_engine() -> OcrEngine:
             use_textline_orientation=False,
             engine="paddle",
             enable_mkldnn=True,
+            cpu_threads=2,
             text_detection_model_name=DEFAULT_DETECTION_MODEL,
             text_recognition_model_name=DEFAULT_RECOGNITION_MODEL,
         ),
@@ -211,7 +212,11 @@ def extract_document_ocr(
                         for flag in source_record.quality_flags
                         if flag not in record.quality_flags
                     )
-                    record.quality_flags.append("ocr_from_image_only_page")
+                    record.quality_flags.append(
+                        "ocr_from_existing_text_layer"
+                        if source_record.normalized_text.strip()
+                        else "ocr_from_image_only_page"
+                    )
                     if record.character_count < 20 or record.cjk_character_count < 5:
                         record.quality_flags.append("ocr_low_substantive_text")
                 except Exception as exc:

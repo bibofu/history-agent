@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -25,7 +25,17 @@ class CatalogDocument(BaseModel):
         "full_required",
     ] = "partial_if_needed"
     expected_page_count: int | None = Field(default=None, ge=1)
+    ocr_pages: list[Annotated[int, Field(ge=1)]] = Field(default_factory=list)
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_ocr_pages(self) -> CatalogDocument:
+        if self.expected_page_count is not None and any(
+            page > self.expected_page_count for page in self.ocr_pages
+        ):
+            raise ValueError("ocr_pages must be within expected_page_count")
+        self.ocr_pages = sorted(set(self.ocr_pages))
+        return self
 
     @field_validator("filename")
     @classmethod

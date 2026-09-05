@@ -1,11 +1,12 @@
 import json
 from pathlib import Path
 
+import pymupdf
 from history_agent.corpus.catalog import load_catalog
 from history_agent.corpus.scanner import scan_corpus
 from history_agent.db import Database
 from history_agent.extraction.benchmark import analyze_text, compact_text
-from history_agent.extraction.full import extract_all_text
+from history_agent.extraction.full import extract_all_text, extract_document
 from history_agent.extraction.ocr import parse_paddle_ocr_result
 from history_agent.extraction.report import compact_page_ranges
 from history_agent.extraction.text import classify_extracted_text, normalize_for_storage
@@ -175,3 +176,33 @@ def test_full_extraction_is_resumable(work_path: Path) -> None:
     assert first.documents[0].processed_pages == 2
     assert second.documents[0].processed_pages == 0
     assert second.documents[0].reused_pages == 2
+
+
+def test_full_ocr_policy_overrides_existing_text_and_cached_pages(work_path: Path) -> None:
+    pdf = pymupdf.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Existing but unreliable text layer")
+    pdf.save(work_path / "fixture.pdf")
+    pdf.close()
+    file_record = {
+        "document_id": "fixture", "relative_path": "fixture.pdf",
+        "filename": "fixture.pdf", "sha256": "test-hash",
+        "ocr_strategy": "partial_if_needed",
+    }
+    kwargs = {
+        "file_record": file_record, "project_root": work_path,
+        "output_dir": work_path / "pages", "run_id": "test",
+        "rebuild": False, "parser_name": "pymupdf",
+    }
+    assert extract_document(**kwargs).status_counts == {"extracted": 1}
+    file_record["ocr_strategy"] = "full_required"
+    cached = extract_document(**kwargs)
+    assert cached.reused_pages == 1
+    assert cached.status_counts == {"ocr_required": 1}
+    kwargs["rebuild"] = True
+    assert extract_document(**kwargs).status_counts == {"ocr_required": 1}
+    kwargs["rebuild"] = False
+    file_record["ocr_strategy"] = "partial_required"
+    assert extract_document(**kwargs).status_counts == {"extracted": 1}
+    file_record["ocr_pages"] = [1]
+    assert extract_document(**kwargs).status_counts == {"ocr_required": 1}
