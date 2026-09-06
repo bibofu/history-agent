@@ -21,20 +21,50 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v4"
+PROMPT_VERSION = "grounded-answer-v5"
 
 
 def _compact(text: str) -> str:
     return WHITESPACE.sub(" ", text).strip()
 
 
-def _quote_for_hit(hit: SearchHit, query_terms: list[str], limit: int = 420) -> str:
+def _quote_for_hit(
+    hit: SearchHit,
+    query_terms: list[str],
+    limit: int = 420,
+    *,
+    query_people: list[str] | None = None,
+) -> str:
     text = _compact(hit.text)
     if len(text) <= limit:
         return text
     positions = [text.find(term) for term in query_terms if len(term) >= 2]
     positions = [position for position in positions if position >= 0]
     center = min(positions) if positions else 0
+    people = set(query_people or [])
+    if len(people) == 2:
+        mentions = sorted(
+            (match.start(), match.end(), person)
+            for person in people
+            for match in re.finditer(re.escape(person), text)
+        )
+        # Center the quote on the closest pair of mentions, not the first occurrence
+        # of a common keyword. Proximity selects context; it does not prove interaction.
+        pairs = [
+            (right[1] - left[0], left[0], right[1])
+            for left, right in zip(mentions, mentions[1:], strict=False)
+            if left[2] != right[2] and right[1] - left[0] <= limit
+        ]
+        if pairs:
+            _, center, pair_end = min(pairs)
+            # Keep the preceding event context, including when a roster is at the
+            # end of the passage. A short tail alone can lose which meeting it names.
+            window_start = max(0, pair_end - limit, min(center - 110, len(text) - limit))
+            boundaries = [text.find(mark, window_start, center) for mark in "。！？；"]
+            boundary = min((position for position in boundaries if position >= 0), default=-1)
+            start = boundary + 1 if boundary >= 0 else window_start
+            end = min(len(text), start + limit)
+            return ("……" if start else "") + text[start:end] + ("……" if end < len(text) else "")
     window_start = max(0, center - 110)
     boundaries = [text.rfind(mark, window_start, center) for mark in "。！？；"]
     boundary = max(boundaries)
@@ -49,9 +79,7 @@ def _unsupported_leading_entity(question: str, hits: list[SearchHit]) -> str | N
     match = LEADING_ENTITY.search(question.strip())
     if match is None:
         return None
-    entities = [
-        entity for entity in ENTITY_SEPARATOR.split(match.group("entity")) if entity
-    ]
+    entities = [entity for entity in ENTITY_SEPARATOR.split(match.group("entity")) if entity]
     for entity in entities:
         if not any(
             entity in hit.title
@@ -72,7 +100,13 @@ def _citations(response: Any) -> list[Citation]:
             volume=hit.volume,
             pdf_page=hit.pdf_page_start,
             section=hit.section_path,
-            quote=_quote_for_hit(hit, response.query_terms),
+            quote=_quote_for_hit(
+                hit,
+                response.query_terms,
+                query_people=response.query_people
+                if response.query_intent == "intersection"
+                else [],
+            ),
             source_type=hit.source_type,
             verification_status=hit.verification_status,
             extraction_methods=hit.extraction_methods,
@@ -86,7 +120,9 @@ def _extractive_answer(intent: str, citations: list[Citation]) -> str:
         return "现有本地资料中没有检索到足以回答这个问题的证据。"
     lead = {
         "timeline": "根据当前本地资料，可先按以下史料线索梳理：",
-        "intersection": "根据当前本地资料，两位人物的交集可从以下共同事件核查：",
+        "intersection": (
+            "根据当前本地资料，检索到以下涉及两位人物的史料线索，可据原文核查具体交集："
+        ),
         "viewpoint": "根据当前本地资料，相关观点主要见于以下原文：",
     }.get(intent, "根据当前本地资料，检索到以下可核验线索：")
     bullets: list[str] = []
@@ -185,6 +221,11 @@ def _llm_answer(
         "出现一个本次证据编号；引用格式只能是[E1]、[E2]这种形式。每一条包含日期、职务、"
         "地点、行动或人物关系的事实必须在同一段或同一列表项给出证据编号；同一要点正常换行"
         "不必重复标注。如需写文献名或PDF页码，必须与证据包完全一致。"
+        "对于人物交集问题，必须说明原文支持两人围绕哪一具体事件发生了什么互动，"
+        "区分共同参与、意见支持与分工协作，不能把人名共现推断成共同参与。"
+        "若问题指定长征等历史时期，只总结证据明确支持属于该时期的活动；"
+        "检索年份范围只是召回线索，不能把同年其他活动或后来的回忆当作当时的交集。"
+        "片段不足以证明互动或时间归属时明确说明，不要补写。"
     )
     history = [item.model_dump() for item in request.history[-6:]]
     messages: list[dict[str, object]] = [
@@ -324,7 +365,8 @@ def answer_question(settings: Settings, request: QuestionRequest) -> AnswerRespo
         citations = _citations(retrieval)
         evidence_status = (
             "supported"
-            if any(
+            if retrieval.query_intent != "intersection"
+            and any(
                 hit.keyword_rank is not None and hit.vector_rank is not None
                 for hit in retrieval.hits[:5]
             )
@@ -335,9 +377,7 @@ def answer_question(settings: Settings, request: QuestionRequest) -> AnswerRespo
         if citations
         else LLMResult(answer=None, error_code="no_evidence")
     )
-    generator_mode: Literal["extractive", "llm"] = (
-        "llm" if llm_result.answer else "extractive"
-    )
+    generator_mode: Literal["extractive", "llm"] = "llm" if llm_result.answer else "extractive"
     answer = llm_result.answer or _extractive_answer(retrieval.query_intent, citations)
     limitations = []
     if not citations:
@@ -357,6 +397,16 @@ def answer_question(settings: Settings, request: QuestionRequest) -> AnswerRespo
         )
     if citations:
         limitations.append("答案仅代表当前已入库文献的检索结果，不等同于完整历史结论。")
+        if retrieval.query_intent == "intersection":
+            limitations.append(
+                "检索片段是交集研究线索；两人的具体互动须由原文支持，不能仅凭人名共现确认。"
+            )
+        if retrieval.query_year_range and not retrieval.query_years:
+            start_year, end_year = retrieval.query_year_range
+            limitations.append(
+                f"时期名称按 {start_year}—{end_year} 年范围召回资料；"
+                "这不是精确起止日期，具体活动的时期归属须结合原文核对。"
+            )
     return AnswerResponse(
         question=request.question,
         answer=answer,

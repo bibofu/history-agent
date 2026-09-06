@@ -80,13 +80,45 @@ def test_question_request_rejects_unbounded_history() -> None:
     assert request.history == []
 
 
-def test_unknown_leading_person_must_appear_in_evidence() -> None:
-    assert (
-        _unsupported_leading_entity(
-            "爱因斯坦在1925年担任了什么党内职务？", []
-        )
-        == "爱因斯坦"
+def test_intersection_quote_keeps_the_complete_interaction_after_long_background() -> None:
+    background = "长征途中，毛泽东提出意见。" + "会议回顾了此前的军事部署和行动方针。" * 30
+    interaction = "周恩来、朱德等也是支持毛泽东的。"
+    hit = SearchHit(
+        rank=1,
+        chunk_id="interaction",
+        document_id="history",
+        title="党史",
+        filename="history.pdf",
+        source_type="official_history",
+        verification_status="verified",
+        pdf_page_start=481,
+        pdf_page_end=481,
+        section_path=[],
+        text=background + interaction + "随后讨论会议安排。" * 30,
+        year_mentions=[1935],
+        people=["毛泽东", "周恩来"],
+        extraction_methods=["text_layer"],
+        score=1.0,
+        matched_terms=[],
     )
+    quote = _quote_for_hit(hit, ["长征", "毛泽东", "周恩来"], query_people=["毛泽东", "周恩来"])
+    assert interaction in quote
+    assert quote.removeprefix("……").removesuffix("……") in hit.text
+    assert len(quote) <= 424
+
+    # A short list of attendees at the end must retain the sentence naming its event.
+    event = "1935年1月15日至17日，中央政治局在遵义召开扩大会议。"
+    roster = "出席会议的政治局委员有毛泽东、张闻天、周恩来、朱德。"
+    tail_hit = hit.model_copy(update={"text": background + event + roster})
+    tail_quote = _quote_for_hit(
+        tail_hit, ["长征", "毛泽东", "周恩来"], query_people=["毛泽东", "周恩来"]
+    )
+    assert event in tail_quote
+    assert roster in tail_quote
+
+
+def test_unknown_leading_person_must_appear_in_evidence() -> None:
+    assert _unsupported_leading_entity("爱因斯坦在1925年担任了什么党内职务？", []) == "爱因斯坦"
 
 
 def test_compound_leading_people_are_checked_individually() -> None:
@@ -113,9 +145,7 @@ def test_compound_leading_people_are_checked_individually() -> None:
 
 
 def test_api_health_and_question_contract(monkeypatch: Any) -> None:
-    settings = Settings(
-        project_root=Path.cwd(), data_dir=Path("test-data-that-does-not-exist")
-    )
+    settings = Settings(project_root=Path.cwd(), data_dir=Path("test-data-that-does-not-exist"))
 
     expected = AnswerResponse(
         question="周恩来在1956年做了什么？",
@@ -184,6 +214,8 @@ def test_deepseek_v4_request_and_usage(monkeypatch: Any) -> None:
     assert body["thinking"] == {"type": "enabled"}
     assert body["reasoning_effort"] == "high"
     assert "temperature" not in body
+    assert "不能把人名共现推断成共同参与" in body["messages"][0]["content"]
+    assert "检索年份范围只是召回线索" in body["messages"][0]["content"]
 
 
 def test_deepseek_rejects_unknown_evidence_marker(monkeypatch: Any) -> None:
@@ -229,8 +261,7 @@ def test_validation_rejects_uncited_core_fact_line() -> None:
 
 def test_validation_accepts_wrapped_fact_with_citation_in_same_list_item() -> None:
     result = validate_grounded_answer(
-        "- 1956年1月，周恩来参加有关会议。\n"
-        "  随后主持科学规划工作。[E1]",
+        "- 1956年1月，周恩来参加有关会议。\n  随后主持科学规划工作。[E1]",
         [_citation()],
     )
 
@@ -239,8 +270,7 @@ def test_validation_accepts_wrapped_fact_with_citation_in_same_list_item() -> No
 
 def test_validation_accepts_multiline_paragraph_with_trailing_citation() -> None:
     result = validate_grounded_answer(
-        "1956年1月，周恩来参加有关会议。\n"
-        "随后主持科学规划工作。相关情况见年谱记载。[E1]",
+        "1956年1月，周恩来参加有关会议。\n随后主持科学规划工作。相关情况见年谱记载。[E1]",
         [_citation()],
     )
 
@@ -289,10 +319,9 @@ def test_deepseek_falls_back_when_core_fact_has_no_citation(monkeypatch: Any) ->
                 "choices": [
                     {
                         "message": {
-                                "content": (
-                                    "1956年1月，周恩来参加有关会议。[E1]\n\n"
-                                    "随后主持科学规划工作。"
-                                )
+                            "content": (
+                                "1956年1月，周恩来参加有关会议。[E1]\n\n随后主持科学规划工作。"
+                            )
                         }
                     }
                 ]
@@ -320,8 +349,7 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
                     {
                         "message": {
                             "content": (
-                                "1956年1月，周恩来参加有关会议。[E1]\n\n"
-                                "随后主持科学规划工作。"
+                                "1956年1月，周恩来参加有关会议。[E1]\n\n随后主持科学规划工作。"
                             )
                         }
                     }
@@ -337,8 +365,7 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
                     {
                         "message": {
                             "content": (
-                                "1956年1月，周恩来参加有关会议。[E1]\n\n"
-                                "随后主持科学规划工作。[E1]"
+                                "1956年1月，周恩来参加有关会议。[E1]\n\n随后主持科学规划工作。[E1]"
                             )
                         }
                     }
@@ -368,10 +395,7 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
         citations=[_citation()],
     )
 
-    assert result.answer == (
-        "1956年1月，周恩来参加有关会议。[E1]\n\n"
-        "随后主持科学规划工作。[E1]"
-    )
+    assert result.answer == ("1956年1月，周恩来参加有关会议。[E1]\n\n随后主持科学规划工作。[E1]")
     assert result.usage == {
         "prompt_tokens": 25,
         "completion_tokens": 5,

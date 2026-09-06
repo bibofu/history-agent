@@ -12,8 +12,14 @@ from history_agent.errors import ResearchDataError
 from history_agent.research.intersections import get_person_intersections
 from history_agent.research.people import resolve_person
 from history_agent.research.timeline import TimelineEvidence, get_person_timeline
+from history_agent.retrieval.keyword import PERIOD_RANGES
 
 _YEAR = re.compile(r"(?P<start>\d{4})年?(?:(?:至|到|—|–|-|~|～)(?P<end>\d{4})年?)?")
+_PERIOD = re.compile(
+    r"(?P<period>"
+    + "|".join(re.escape(name) for name in sorted(PERIOD_RANGES, key=len, reverse=True))
+    + r")(?:期间|时期|时|中)?"
+)
 _INTERSECTION = re.compile(r"交集|共同(?:事件|活动|经历|参加|参与|出席)")
 _TIMELINE = re.compile(r"时间线|经历[？?。]*$|经历有哪些|有哪些活动|做了什么|参加[过了]哪些会议")
 _ALLOWED = {
@@ -91,14 +97,20 @@ def answer_structured_question(
             return None
     clarify = (
         "请明确人物和年份，例如“毛泽东在1949年有哪些经历”或"
-        "“毛泽东与周恩来在1949年有哪些交集”。当前结构化查询支持整年或年份区间，"
+        "“毛泽东与周恩来在1949年有哪些交集”。也可使用“长征期间”等已识别的时期名称"
+        "检索原文。当前结构化查询支持整年或年份区间，"
         "不会忽略地点、月份等附加条件，也不会自动继承上一轮人物。"
     )
     years = list(_YEAR.finditer(question))
-    if len(years) != 1:
+    periods = list(_PERIOD.finditer(question))
+    period_query = not years and len(periods) == 1
+    if period_query:
+        start, end = PERIOD_RANGES[periods[0]["period"]]
+    elif len(years) == 1:
+        start = int(years[0]["start"])
+        end = int(years[0]["end"] or start)
+    else:
         return _response(request, intent, clarify)
-    start = int(years[0]["start"])
-    end = int(years[0]["end"] or start)
     lower, upper = settings.research_start.year, settings.research_end.year
     if not lower <= start <= end <= upper:
         return _response(
@@ -128,7 +140,8 @@ def answer_structured_question(
             return _response(request, intent, clarify)
         # Removing only recognized names/year/function words prevents silently dropping
         # constraints (e.g. an unknown third person, a month, place, or negation).
-        remainder = name_pattern.sub("", _YEAR.sub("", question))
+        time_pattern = _PERIOD if period_query else _YEAR
+        remainder = name_pattern.sub("", time_pattern.sub("", question))
         remainder = re.sub(r"^(?:(?:请问|请|帮我|查询|列出|梳理|一下|看看))+", "", remainder)
         remainder = re.sub(r"[和与及、在于的]", "", remainder)
         if _ALLOWED[intent].fullmatch(remainder) is None:
@@ -146,6 +159,12 @@ def answer_structured_question(
             return _response(
                 request, intent, "交集查询需要两位不同人物；两个称呼可能是同一人的别名。"
             )
+        if period_query:
+            # Named periods ask for a synthesis of source passages. The hybrid retriever
+            # already understands their year ranges. Select that route BEFORE looking
+            # up joint-action candidates, and only after validating people/constraints.
+            # Never use retrieval as an outcome-dependent fallback for a failed lookup.
+            return None
         citations: list[Citation] = []
         lines: list[str] = []
         event_types = ["meeting"] if "会议" in question else None

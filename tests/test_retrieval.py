@@ -52,6 +52,7 @@ def _response(hits: list[SearchHit], *, intent: str = "general") -> SearchRespon
 def test_query_routing_extracts_intent_and_period() -> None:
     assert infer_query_intent("毛泽东和周恩来在长征期间的交集") == "intersection"
     assert infer_query_intent("周恩来在1956年主要有哪些经历") == "timeline"
+    assert infer_query_intent("周恩来在长征期间有哪些经历") == "timeline"
     assert infer_query_intent("毛泽东关于调查研究的观点") == "viewpoint"
     assert infer_query_intent("毛泽东在矛盾论中怎样分析主要矛盾") == "viewpoint"
     assert infer_query_intent("斯诺在西行漫记中怎样记述毛泽东") == "observation"

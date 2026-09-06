@@ -106,7 +106,7 @@ def infer_query_intent(query: str) -> str:
         for term in ("观点", "论述", "主张", "看法", "如何看", "怎样分析", "如何分析")
     ):
         return "viewpoint"
-    if YEAR.search(query) and any(
+    if (YEAR.search(query) or any(period in query for period in PERIOD_RANGES)) and any(
         term in query
         for term in ("经历", "做了什么", "活动", "任职", "担任", "职务", "主要做")
     ):
