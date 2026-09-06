@@ -43,15 +43,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @api.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        return FileResponse(str(static_dir.joinpath("index.html")))
+        return FileResponse(
+            str(static_dir.joinpath("index.html")), headers={"Cache-Control": "no-store"}
+        )
 
     @api.get("/app.css", include_in_schema=False)
     def stylesheet() -> FileResponse:
-        return FileResponse(str(static_dir.joinpath("app.css")), media_type="text/css")
+        return FileResponse(
+            str(static_dir.joinpath("app.css")),
+            media_type="text/css",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @api.get("/app.js", include_in_schema=False)
     def javascript() -> FileResponse:
-        return FileResponse(str(static_dir.joinpath("app.js")), media_type="application/javascript")
+        return FileResponse(
+            str(static_dir.joinpath("app.js")),
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @api.get("/api/health")
     def health() -> dict[str, object]:

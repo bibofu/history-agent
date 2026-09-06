@@ -58,7 +58,8 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
-  const path = req.url === "/" ? "index.html" : req.url.split("/").pop();
+  const requestPath = new URL(req.url, "http://127.0.0.1").pathname;
+  const path = requestPath === "/" ? "index.html" : requestPath.split("/").pop();
   try {
     const bytes = await readFile(new URL(path, root));
     res.setHeader("Content-Type", path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css" : "text/html");

@@ -13,8 +13,10 @@ MARKDOWN = MarkdownIt("commonmark").enable("table")
 CITATION_ONLY = re.compile(r"(?:\s*\[E\d+\][\s,，、;；。.]*)+")
 # Only nominal topic labels are exempt; a factual heading still needs a citation.
 TOPIC_LABEL = re.compile(
+    r"(?:[一二三四五六七八九十0-9]+[、.)．]\s*)?"
     r"(?:(?:共同)?(?:参加|参与|出席)(?:会议|活动)(?:情况)?|"
-    r"(?:成立|召开)(?:背景|过程)|(?:出席|参加)人员|主要讲话|会议决定)[:：]?"
+    r"(?:成立|召开)(?:背景|过程)|(?:参与|出席|参加)(?:者|人员)(?:个例|情况|构成)?|"
+    r"主要讲话|会议决定)[:：]?"
 )
 EVIDENCE_LIMIT = re.compile(
     r"^(?:(?:现有|当前|本次|所提供的|检索到的|已提供的)*(?:资料|材料|史料|证据|片段)"
@@ -22,9 +24,14 @@ EVIDENCE_LIMIT = re.compile(
     r"(?:尚无法|尚不能|无法|不能|不足以))"
     r"(?:确认|证实|判断|确定|证明|推断)"
 )
+EVIDENCE_SCOPE_NOTE = re.compile(
+    r"(?:证据包|证据|资料|材料|史料).*(?:无更多材料|不足|无法进一步说明|"
+    r"无直接关联|不予采入|未予采入|不纳入|未纳入)"
+)
 CLAUSE_BOUNDARY = re.compile(r"[，,。！？；;\n]")
 ASSERTION_TRANSITION = re.compile(r"但|然而|不过|实际|事实上|而且|并且|随后|因此|所以")
 CHINESE_YEAR = r"[一二三四五六七八九〇零]{4}年"
+DATE_SIGNAL = re.compile(rf"(?:(?:18|19|20)\d{{2}}年|{CHINESE_YEAR}|\d{{1,2}}月\d{{1,2}}日)")
 CORE_FACT_SIGNAL = re.compile(
     rf"(?:"
     rf"(?:18|19|20)\d{{2}}年|{CHINESE_YEAR}|\d{{1,2}}月\d{{1,2}}日|"
@@ -82,18 +89,20 @@ def _claim_blocks(answer: str) -> list[str]:
                     # preceding paragraph in this container, never another list item.
                     blocks[preceding_paragraph] += " " + text
                     continue
-                is_label = child.type == "heading" or (
-                    container.type == "list_item"
-                    and any(
-                        item.type in {"bullet_list", "ordered_list"} for item in container.children
-                    )
+                is_undated_heading = child.type == "heading" and not DATE_SIGNAL.search(text)
+                is_nested_list_label = container.type == "list_item" and any(
+                    item.type in {"bullet_list", "ordered_list"} for item in container.children
                 )
                 is_table_header = container.type == "thead" and all(
                     TOPIC_LABEL.fullmatch(_node_text(cell))
                     or not _is_core_fact_block(_node_text(cell))
                     for cell in child.children
                 )
-                if (is_label and TOPIC_LABEL.fullmatch(text)) or is_table_header:
+                if (
+                    is_undated_heading
+                    or (is_nested_list_label and TOPIC_LABEL.fullmatch(text))
+                    or is_table_header
+                ):
                     preceding_paragraph = None
                     continue
                 blocks.append(text)
@@ -108,6 +117,10 @@ def _claim_blocks(answer: str) -> list[str]:
 
 def _is_core_fact_block(block: str) -> bool:
     claim = _claim_text(block)
+    if not ASSERTION_TRANSITION.search(claim) and (
+        EVIDENCE_LIMIT.search(claim) or EVIDENCE_SCOPE_NOTE.search(claim)
+    ):
+        return False
     for clause in CLAUSE_BOUNDARY.split(claim):
         clause = clause.strip()
         if CORE_FACT_SIGNAL.search(clause) and not (

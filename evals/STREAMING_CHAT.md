@@ -2,7 +2,7 @@
 
 ## 行为
 
-聊天页面改用 `POST /api/questions/stream`。服务端向 DeepSeek 请求真实的 `stream: true` 响应，收到正文增量就通过 SSE 发给浏览器；前端持续解析 UTF-8 和 SSE 帧，逐帧渲染 Markdown。未等待完整答案后再分片，未展示模型的 `reasoning_content`。原有 JSON 问答接口保持兼容，两个入口共用证据包、提示词（`grounded-answer-v7`）、引用修复请求和最终回答构造。
+聊天页面改用 `POST /api/questions/stream`。服务端向 DeepSeek 请求真实的 `stream: true` 响应，收到正文增量就通过 SSE 发给浏览器；前端持续解析 UTF-8 和 SSE 帧，逐帧渲染 Markdown。未等待完整答案后再分片，未展示模型的 `reasoning_content`。原有 JSON 问答接口保持兼容，两个入口共用证据包、提示词（`grounded-answer-v8`）、引用修复请求和最终回答构造。
 
 | 事件 | 数据 | 前端行为 |
 | --- | --- | --- |
