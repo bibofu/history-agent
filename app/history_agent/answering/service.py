@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 
@@ -12,7 +12,7 @@ from history_agent.answering.structured import answer_structured_question
 from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.retrieval.hybrid import search_hybrid_index
-from history_agent.retrieval.models import SearchHit
+from history_agent.retrieval.models import SearchHit, SearchResponse
 
 WHITESPACE = re.compile(r"\s+")
 SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？；])")
@@ -21,7 +21,7 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v5"
+PROMPT_VERSION = "grounded-answer-v6"
 
 
 def _compact(text: str) -> str:
@@ -201,11 +201,9 @@ def _request_deepseek_completion(
     return LLMResult(answer=answer, usage=usage)
 
 
-def _llm_answer(
+def _llm_request_payload(
     *, settings: Settings, request: QuestionRequest, citations: list[Citation]
-) -> LLMResult:
-    if not settings.llm_enabled:
-        return LLMResult(answer=None, error_code="not_configured")
+) -> dict[str, object]:
     evidence = "\n\n".join(
         (
             f"[{item.evidence_id}] 《{item.document}》PDF第{item.pdf_page}页"
@@ -226,6 +224,7 @@ def _llm_answer(
         "若问题指定长征等历史时期，只总结证据明确支持属于该时期的活动；"
         "检索年份范围只是召回线索，不能把同年其他活动或后来的回忆当作当时的交集。"
         "片段不足以证明互动或时间归属时明确说明，不要补写。"
+        "使用Markdown组织回答，可使用简短标题、列表和加粗；证据编号保持[E1]格式。"
     )
     history = [item.model_dump() for item in request.history[-6:]]
     messages: list[dict[str, object]] = [
@@ -245,20 +244,16 @@ def _llm_answer(
     }
     if settings.llm_thinking:
         request_payload["reasoning_effort"] = settings.llm_reasoning_effort
-    first = _request_deepseek_completion(settings, request_payload)
-    if first.answer is None:
-        return first
-    validation = validate_grounded_answer(first.answer, citations)
-    if validation.valid:
-        return first
-    if validation.error_code != "uncited_core_claim":
-        return LLMResult(
-            answer=None,
-            error_code=validation.error_code,
-            usage=first.usage,
-        )
+    return request_payload
 
-    missing_claims = "\n".join(f"- {claim}" for claim in validation.uncited_claims)
+
+def _repair_request_payload(
+    request_payload: dict[str, object],
+    answer: str,
+    citations: list[Citation],
+    uncited_claims: tuple[str, ...],
+) -> dict[str, object]:
+    missing_claims = "\n".join(f"- {claim}" for claim in uncited_claims)
     valid_markers = "、".join(f"[{item.evidence_id}]" for item in citations)
     repair_instruction = (
         "上一版回答因部分事实要点缺少引用而未通过校验。请重新输出完整回答，不要增加新事实，"
@@ -266,14 +261,33 @@ def _llm_answer(
         f"都要使用证据包中的合法编号（仅限：{valid_markers}）。缺少引用的要点如下：\n"
         f"{missing_claims}"
     )
-    repair_payload = {
+    return {
         **request_payload,
         "messages": [
-            *messages,
-            {"role": "assistant", "content": first.answer},
+            *cast(list[dict[str, object]], request_payload["messages"]),
+            {"role": "assistant", "content": answer},
             {"role": "user", "content": repair_instruction},
         ],
     }
+
+
+def _llm_answer(
+    *, settings: Settings, request: QuestionRequest, citations: list[Citation]
+) -> LLMResult:
+    if not settings.llm_enabled:
+        return LLMResult(answer=None, error_code="not_configured")
+    request_payload = _llm_request_payload(settings=settings, request=request, citations=citations)
+    first = _request_deepseek_completion(settings, request_payload)
+    if first.answer is None:
+        return first
+    validation = validate_grounded_answer(first.answer, citations)
+    if validation.valid:
+        return first
+    if validation.error_code != "uncited_core_claim":
+        return LLMResult(answer=None, error_code=validation.error_code, usage=first.usage)
+    repair_payload = _repair_request_payload(
+        request_payload, first.answer, citations, validation.uncited_claims
+    )
     repaired = _request_deepseek_completion(settings, repair_payload)
     combined_usage = _merge_usage(first.usage, repaired.usage)
     if repaired.answer is None:
@@ -344,10 +358,15 @@ def check_deepseek_connection(settings: Settings) -> dict[str, object]:
     }
 
 
-def answer_question(settings: Settings, request: QuestionRequest) -> AnswerResponse:
-    structured = answer_structured_question(settings, request)
-    if structured is not None:
-        return structured
+@dataclass(frozen=True)
+class AnswerContext:
+    retrieval: SearchResponse
+    citations: list[Citation]
+    evidence_status: Literal["supported", "partial", "no_evidence"]
+    unsupported_entity: str | None
+
+
+def _retrieve_context(settings: Settings, request: QuestionRequest) -> AnswerContext:
     retrieval = search_hybrid_index(
         keyword_index_path=settings.keyword_index_path,
         vector_index_path=settings.vector_index_path,
@@ -372,11 +391,14 @@ def answer_question(settings: Settings, request: QuestionRequest) -> AnswerRespo
             )
             else "partial"
         )
-    llm_result = (
-        _llm_answer(settings=settings, request=request, citations=citations)
-        if citations
-        else LLMResult(answer=None, error_code="no_evidence")
-    )
+    return AnswerContext(retrieval, citations, evidence_status, unsupported_entity)
+
+
+def _finish_answer(
+    settings: Settings, request: QuestionRequest, context: AnswerContext, llm_result: LLMResult
+) -> AnswerResponse:
+    retrieval, citations = context.retrieval, context.citations
+    unsupported_entity = context.unsupported_entity
     generator_mode: Literal["extractive", "llm"] = "llm" if llm_result.answer else "extractive"
     answer = llm_result.answer or _extractive_answer(retrieval.query_intent, citations)
     limitations = []
@@ -410,7 +432,7 @@ def answer_question(settings: Settings, request: QuestionRequest) -> AnswerRespo
     return AnswerResponse(
         question=request.question,
         answer=answer,
-        evidence_status=evidence_status,
+        evidence_status=context.evidence_status,
         generator_mode=generator_mode,
         llm_status=(
             "not_applicable"
@@ -428,3 +450,16 @@ def answer_question(settings: Settings, request: QuestionRequest) -> AnswerRespo
         citations=citations,
         limitations=limitations,
     )
+
+
+def answer_question(settings: Settings, request: QuestionRequest) -> AnswerResponse:
+    structured = answer_structured_question(settings, request)
+    if structured is not None:
+        return structured
+    context = _retrieve_context(settings, request)
+    llm_result = (
+        _llm_answer(settings=settings, request=request, citations=context.citations)
+        if context.citations
+        else LLMResult(answer=None, error_code="no_evidence")
+    )
+    return _finish_answer(settings, request, context, llm_result)

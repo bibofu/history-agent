@@ -16,4 +16,16 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $python -m pytest
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+$nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCommand) {
+    foreach ($scriptName in @("app.js", "markdown.js", "stream.js")) {
+        & $nodeCommand.Source --check (Join-Path $projectRoot "app\history_agent\web\static\$scriptName")
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+    & $nodeCommand.Source (Join-Path $projectRoot "scripts\test-stream.mjs")
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} else {
+    Write-Host "Node.js is not installed; frontend stream checks skipped."
+}
+
 Write-Host "All project checks passed."

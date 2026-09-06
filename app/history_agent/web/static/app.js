@@ -1,3 +1,6 @@
+import {renderMarkdown} from "/assets/markdown.js";
+import {consumeEventStream} from "/assets/stream.js";
+
 const messages = document.querySelector("#messages");
 const form = document.querySelector("#composer");
 const input = document.querySelector("#question");
@@ -6,9 +9,11 @@ const statusText = document.querySelector("#status");
 const statusDot = document.querySelector("#status-dot");
 const clear = document.querySelector("#clear");
 const history = [];
+const suggestions = document.querySelectorAll(".suggestions button");
+let active = null;
 
 function escapeHtml(value) {
-  return value.replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
+  return String(value).replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
 }
 
 function addMessage(role, html) {
@@ -32,35 +37,117 @@ function renderAnswer(data) {
       <p class="quote">${escapeHtml(item.quote)}</p>
     </details>`).join("");
   const limits = data.limitations.length ? `<p class="limits">${data.limitations.map(escapeHtml).join(" · ")}</p>` : "";
-  return `<p class="meta">${mode}</p><p>${escapeHtml(data.answer)}</p><div class="evidence">${evidence}</div>${limits}`;
+  return `<p class="meta">${mode}</p><div class="markdown-body">${renderMarkdown(data.answer)}</div><div class="evidence">${evidence}</div>${limits}`;
+}
+
+function setBusy(busy) {
+  input.disabled = busy;
+  send.textContent = busy ? "停止生成" : "发送";
+  send.type = busy ? "button" : "submit";
+  suggestions.forEach(button => { button.disabled = busy; });
+}
+
+function renderDraft(run) {
+  if (active !== run) return;
+  const follow = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220;
+  run.bubble.innerHTML = `<p class="meta stream-status" role="status">${escapeHtml(run.status)}</p><div class="markdown-body">${renderMarkdown(run.text)}</div>`;
+  if (follow) run.pending.scrollIntoView({block: "end"});
+}
+
+function scheduleDraft(run) {
+  if (run.frame) return;
+  run.frame = requestAnimationFrame(() => {
+    run.frame = null;
+    renderDraft(run);
+  });
+}
+
+function stopGeneration() {
+  if (!active) return;
+  const run = active;
+  run.controller.abort();
+  cancelAnimationFrame(run.frame);
+  run.status = "已停止，回答未完成核查。";
+  renderDraft(run);
+  run.pending.removeAttribute("aria-busy");
+  active = null;
+  setBusy(false);
+  input.focus();
 }
 
 async function ask(question) {
+  if (active || !question.trim()) return;
   addMessage("user", `<p>${escapeHtml(question)}</p>`);
-  const pending = addMessage("assistant", '<span class="typing"><i></i><i></i><i></i></span>');
-  send.disabled = true;
-  input.disabled = true;
+  const pending = addMessage("assistant", '<p class="meta" role="status">正在检索本地史料…</p>');
+  pending.setAttribute("aria-busy", "true");
+  const run = {controller: new AbortController(), pending, bubble: pending.querySelector(".bubble"), text: "", status: "正在检索本地史料…", frame: null};
+  active = run;
+  setBusy(true);
+  let completed = false;
   try {
-    const response = await fetch("/api/questions", {
+    const response = await fetch("/api/questions/stream", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({question, top_k: 8, history: history.slice(-8)})
+      headers: {"Content-Type": "application/json", "Accept": "text/event-stream"},
+      body: JSON.stringify({question, top_k: 8, history: history.slice(-8)}),
+      signal: run.controller.signal
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "问答服务暂时不可用");
-    pending.querySelector(".bubble").innerHTML = renderAnswer(data);
-    history.push({role: "user", content: question}, {role: "assistant", content: data.answer});
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(typeof data.detail === "string" ? data.detail : "问答服务暂时不可用");
+    }
+    await consumeEventStream(response, (event, data) => {
+      if (active !== run) return false;
+      if (event === "status") {
+        run.status = data.message;
+        scheduleDraft(run);
+      } else if (event === "delta") {
+        run.text += data.text;
+        scheduleDraft(run);
+      } else if (event === "reset") {
+        cancelAnimationFrame(run.frame);
+        run.frame = null;
+        run.text = "";
+        run.status = data.message;
+        renderDraft(run);
+      } else if (event === "error") {
+        throw new Error(data.message || "问答服务暂时不可用");
+      } else if (event === "done") {
+        cancelAnimationFrame(run.frame);
+        run.frame = null;
+        run.bubble.innerHTML = renderAnswer(data);
+        history.push({role: "user", content: question}, {role: "assistant", content: data.answer});
+        completed = true;
+        return false;
+      }
+      return true;
+    });
+    if (!completed && active === run) throw new Error("连接中断，回答未完成，请重新发送问题");
   } catch (error) {
-    pending.querySelector(".bubble").innerHTML = `<p>暂时无法回答：${escapeHtml(error.message)}</p>`;
+    if (active === run) {
+      cancelAnimationFrame(run.frame);
+      run.frame = null;
+      run.bubble.innerHTML = `<p>暂时无法回答：${escapeHtml(error.message)}</p>`;
+    }
   } finally {
-    send.disabled = false;
-    input.disabled = false;
-    input.focus();
+    cancelAnimationFrame(run.frame);
+    pending.removeAttribute("aria-busy");
+    if (active === run) {
+      active = null;
+      setBusy(false);
+      input.focus();
+    }
   }
 }
 
+send.addEventListener("click", event => {
+  if (active) {
+    event.preventDefault();
+    stopGeneration();
+  }
+});
 form.addEventListener("submit", event => {
   event.preventDefault();
+  if (active) return;
   const question = input.value.trim();
   if (!question) return;
   input.value = "";
@@ -68,7 +155,7 @@ form.addEventListener("submit", event => {
   ask(question);
 });
 input.addEventListener("keydown", event => {
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
     form.requestSubmit();
   }
@@ -77,8 +164,9 @@ input.addEventListener("input", () => {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
 });
-document.querySelectorAll(".suggestions button").forEach(button => button.addEventListener("click", () => ask(button.textContent)));
+suggestions.forEach(button => button.addEventListener("click", () => ask(button.textContent)));
 clear.addEventListener("click", () => {
+  stopGeneration();
   history.length = 0;
   messages.querySelectorAll(".message:not(.welcome)").forEach(node => node.remove());
   input.focus();

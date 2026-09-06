@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 from importlib.resources import files
 from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from history_agent import __version__
 from history_agent.answering.models import AnswerResponse, QuestionRequest
 from history_agent.answering.service import answer_question
+from history_agent.answering.streaming import AnswerStreamEvent, stream_answer_question
 from history_agent.config import Settings, get_settings
 from history_agent.db import Database
 from history_agent.errors import ResearchDataError, RetrievalError
@@ -35,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=__version__,
         description="Local evidence-grounded RAG for the 1921-1978 corpus.",
     )
+    api.mount("/assets", StaticFiles(directory=str(static_dir)), name="assets")
 
     @api.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -74,6 +79,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return answer_question(active_settings, request)
         except RetrievalError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @api.post("/api/questions/stream")
+    async def question_stream(request: QuestionRequest) -> StreamingResponse:
+        async def events() -> AsyncIterator[str]:
+            try:
+                async with aclosing(stream_answer_question(active_settings, request)) as answers:
+                    async for event in answers:
+                        yield event.encode()
+            except RetrievalError:
+                yield AnswerStreamEvent(
+                    "error", {"message": "本地检索暂不可用，请检查索引后重试。"}
+                ).encode()
+            except Exception:
+                yield AnswerStreamEvent(
+                    "error", {"message": "问答服务暂时不可用，请重试。"}
+                ).encode()
+
+        return StreamingResponse(
+            events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+        )
 
     @api.get("/api/people/{person_id}/timeline", response_model=PersonTimelineResponse)
     def person_timeline(

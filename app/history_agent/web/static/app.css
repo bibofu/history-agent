@@ -54,7 +54,7 @@ h1 { margin: 0; font-family: "Noto Serif SC", SimSun, serif; font-size: clamp(28
 .ghost:hover { border-color: var(--red); color: var(--red); }
 
 .messages { padding: 30px 4px 170px; overflow-wrap: anywhere; }
-.message { display: flex; gap: 12px; margin: 0 0 24px; animation: rise .25s ease-out; }
+.message { display: flex; gap: 12px; margin: 0 0 24px; scroll-margin-bottom: 170px; animation: rise .25s ease-out; }
 .message.user { flex-direction: row-reverse; }
 .avatar { flex: 0 0 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--red); color: white; font-family: SimSun, serif; }
 .user .avatar { background: #433d36; }
@@ -62,9 +62,34 @@ h1 { margin: 0; font-family: "Noto Serif SC", SimSun, serif; font-size: clamp(28
 .user .bubble { color: white; background: #3b3732; border-color: #3b3732; border-radius: 18px 4px 18px 18px; }
 .bubble p { margin: 0 0 10px; white-space: pre-wrap; }
 .bubble p:last-child { margin-bottom: 0; }
+.markdown-body { min-width: 0; }
+.markdown-body p { white-space: normal; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  margin: 1.1em 0 .45em; font-family: inherit; font-size: 1.1em; font-weight: 700; line-height: 1.5; letter-spacing: normal;
+}
+.markdown-body h1 { font-size: 1.45em; }
+.markdown-body h2 { font-size: 1.25em; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.6em; margin: .6em 0; }
+.markdown-body li { margin: .25em 0; }
+.markdown-body li > p { margin-bottom: .35em; }
+.markdown-body blockquote { margin: .8em 0; padding: .2em 1em; border-left: 3px solid var(--gold); color: #655a4c; }
+.markdown-body code { font-family: Consolas, "Cascadia Code", monospace; font-size: .9em; background: #eee7dc; padding: .1em .3em; border-radius: 4px; }
+.markdown-body pre { overflow-x: auto; padding: 14px; border-radius: 8px; background: #eee7dc; line-height: 1.5; white-space: pre; }
+.markdown-body pre code { padding: 0; background: none; }
+.markdown-body a { color: var(--red-dark); text-underline-offset: 3px; }
+.markdown-body hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+.table-scroll { max-width: 100%; overflow-x: auto; margin: .8em 0; }
+.markdown-body table { width: 100%; border-collapse: collapse; font-size: .92em; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--line); padding: 7px 11px; text-align: left; }
+.markdown-body th { background: #f0e8db; font-weight: 650; }
+.stream-status { color: var(--red-dark); }
 .suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .suggestions button { border: 1px solid #d6c7b2; background: #fbf6ed; color: var(--red-dark); border-radius: 99px; padding: 8px 12px; text-align: left; }
 .suggestions button:hover { border-color: var(--red); }
+.suggestions button:disabled { opacity: .55; cursor: default; }
 .evidence { margin-top: 16px; border-top: 1px solid var(--line); }
 .evidence details { border-bottom: 1px solid var(--line); padding: 10px 0; }
 .evidence summary { color: var(--red-dark); font-weight: 650; cursor: pointer; }
