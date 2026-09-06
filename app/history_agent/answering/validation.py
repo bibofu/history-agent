@@ -3,10 +3,27 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from markdown_it import MarkdownIt
+from markdown_it.tree import SyntaxTreeNode
+
 from history_agent.answering.models import Citation
 
 EVIDENCE_MARKER = re.compile(r"\[(E\d+)\]")
-MARKDOWN_LIST_PREFIX = re.compile(r"^\s*(?:[-+*>]|\d+[.)、])\s*")
+MARKDOWN = MarkdownIt("commonmark").enable("table")
+CITATION_ONLY = re.compile(r"(?:\s*\[E\d+\][\s,，、;；。.]*)+")
+# Only nominal topic labels are exempt; a factual heading still needs a citation.
+TOPIC_LABEL = re.compile(
+    r"(?:(?:共同)?(?:参加|参与|出席)(?:会议|活动)(?:情况)?|"
+    r"(?:成立|召开)(?:背景|过程)|(?:出席|参加)人员|主要讲话|会议决定)[:：]?"
+)
+EVIDENCE_LIMIT = re.compile(
+    r"^(?:(?:现有|当前|本次|所提供的|检索到的|已提供的)*(?:资料|材料|史料|证据|片段)"
+    r"(?:尚|仍|还)?(?:不足以|无法|不能|未能|未|没有)|"
+    r"(?:尚无法|尚不能|无法|不能|不足以))"
+    r"(?:确认|证实|判断|确定|证明|推断)"
+)
+CLAUSE_BOUNDARY = re.compile(r"[，,。！？；;\n]")
+ASSERTION_TRANSITION = re.compile(r"但|然而|不过|实际|事实上|而且|并且|随后|因此|所以")
 CHINESE_YEAR = r"[一二三四五六七八九〇零]{4}年"
 CORE_FACT_SIGNAL = re.compile(
     rf"(?:"
@@ -35,42 +52,69 @@ class AnswerValidationResult:
 
 
 def _claim_text(line: str) -> str:
-    text = MARKDOWN_LIST_PREFIX.sub("", line.strip())
-    text = text.replace("**", "").replace("`", "")
-    return EVIDENCE_MARKER.sub("", text).strip()
+    return EVIDENCE_MARKER.sub("", line).strip()
+
+
+def _node_text(node: SyntaxTreeNode) -> str:
+    if node.type in {"softbreak", "hardbreak"}:
+        return " "
+    if node.children:
+        separator = " | " if node.type == "tr" else ""
+        return separator.join(_node_text(child) for child in node.children)
+    return node.content
 
 
 def _claim_blocks(answer: str) -> list[str]:
-    """Group wrapped prose by paragraph or Markdown list item."""
-
+    """Respect Markdown paragraph, quotation, list-item and table-row boundaries."""
     blocks: list[str] = []
-    current: list[str] = []
 
-    def flush() -> None:
-        if current:
-            blocks.append(" ".join(current))
-            current.clear()
+    def visit(container: SyntaxTreeNode) -> None:
+        preceding_paragraph: int | None = None
+        for child in container.children:
+            if child.type in {"paragraph", "heading", "tr", "fence", "code_block", "html_block"}:
+                text = _node_text(child).strip()
+                if (
+                    child.type == "paragraph"
+                    and preceding_paragraph is not None
+                    and CITATION_ONLY.fullmatch(text)
+                ):
+                    # A citation on its own line belongs only to the immediately
+                    # preceding paragraph in this container, never another list item.
+                    blocks[preceding_paragraph] += " " + text
+                    continue
+                is_label = child.type == "heading" or (
+                    container.type == "list_item"
+                    and any(
+                        item.type in {"bullet_list", "ordered_list"} for item in container.children
+                    )
+                )
+                is_table_header = container.type == "thead" and all(
+                    TOPIC_LABEL.fullmatch(_node_text(cell))
+                    or not _is_core_fact_block(_node_text(cell))
+                    for cell in child.children
+                )
+                if (is_label and TOPIC_LABEL.fullmatch(text)) or is_table_header:
+                    preceding_paragraph = None
+                    continue
+                blocks.append(text)
+                preceding_paragraph = len(blocks) - 1 if child.type == "paragraph" else None
+            else:
+                preceding_paragraph = None
+                visit(child)
 
-    for raw_line in answer.splitlines():
-        line = raw_line.strip()
-        if not line:
-            flush()
-            continue
-        if line.startswith("#"):
-            flush()
-            continue
-        if MARKDOWN_LIST_PREFIX.match(line):
-            flush()
-        current.append(line)
-    flush()
+    visit(SyntaxTreeNode(MARKDOWN.parse(answer)))
     return blocks
 
 
 def _is_core_fact_block(block: str) -> bool:
     claim = _claim_text(block)
-    if not claim or claim.endswith(("：", ":")):
-        return False
-    return CORE_FACT_SIGNAL.search(claim) is not None
+    for clause in CLAUSE_BOUNDARY.split(claim):
+        clause = clause.strip()
+        if CORE_FACT_SIGNAL.search(clause) and not (
+            EVIDENCE_LIMIT.match(clause) and not ASSERTION_TRANSITION.search(clause)
+        ):
+            return True
+    return False
 
 
 def _normalize_document(value: str) -> str:
@@ -87,16 +131,17 @@ def _document_matches(claimed: str | None, actual: str) -> bool:
     )
 
 
-def validate_grounded_answer(
-    answer: str, citations: list[Citation]
-) -> AnswerValidationResult:
-    """Validate evidence IDs, explicit source metadata, and factual-line coverage."""
+def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerValidationResult:
+    """Check reference syntax, metadata and coverage, not semantic entailment."""
 
     citation_by_id = {citation.evidence_id: citation for citation in citations}
     if len(citation_by_id) != len(citations):
         return AnswerValidationResult(valid=False, error_code="invalid_citation_bundle")
 
-    markers = EVIDENCE_MARKER.findall(answer)
+    blocks = _claim_blocks(answer)
+    # Markdown can decode escaped brackets/entities into visible evidence IDs.
+    # Validate those too before looking them up while checking source metadata.
+    markers = EVIDENCE_MARKER.findall(answer) + EVIDENCE_MARKER.findall("\n".join(blocks))
     used_evidence_ids = tuple(dict.fromkeys(markers))
     if not markers:
         return AnswerValidationResult(
@@ -114,7 +159,7 @@ def validate_grounded_answer(
 
     uncited_claims: list[str] = []
     citation_mismatches: list[str] = []
-    for block in _claim_blocks(answer):
+    for block in blocks:
         block_markers = EVIDENCE_MARKER.findall(block)
         if _is_core_fact_block(block) and not block_markers:
             uncited_claims.append(_claim_text(block))

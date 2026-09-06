@@ -10,6 +10,7 @@ const root = new URL("../app/history_agent/web/static/", import.meta.url);
 const answer = '## 研究结论\n\n**重要事实**与*说明*。[E1]\n\n- 第一项\n- 第二项\n\n> 原文引述\n\n| 年份 | 事件 |\n| --- | --- |\n| 1935 | 会议 |\n\n```js\nconst text = "<tag>";\n```\n\n[文献](https://example.com/source)\n\n<img src="https://example.com/tracker" onerror="window.injected=true"><script>window.injected=true</script>[危险链接](javascript:alert(1))';
 const requests = [];
 const cancelled = [];
+const rejectedClaim = '未引用的草稿：<img src="https://example.com/tracker" onerror="window.injected=true">';
 const timers = new Set();
 function later(fn, delay) {
   const timer = setTimeout(() => { timers.delete(timer); fn(); }, delay);
@@ -41,6 +42,12 @@ const server = createServer(async (req, res) => {
       later(() => { send(res, "error", {message: "测试服务错误"}); res.end(); }, 300);
     } else if (data.question.includes("停止") || data.question.includes("清空")) {
       later(() => { send(res, "done", final("旧回答不应回来")); res.end(); }, 3000);
+    } else if (data.question.includes("降级")) {
+      later(() => {
+        done = true;
+        send(res, "done", {...final("本地证据摘录。[E1]"), generator_mode: "extractive", llm_status: "fallback", llm_error_code: "citation_repair_uncited_core_claim", uncited_claims: [rejectedClaim], limitations: ["生成回答仍有事实语句缺少引用，已改为展示证据摘录。"]});
+        res.end();
+      }, 350);
     } else if (data.question.includes("修复")) {
       later(() => send(res, "reset", {message: "正在补全引用…"}), 350);
       later(() => send(res, "delta", {text: "修复后的事实。[E1]"}), 650);
@@ -118,10 +125,25 @@ try {
   await current.getByText(/测试服务错误/).waitFor();
   assert.equal(requests.at(-1).history.length, 2);
   assert.equal(requests.at(-1).history[1].content, "修复后的事实。[E1]");
+  await ask("降级原因测试");
+  const diagnostic = current.locator(".citation-diagnostics");
+  await diagnostic.waitFor();
+  assert.equal(await diagnostic.getAttribute("open"), null);
+  await diagnostic.getByText("哪些语句缺少引用", {exact: true}).click();
+  assert.equal(await diagnostic.locator("li").textContent(), rejectedClaim);
+  assert.equal(await diagnostic.locator("img, script, [onerror]").count(), 0);
+  assert.equal(await current.locator(".markdown-body").textContent(), "本地证据摘录。[E1]\n");
+  assert.equal(await page.evaluate(() => window.injected), undefined);
+  assert.deepEqual(external, []);
+  await page.screenshot({path: fileURLToPath(new URL("../data/reports/citation-diagnostics-mobile.png", import.meta.url)), fullPage: true});
+  await ask("后续错误测试");
+  await current.getByText(/测试服务错误/).waitFor();
+  assert.equal(requests.at(-1).history.at(-1).content, "本地证据摘录。[E1]");
+  assert(!JSON.stringify(requests.at(-1).history).includes("未引用的草稿"));
   assert(cancelled.includes("停止测试") && cancelled.includes("清空测试"));
   assert.equal(await page.getByText("旧回答不应回来").count(), 0);
   assert.deepEqual(errors, []);
-  console.log("PASS: incremental Markdown, headings/lists/tables/code/quotes, sanitization, mobile layout, citations, abort, clear, repair, disconnect, history isolation.");
+  console.log("PASS: incremental Markdown, headings/lists/tables/code/quotes, sanitization, mobile layout, citations, fallback diagnostics, abort, clear, repair, disconnect, history isolation.");
 } finally {
   for (const timer of timers) clearTimeout(timer);
   await browser?.close();

@@ -21,7 +21,7 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v6"
+PROMPT_VERSION = "grounded-answer-v7"
 
 
 def _compact(text: str) -> str:
@@ -147,6 +147,7 @@ class LLMResult:
     answer: str | None
     error_code: str | None = None
     usage: dict[str, int] | None = None
+    uncited_claims: tuple[str, ...] = ()
 
 
 def _deepseek_error_code(exc: httpx.HTTPError) -> str:
@@ -225,6 +226,8 @@ def _llm_request_payload(
         "检索年份范围只是召回线索，不能把同年其他活动或后来的回忆当作当时的交集。"
         "片段不足以证明互动或时间归属时明确说明，不要补写。"
         "使用Markdown组织回答，可使用简短标题、列表和加粗；证据编号保持[E1]格式。"
+        "标题只写主题，含事实的标题也必须给出引用；表格每一行的事实须在该行标注引用。"
+        "单纯说明资料不足以确认某事不需要引用，但不能在其中夹带未引用的历史事实。"
     )
     history = [item.model_dump() for item in request.history[-6:]]
     messages: list[dict[str, object]] = [
@@ -257,8 +260,10 @@ def _repair_request_payload(
     valid_markers = "、".join(f"[{item.evidence_id}]" for item in citations)
     repair_instruction = (
         "上一版回答因部分事实要点缺少引用而未通过校验。请重新输出完整回答，不要增加新事实，"
-        "只修复引用覆盖。每个包含日期、职务、地点、行动、会议决定或人物关系的段落或列表项"
-        f"都要使用证据包中的合法编号（仅限：{valid_markers}）。缺少引用的要点如下：\n"
+        "根据原文修复引用覆盖：有证据支持才添加对应编号，没有证据支持的事实必须删除，"
+        "不能随意挂靠引用。每个包含日期、职务、地点、行动、会议决定或人物关系的段落、"
+        f"列表项或表格行都要使用对应的合法编号（仅限：{valid_markers}）。"
+        "单纯说明资料不足以确认某事不需要引用。缺少引用的要点如下：\n"
         f"{missing_claims}"
     )
     return {
@@ -284,7 +289,12 @@ def _llm_answer(
     if validation.valid:
         return first
     if validation.error_code != "uncited_core_claim":
-        return LLMResult(answer=None, error_code=validation.error_code, usage=first.usage)
+        return LLMResult(
+            answer=None,
+            error_code=validation.error_code,
+            usage=first.usage,
+            uncited_claims=validation.uncited_claims,
+        )
     repair_payload = _repair_request_payload(
         request_payload, first.answer, citations, validation.uncited_claims
     )
@@ -302,6 +312,7 @@ def _llm_answer(
             answer=None,
             error_code=f"citation_repair_{repaired_validation.error_code}",
             usage=combined_usage,
+            uncited_claims=repaired_validation.uncited_claims,
         )
     return LLMResult(answer=repaired.answer, usage=combined_usage)
 
@@ -414,9 +425,15 @@ def _finish_answer(
             "当前未配置生成模型，返回的是证据摘录式答案；配置兼容接口后可生成综合回答。"
         )
     elif llm_result.answer is None:
-        limitations.append(
-            f"DeepSeek 生成未通过（{llm_result.error_code}），已安全降级为证据摘录。"
-        )
+        if llm_result.error_code in {"uncited_core_claim", "citation_repair_uncited_core_claim"}:
+            limitations.append(
+                "生成回答仍有事实语句缺少引用，已改为展示证据摘录；"
+                "可展开“哪些语句缺少引用”查看原因。"
+            )
+        else:
+            limitations.append(
+                f"DeepSeek 生成未通过（{llm_result.error_code}），已安全降级为证据摘录。"
+            )
     if citations:
         limitations.append("答案仅代表当前已入库文献的检索结果，不等同于完整历史结论。")
         if retrieval.query_intent == "intersection":
@@ -445,6 +462,8 @@ def _finish_answer(
         ),
         model_name=settings.llm_model if settings.llm_enabled else None,
         llm_usage=llm_result.usage,
+        llm_error_code=llm_result.error_code if citations and settings.llm_enabled else None,
+        uncited_claims=list(llm_result.uncited_claims),
         retrieval_mode=retrieval.retrieval_mode,
         query_intent=retrieval.query_intent,
         citations=citations,

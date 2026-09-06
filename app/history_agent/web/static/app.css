@@ -96,6 +96,10 @@ h1 { margin: 0; font-family: "Noto Serif SC", SimSun, serif; font-size: clamp(28
 .quote { margin-top: 9px !important; padding-left: 12px; border-left: 2px solid var(--gold); color: #554e46; font-size: 14px; }
 .meta, .limits { color: var(--muted); font-size: 12px; }
 .limits { margin-top: 12px !important; }
+.citation-diagnostics { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14px; }
+.citation-diagnostics summary { cursor: pointer; color: var(--red-dark); font-weight: 650; }
+.citation-diagnostics .meta { margin-top: 8px; }
+.citation-diagnostics ul { padding-left: 1.4em; margin: 8px 0 0; }
 .typing { display: inline-flex; gap: 5px; padding: 6px 0; }
 .typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: pulse 1s infinite alternate; }
 .typing i:nth-child(2) { animation-delay: .2s; }

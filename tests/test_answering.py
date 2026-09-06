@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.service import (
@@ -338,6 +339,7 @@ def test_deepseek_falls_back_when_core_fact_has_no_citation(monkeypatch: Any) ->
 
     assert result.answer is None
     assert result.error_code == "citation_repair_uncited_core_claim"
+    assert result.uncited_claims == ("随后主持科学规划工作。",)
     assert calls == 2
 
 
@@ -405,3 +407,74 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
     repair_messages = request_bodies[1]["messages"]
     assert repair_messages[-2]["role"] == "assistant"
     assert "随后主持科学规划工作" in repair_messages[-1]["content"]
+    assert "没有证据支持的事实必须删除" in repair_messages[-1]["content"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "> 周恩来参加会议。\n> [E1]",
+        "周恩来参加会议。\n\n[E1]",
+        "- 周恩来参加会议。\n\n  [E1]",
+        "- **共同参加会议**\n  - 周恩来参加会议。[E1]",
+        "### 出席人员\n\n周恩来参加会议。[E1]",
+        "| 参加人员 | 情况 |\n| --- | --- |\n| 周恩来 | 参加会议。[E1] |",
+        "**周恩来参加会议。**\n**[E1]**",
+        "周恩来参加会议。[E1]\n\n现有资料不足以确认两人是否共同参与了其他活动。",
+        "周恩来参加会议。[E1]\n\n无法确认两人是否共同主持了其他会议。",
+    ],
+)
+def test_validation_accepts_markdown_citation_layouts_and_evidence_limits(answer: str) -> None:
+    assert validate_grounded_answer(answer, [_citation()]).valid
+
+
+@pytest.mark.parametrize(
+    "uncited",
+    [
+        "现有资料不足以确认其他活动，但两人随后共同主持会议。",
+        "现有资料不足以确认其他活动。两人随后共同主持会议。",
+        "现有资料不足以确认其他活动，随后共同主持会议。",
+        "现有资料记载两人共同主持会议。",
+        "## 1956年周恩来主持会议",
+        "**周恩来主持会议。**",
+        "- **周恩来主持会议**\n  - 另见材料。[E1]",
+        "周恩来主持会议：",
+        "<div>周恩来主持会议。</div>",
+        "| 日期 | 活动 |\n| --- | --- |\n| 1956年 | 主持会议 |",
+    ],
+)
+def test_validation_still_rejects_uncited_facts_in_any_format(uncited: str) -> None:
+    result = validate_grounded_answer("参加有关会议。[E1]\n\n" + uncited, [_citation()])
+    assert result.error_code == "uncited_core_claim"
+    assert result.uncited_claims
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "周恩来参加会议。\n\n另一件事。[E1]",
+        "周恩来参加会议。\n\n## 出处\n\n[E1]",
+        "周恩来参加会议。\n\n---\n\n[E1]",
+        "- 周恩来参加会议。\n- [E1]",
+        "> 周恩来参加会议。\n\n[E1]",
+        "| 日期 | 活动 |\n| --- | --- |\n| 1956年 | 主持会议 |\n| 1957年 | 参加会议。[E1] |",
+    ],
+)
+def test_citations_cannot_cover_separate_blocks(answer: str) -> None:
+    result = validate_grounded_answer(answer, [_citation()])
+    assert result.error_code == "uncited_core_claim"
+
+
+def test_citation_on_separate_line_does_not_allow_fabricated_page() -> None:
+    result = validate_grounded_answer(
+        "> 《周恩来年谱》PDF第999页记载周恩来参加会议。\n> [E1]", [_citation()]
+    )
+    assert result.error_code == "citation_metadata_mismatch"
+
+
+@pytest.mark.parametrize("marker", [r"\[E99\]", "&#91;E99&#93;"])
+def test_decoded_markdown_marker_is_validated_before_metadata_lookup(marker: str) -> None:
+    result = validate_grounded_answer(
+        f"参加会议。[E1]\n\n《周恩来年谱》PDF第688页记载参加会议。{marker}", [_citation()]
+    )
+    assert result.error_code == "invalid_evidence_marker"

@@ -38,6 +38,8 @@ class AnswerResponse(BaseModel):
     llm_status: Literal["used", "disabled", "fallback", "not_applicable"]
     model_name: str | None = None
     llm_usage: dict[str, int] | None = None
+    llm_error_code: str | None = None
+    uncited_claims: list[str] = Field(default_factory=list)
     retrieval_mode: str
     query_intent: str
     citations: list[Citation]

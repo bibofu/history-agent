@@ -9,7 +9,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from history_agent.answering.models import QuestionRequest
-from history_agent.answering.service import AnswerContext, LLMResult
+from history_agent.answering.service import AnswerContext, LLMResult, answer_question
 from history_agent.answering.streaming import _stream_completion, stream_answer_question
 from history_agent.config import Settings
 from history_agent.errors import RetrievalError
@@ -227,7 +227,68 @@ def test_second_invalid_stream_does_not_retry_again(monkeypatch: pytest.MonkeyPa
     final = _events()[-1].data
     assert len(requests) == 2
     assert final["llm_status"] == "fallback"
-    assert any("citation_repair_uncited_core_claim" in item for item in final["limitations"])
+    assert final["llm_error_code"] == "citation_repair_uncited_core_claim"
+    assert final["uncited_claims"] == ["随后主持工作。"]
+    assert any("哪些语句缺少引用" in item for item in final["limitations"])
+
+
+@pytest.mark.parametrize("missing_fact", [False, True])
+def test_ceremony_overview_has_same_validation_and_diagnostics_in_both_apis(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_fact: bool,
+) -> None:
+    # A local provider fixture for the reported question, not a recorded model answer.
+    fact = "1949年10月1日，开国大典在北京天安门广场举行。"
+    draft = f"## 开国大典\n\n> {fact}\n> [E1]\n\n"
+    draft += "现有资料不足以确认所有参与人员的具体分工。"
+    if missing_fact:
+        draft += "\n\n随后主持其他会议。"
+    citation = _citation(fact)
+    context = AnswerContext(_response([_hit("one", 1, page=688)]), [citation], "partial", None)
+    for module in ("service", "streaming"):
+        monkeypatch.setattr(
+            f"history_agent.answering.{module}.answer_structured_question", lambda *a: None
+        )
+        monkeypatch.setattr(
+            f"history_agent.answering.{module}._retrieve_context", lambda *a: context
+        )
+    sync_calls = []
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        sync_calls.append(kwargs["json"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": draft}}], "usage": {"total_tokens": 20}},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    expected_calls = 2 if missing_fact else 1
+    requests = _provider(
+        monkeypatch,
+        [
+            ChunkStream([_chunk(draft, finish="stop", usage=20), b"data: [DONE]\n\n"])
+            for _ in range(expected_calls)
+        ],
+    )
+    question = QuestionRequest(question="介绍一下开国大典的情况")
+    synchronous = answer_question(_settings(), question).model_dump()
+
+    async def collect() -> list[Any]:
+        return [event async for event in stream_answer_question(_settings(), question)]
+
+    streamed = asyncio.run(collect())[-1].data
+    assert synchronous == streamed
+    assert len(sync_calls) == len(requests) == expected_calls
+    if missing_fact:
+        assert streamed["llm_status"] == "fallback"
+        assert streamed["uncited_claims"] == ["随后主持其他会议。"]
+        assert "随后主持其他会议" not in streamed["answer"]
+    else:
+        assert streamed["llm_status"] == "used"
+        assert streamed["answer"] == draft
+        assert streamed["uncited_claims"] == []
+        assert streamed["llm_error_code"] is None
 
 
 def test_rate_limit_becomes_final_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

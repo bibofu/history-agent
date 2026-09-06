@@ -140,7 +140,12 @@ async def _stream_llm_answer(
             yield LLMResult(answer=result.answer, usage=usage)
             return
         if attempt or validation.error_code != "uncited_core_claim":
-            yield LLMResult(answer=None, error_code=f"{prefix}{validation.error_code}", usage=usage)
+            yield LLMResult(
+                answer=None,
+                error_code=f"{prefix}{validation.error_code}",
+                usage=usage,
+                uncited_claims=validation.uncited_claims,
+            )
             return
         payload = _repair_request_payload(
             payload, result.answer, citations, validation.uncited_claims

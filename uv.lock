@@ -1053,6 +1053,7 @@ name = "history-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "markdown-it-py" },
     { name = "pdfplumber" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -1086,6 +1087,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'app'", specifier = ">=0.115,<1" },
     { name = "httpx", marker = "extra == 'app'", specifier = ">=0.28,<1" },
+    { name = "markdown-it-py", specifier = ">=4,<5" },
     { name = "paddleocr", marker = "extra == 'ocr'", specifier = ">=3.3,<4" },
     { name = "paddlepaddle", marker = "extra == 'ocr'", specifier = "==3.2.0" },
     { name = "pdfplumber", specifier = ">=0.11" },

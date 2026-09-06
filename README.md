@@ -231,6 +231,8 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 生成答案如果只因部分事实要点漏写证据编号而未通过校验，系统会把具体漏引要点反馈给 DeepSeek，自动修复一次引用；第二次仍不合格才降级为证据摘录。修复请求只允许使用原证据包，不得增加新事实，两次调用的 Token 用量会合并返回。伪造证据编号、文献名或 PDF 页码等错误不会触发自动修复。
 
+`citation_repair_uncited_core_claim` 表示修复后仍被判有事实漏引，不是网络连接错误。校验按 Markdown 段落、引用块、列表项及表格行识别正文，单纯的资料不足说明无需引用。若仍因漏引降级，可展开“哪些语句缺少引用”查看未通过的具体草稿语句；这些语句不作为答案依据，也不进入后续会话上下文。JSON 与 SSE 最终结果中的 `llm_error_code`、`uncited_claims` 提供相同诊断。修复记录见 [引用校验回归记录](evals/CITATION_VALIDATION.md)。
+
 ```dotenv
 DEEPSEEK_API_KEY=你的密钥
 ```
