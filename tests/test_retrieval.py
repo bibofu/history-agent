@@ -75,6 +75,20 @@ def test_observation_query_expansion_is_restrained() -> None:
     assert expand_query("周恩来在1956年有哪些经历？") == "周恩来在1956年有哪些经历？"
 
 
+def test_cpc_congress_short_name_expands_to_formal_name() -> None:
+    assert expand_query("中共一大的情况") == (
+        "中共一大的情况 中国共产党第一次全国代表大会"
+    )
+    assert expand_query("比较中共一大和中共二大") == (
+        "比较中共一大和中共二大 "
+        "中国共产党第一次全国代表大会 中国共产党第二次全国代表大会"
+    )
+
+
+def test_generic_question_words_do_not_pollute_keyword_query() -> None:
+    assert tokenize_query("中共一大的情况") == ["中共", "共一", "一大"]
+
+
 def test_rrf_rewards_results_found_by_both_retrievers() -> None:
     keyword = _response([_hit("a", 1, page=1), _hit("shared", 2, page=2)])
     vector = _response([_hit("shared", 1, page=2), _hit("b", 2, page=3)])

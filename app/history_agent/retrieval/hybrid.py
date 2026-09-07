@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from history_agent.retrieval.keyword import search_keyword_index
@@ -13,14 +14,23 @@ MIN_TEMPORAL_COVERAGE_YEARS = 5
 TEMPORAL_FOCUS_MARKERS = ("初期", "前期", "早期", "中期", "后期", "晚期", "末期")
 OBSERVATION_QUERY_MARKERS = ("怎样记述", "如何记述", "怎样描述", "如何描述")
 OBSERVATION_EXPANSION = "外貌 性格 生活 印象"
+CPC_CONGRESS_SHORT_NAME = re.compile(
+    r"中共(?:第)?(?P<ordinal>[一二三四五六七八九十]{1,3})大"
+)
 
 
 def expand_query(query: str) -> str:
-    """Add restrained search hints for source-observation questions."""
+    """Add restrained search hints for source observations and named congresses."""
 
+    expansions: list[str] = []
     if any(marker in query for marker in OBSERVATION_QUERY_MARKERS):
-        return f"{query} {OBSERVATION_EXPANSION}"
-    return query
+        expansions.append(OBSERVATION_EXPANSION)
+    congress_ordinals = dict.fromkeys(
+        match.group("ordinal") for match in CPC_CONGRESS_SHORT_NAME.finditer(query)
+    )
+    for ordinal in congress_ordinals:
+        expansions.append(f"中国共产党第{ordinal}次全国代表大会")
+    return f"{query} {' '.join(expansions)}" if expansions else query
 
 
 def _source_bonus(
