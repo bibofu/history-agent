@@ -21,7 +21,7 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v10"
+PROMPT_VERSION = "grounded-answer-v11"
 
 
 def _compact(text: str) -> str:
@@ -259,6 +259,7 @@ def _llm_request_payload(
         "若问题指定长征等历史时期，只总结证据明确支持属于该时期的活动；"
         "检索年份范围只是召回线索，不能把同年其他活动或后来的回忆当作当时的交集。"
         "若证据覆盖所问时期的多个阶段，须按阶段组织回答，不能只总结前半段；"
+        "对于跨年人物活动梳理，若证据覆盖多个年份，须按年份组织，不能只回答起止年份；"
         "某阶段没有直接材料时明确说明。"
         "片段不足以证明互动或时间归属时明确说明，不要补写。"
         "使用Markdown组织回答，可使用简短标题、列表和加粗；证据编号保持[E1]格式。"

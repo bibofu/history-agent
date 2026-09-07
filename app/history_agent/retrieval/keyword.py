@@ -16,6 +16,10 @@ INDEX_VERSION = "sqlite-fts5-cjk-bigram-v1"
 CJK_RUN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
 LATIN_OR_NUMBER = re.compile(r"[A-Za-z]+(?:[-_][A-Za-z0-9]+)*|\d+(?:\.\d+)?")
 YEAR = re.compile(r"(?<!\d)((?:18|19|20)\d{2})(?!\d)")
+YEAR_RANGE = re.compile(
+    r"(?<!\d)(?:18|19|20)\d{2}年?\s*(?:至|到|—|–|-|~|～)\s*"
+    r"(?:18|19|20)\d{2}年?(?!\d)"
+)
 QUERY_STOP_TERMS = {
     "哪些",
     "什么",
@@ -144,6 +148,10 @@ def infer_year_range(query: str, explicit_years: list[int]) -> list[int]:
     if not ranges:
         return []
     return [min(item[0] for item in ranges), max(item[1] for item in ranges)]
+
+
+def has_explicit_year_range(query: str) -> bool:
+    return YEAR_RANGE.search(query) is not None
 
 
 def load_chunks(chunks_dir: Path) -> list[ChunkRecord]:
@@ -292,6 +300,7 @@ def search_keyword_index(
     query_intent = infer_query_intent(query)
     query_years = sorted({int(match.group(1)) for match in YEAR.finditer(query)})
     query_year_range = infer_year_range(query, query_years)
+    explicit_year_range = has_explicit_year_range(query)
     aliases = load_person_aliases(aliases_path)
     query_people = sorted(
         person
@@ -305,7 +314,12 @@ def search_keyword_index(
         placeholders = ", ".join("?" for _ in document_ids)
         conditions.append(f"m.document_id IN ({placeholders})")
         parameters.extend(document_ids)
-    if query_years:
+    if explicit_year_range:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM json_each(m.year_mentions_json) WHERE value BETWEEN ? AND ?)"
+        )
+        parameters.extend(query_year_range)
+    elif query_years:
         year_conditions = []
         for year in query_years:
             year_conditions.append(

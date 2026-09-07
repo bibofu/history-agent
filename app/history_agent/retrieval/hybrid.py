@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from history_agent.retrieval.keyword import search_keyword_index
+from history_agent.retrieval.keyword import YEAR, search_keyword_index
 from history_agent.retrieval.models import SearchHit, SearchResponse
 from history_agent.retrieval.vector import search_vector_index
 
@@ -52,6 +52,14 @@ def _primary_year(hit: SearchHit, start_year: int, end_year: int) -> int | None:
     years = sorted(year for year in hit.year_mentions if start_year <= year <= end_year)
     if not years:
         return None
+    section_years = [
+        int(match.group(1))
+        for section in hit.section_path
+        for match in YEAR.finditer(section)
+        if start_year <= int(match.group(1)) <= end_year
+    ]
+    if section_years:
+        return section_years[0]
     positions = [
         (hit.text.find(f"{year}年"), year)
         for year in years
@@ -77,14 +85,33 @@ def _select_with_temporal_coverage(
 
     start_year, end_year = query_year_range
     span = end_year - start_year + 1
+    if span <= top_k:
+        covered_ids: set[str] = set()
+        for target_year in range(start_year, end_year + 1):
+            match = next(
+                (
+                    hit
+                    for hit in ranked
+                    if _primary_year(hit, start_year, end_year) == target_year
+                ),
+                None,
+            )
+            if match is not None:
+                covered_ids.add(match.chunk_id)
+        for hit in ranked:
+            if len(covered_ids) >= top_k:
+                break
+            covered_ids.add(hit.chunk_id)
+        return [hit for hit in ranked if hit.chunk_id in covered_ids][:top_k]
+
     buckets: list[list[SearchHit]] = [[] for _ in range(TEMPORAL_BUCKET_COUNT)]
     for hit in ranked:
-        year = _primary_year(hit, start_year, end_year)
-        if year is None:
+        primary_year = _primary_year(hit, start_year, end_year)
+        if primary_year is None:
             continue
         bucket_index = min(
             TEMPORAL_BUCKET_COUNT - 1,
-            (year - start_year) * TEMPORAL_BUCKET_COUNT // span,
+            (primary_year - start_year) * TEMPORAL_BUCKET_COUNT // span,
         )
         buckets[bucket_index].append(hit)
 

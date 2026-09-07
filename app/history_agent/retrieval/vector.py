@@ -15,6 +15,7 @@ from history_agent.processing.models import ChunkRecord
 from history_agent.retrieval.keyword import (
     YEAR,
     hard_filter_people,
+    has_explicit_year_range,
     infer_query_intent,
     infer_year_range,
     load_chunks,
@@ -239,6 +240,7 @@ def search_vector_index(
     filter_people = hard_filter_people(query_people, query_intent)
     query_years = sorted({int(match.group(1)) for match in YEAR.finditer(query)})
     query_year_range = infer_year_range(query, query_years)
+    explicit_year_range = has_explicit_year_range(query)
     _, QdrantClient, models = _load_vector_dependencies()
     embedding_model = _embedding_model(model_cache_dir)
     query_vector = next(iter(embedding_model.query_embed(query)))
@@ -246,7 +248,9 @@ def search_vector_index(
     # pool for exact-year timeline questions, then prefer the year heading in the
     # recovered document structure over incidental year mentions.
     candidate_limit = top_k
-    prefer_section_year = bool(query_years and query_intent == "timeline")
+    prefer_section_year = bool(
+        query_years and not explicit_year_range and query_intent == "timeline"
+    )
     if prefer_section_year:
         candidate_limit = min(500, max(100, top_k * 20))
     client = QdrantClient(path=str(index_path))

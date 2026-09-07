@@ -11,7 +11,8 @@ def test_chronology_section_controls_scope_even_with_later_year_mentions(work_pa
     pdf = pymupdf.open()
     pdf.new_page()
     pdf.new_page()
-    pdf.set_toc([[1, "1920年", 1], [1, "1921年", 2]])
+    pdf.new_page()
+    pdf.set_toc([[1, "1920年", 1], [1, "1921年", 2], [1, "1922年", 3]])
     pdf.save(work_path / "fixture.pdf")
     pdf.close()
     pages = work_path / "pages"
@@ -19,6 +20,7 @@ def test_chronology_section_controls_scope_even_with_later_year_mentions(work_pa
     texts = [
         "毛泽东参加活动。这条1920年的记载在1956年被回忆，不能变成1956年的经历。",
         "毛泽东参加活动。这是1921年研究范围内的事件，有独立的页码证据。",
+        "毛泽东参加活动。这是1922年研究范围内的事件，有独立的页码证据。",
     ]
     records = [
         build_page_record(
@@ -45,7 +47,11 @@ def test_chronology_section_controls_scope_even_with_later_year_mentions(work_pa
     rows = [json.loads(line) for line in (chunks / "fixture.jsonl").read_text(
         encoding="utf-8"
     ).splitlines()]
-    assert [row["scope_status"] for row in rows] == ["out_of_scope", "in_scope"]
+    assert [row["scope_status"] for row in rows] == [
+        "out_of_scope",
+        "in_scope",
+        "in_scope",
+    ]
     assert 1956 in rows[0]["year_mentions"]
 
     index = work_path / "keyword.db"
@@ -63,6 +69,10 @@ def test_chronology_section_controls_scope_even_with_later_year_mentions(work_pa
     assert search_keyword_index(
         index_path=index, aliases_path=aliases, query="毛泽东1921年活动"
     ).hits
+    range_hits = search_keyword_index(
+        index_path=index, aliases_path=aliases, query="毛泽东1921-1922年活动"
+    ).hits
+    assert {hit.pdf_page_start for hit in range_hits} == {2, 3}
 
 
 def test_vector_year_filter_keeps_research_scope_constraint() -> None:

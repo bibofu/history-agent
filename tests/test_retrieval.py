@@ -1,6 +1,7 @@
-from history_agent.retrieval.hybrid import expand_query, fuse_search_responses
+from history_agent.retrieval.hybrid import _primary_year, expand_query, fuse_search_responses
 from history_agent.retrieval.keyword import (
     hard_filter_people,
+    has_explicit_year_range,
     infer_query_intent,
     infer_year_range,
     tokenize_query,
@@ -59,6 +60,10 @@ def test_query_routing_extracts_intent_and_period() -> None:
     assert infer_query_intent("毛泽东在矛盾论中怎样分析主要矛盾") == "viewpoint"
     assert infer_query_intent("斯诺在西行漫记中怎样记述毛泽东") == "observation"
     assert infer_year_range("长征期间", []) == [1934, 1936]
+    assert has_explicit_year_range("梳理毛泽东在1921-1926年期间的活动")
+    assert has_explicit_year_range("1921年至1926年")
+    assert has_explicit_year_range("1921～1926")
+    assert not has_explicit_year_range("比较毛泽东在1921年和1926年的活动")
     assert "毛泽" in tokenize_query("毛泽东关于调查研究的观点")
     assert hard_filter_people(["毛泽东"], "viewpoint") == []
     assert hard_filter_people(["埃德加·斯诺", "毛泽东"], "observation") == []
@@ -154,6 +159,32 @@ def test_wide_period_query_balances_early_middle_and_late_evidence() -> None:
         "late-1",
         "late-2",
     ]
+
+
+def test_short_year_range_keeps_evidence_from_each_year() -> None:
+    hits = [
+        *[_hit(f"edge-{index}", index, page=index, years=[1921]) for index in range(1, 7)],
+        _hit("1922", 7, page=7, years=[1922]),
+        _hit("1923", 8, page=8, years=[1923]),
+        _hit("1924", 9, page=9, years=[1924]),
+        _hit("1925", 10, page=10, years=[1925]),
+        _hit("1926", 11, page=11, years=[1926]),
+    ]
+    keyword = _response(hits).model_copy(
+        update={"query": "1921-1926年期间的活动", "query_year_range": [1921, 1926]}
+    )
+
+    result = fuse_search_responses(keyword, _response([]), top_k=6)
+
+    assert {hit.year_mentions[0] for hit in result.hits} == set(range(1921, 1927))
+
+
+def test_primary_year_prefers_chronology_heading_over_incidental_body_year() -> None:
+    hit = _hit("chronology", 1, page=1, years=[1925, 1926])
+    hit.section_path = ["1925年"]
+    hit.text = "年底讨论了1926年的工作计划。"
+
+    assert _primary_year(hit, 1921, 1926) == 1925
 
 
 def test_focused_subperiod_query_keeps_relevance_order() -> None:
