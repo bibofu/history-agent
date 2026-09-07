@@ -439,6 +439,10 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
             "周恩来参加会议。[E1]\n\n证据中出现的周恩来在1945年、1946年涉及“国民大会”"
             "的内容，均与开国大典无直接关联，不予采入。"
         ),
+        (
+            "周恩来参加会议。[E1]\n\n现有证据只覆盖1935年、1944年、1947年、1960年和"
+            "1975年几个时间点的评价，缺少其他时期的直接材料。"
+        ),
     ],
 )
 def test_validation_accepts_markdown_citation_layouts_and_evidence_limits(answer: str) -> None:
@@ -452,6 +456,7 @@ def test_validation_accepts_markdown_citation_layouts_and_evidence_limits(answer
         "现有资料不足以确认其他活动。两人随后共同主持会议。",
         "现有资料不足以确认其他活动，随后共同主持会议。",
         "现有资料记载两人共同主持会议。",
+        "现有证据只覆盖1935年毛泽东主持会议的记载。",
         "## 1956年周恩来主持会议",
         "## 1956年筹备委员会成立",
         "**周恩来主持会议。**",

@@ -21,7 +21,7 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v8"
+PROMPT_VERSION = "grounded-answer-v9"
 
 
 def _compact(text: str) -> str:
@@ -229,6 +229,7 @@ def _llm_request_payload(
         "标题只写主题，含事实的标题也必须给出引用；表格每一行的事实须在该行标注引用。"
         "单纯说明资料不足以确认某事不需要引用，但不能在其中夹带未引用的历史事实。"
         "不要逐条解释为何排除无关证据；资料限制只简要说明还缺少哪些材料。"
+        "说明证据时间范围有限时不要逐年罗列证据年份，使用概括表述。"
     )
     history = [item.model_dump() for item in request.history[-6:]]
     messages: list[dict[str, object]] = [
