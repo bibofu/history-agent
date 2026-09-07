@@ -14,9 +14,57 @@ MIN_TEMPORAL_COVERAGE_YEARS = 5
 TEMPORAL_FOCUS_MARKERS = ("初期", "前期", "早期", "中期", "后期", "晚期", "末期")
 OBSERVATION_QUERY_MARKERS = ("怎样记述", "如何记述", "怎样描述", "如何描述")
 OBSERVATION_EXPANSION = "外貌 性格 生活 印象"
+CPC_CONGRESS_ORDINALS = (
+    "一",
+    "二",
+    "三",
+    "四",
+    "五",
+    "六",
+    "七",
+    "八",
+    "九",
+    "十",
+    "十一",
+    "十二",
+    "十三",
+    "十四",
+    "十五",
+    "十六",
+    "十七",
+    "十八",
+    "十九",
+    "二十",
+)
+CPC_CONGRESS_NUMBER = {
+    ordinal: number for number, ordinal in enumerate(CPC_CONGRESS_ORDINALS, start=1)
+}
 CPC_CONGRESS_SHORT_NAME = re.compile(
     r"中共(?:第)?(?P<ordinal>[一二三四五六七八九十]{1,3})大"
 )
+CPC_CONGRESS_RANGE = re.compile(
+    r"中共(?:第)?(?P<start>[一二三四五六七八九十]{1,3})大\s*"
+    r"(?:至|到|—|–|-|~|～)\s*"
+    r"中共(?:第)?(?P<end>[一二三四五六七八九十]{1,3})大"
+)
+
+
+def cpc_congress_ordinals(query: str) -> list[str]:
+    ordinals: list[str] = []
+    for match in CPC_CONGRESS_RANGE.finditer(query):
+        start = CPC_CONGRESS_NUMBER.get(match.group("start"))
+        end = CPC_CONGRESS_NUMBER.get(match.group("end"))
+        if start is None or end is None:
+            continue
+        step = 1 if start <= end else -1
+        ordinals.extend(
+            CPC_CONGRESS_ORDINALS[number - 1]
+            for number in range(start, end + step, step)
+        )
+    ordinals.extend(
+        match.group("ordinal") for match in CPC_CONGRESS_SHORT_NAME.finditer(query)
+    )
+    return list(dict.fromkeys(ordinals))
 
 
 def expand_query(query: str) -> str:
@@ -25,10 +73,7 @@ def expand_query(query: str) -> str:
     expansions: list[str] = []
     if any(marker in query for marker in OBSERVATION_QUERY_MARKERS):
         expansions.append(OBSERVATION_EXPANSION)
-    congress_ordinals = dict.fromkeys(
-        match.group("ordinal") for match in CPC_CONGRESS_SHORT_NAME.finditer(query)
-    )
-    for ordinal in congress_ordinals:
+    for ordinal in cpc_congress_ordinals(query):
         expansions.append(f"中国共产党第{ordinal}次全国代表大会")
     return f"{query} {' '.join(expansions)}" if expansions else query
 
@@ -127,6 +172,64 @@ def _select_with_temporal_coverage(
     return [hit for hit in ranked if hit.chunk_id in selected_ids][:top_k]
 
 
+def _best_congress_hits(ranked: list[SearchHit], query: str) -> list[SearchHit]:
+    ordinals = cpc_congress_ordinals(query)
+    selected: list[SearchHit] = []
+    for ordinal in ordinals:
+        markers = (
+            f"党的第{ordinal}次全国代表大会",
+            f"中国共产党第{ordinal}次全国代表大会",
+            f"第{ordinal}次全国代表大会",
+        )
+        matches = [
+            (index, hit)
+            for index, hit in enumerate(ranked)
+            if any(marker in " ".join(hit.section_path) for marker in markers)
+            or any(marker in hit.text for marker in markers)
+        ]
+        if not matches:
+            continue
+        _, match = max(
+            matches,
+            key=lambda item: (
+                any(marker in " ".join(item[1].section_path) for marker in markers),
+                any(marker in item[1].text for marker in markers),
+                "召开" in item[1].text or "举行" in item[1].text,
+                item[1].source_type == "official_history",
+                -item[0],
+            ),
+        )
+        selected.append(match)
+    return selected
+
+
+def _select_with_congress_coverage(
+    ranked: list[SearchHit], *, query: str, top_k: int
+) -> list[SearchHit]:
+    ordinals = cpc_congress_ordinals(query)
+    if len(ordinals) < 2 or len(ordinals) > top_k:
+        return ranked
+    covered_ids = {hit.chunk_id for hit in _best_congress_hits(ranked, query)}
+    for hit in ranked:
+        if len(covered_ids) >= top_k:
+            break
+        covered_ids.add(hit.chunk_id)
+    return [hit for hit in ranked if hit.chunk_id in covered_ids]
+
+
+def _prepend_congress_keyword_hits(
+    primary: SearchResponse, congress_hits: list[SearchHit]
+) -> SearchResponse:
+    combined: list[SearchHit] = []
+    seen_ids: set[str] = set()
+    for hit in [*congress_hits, *primary.hits]:
+        if hit.chunk_id in seen_ids:
+            continue
+        seen_ids.add(hit.chunk_id)
+        combined.append(hit.model_copy(update={"rank": len(combined) + 1}))
+    return primary.model_copy(update={"hits": combined})
+
+
 def fuse_search_responses(
     keyword: SearchResponse,
     vector: SearchResponse,
@@ -178,17 +281,26 @@ def fuse_search_responses(
     )
     # A page may yield several adjacent chunks. One result per physical page gives
     # the answer layer a broader, less repetitive evidence set.
-    unique_pages: list[SearchHit] = []
-    seen_pages: set[tuple[str, int]] = set()
+    preferred_ids = {
+        hit.chunk_id for hit in _best_congress_hits(ranked, keyword.query)
+    }
+    unique_by_page: dict[tuple[str, int], SearchHit] = {}
     for hit in ranked:
         page_key = (hit.document_id, hit.pdf_page_start)
-        if page_key in seen_pages:
-            continue
-        seen_pages.add(page_key)
-        unique_pages.append(hit)
+        existing = unique_by_page.get(page_key)
+        if existing is None or (
+            hit.chunk_id in preferred_ids and existing.chunk_id not in preferred_ids
+        ):
+            unique_by_page[page_key] = hit
+    unique_pages = sorted(
+        unique_by_page.values(), key=lambda hit: ranked.index(hit)
+    )
 
+    congress_covered = _select_with_congress_coverage(
+        unique_pages, query=keyword.query, top_k=top_k
+    )
     selected = _select_with_temporal_coverage(
-        unique_pages,
+        congress_covered,
         query=keyword.query,
         query_year_range=keyword.query_year_range,
         top_k=top_k,
@@ -221,7 +333,8 @@ def search_hybrid_index(
     document_ids: list[str] | None = None,
     include_out_of_scope: bool = False,
 ) -> SearchResponse:
-    candidate_k = min(100, max(30, top_k * 4))
+    congress_count = len(cpc_congress_ordinals(query))
+    candidate_k = min(100, max(30, top_k * 4, congress_count * 12))
     search_query = expand_query(query)
     keyword = search_keyword_index(
         index_path=keyword_index_path,
@@ -231,6 +344,23 @@ def search_hybrid_index(
         document_ids=document_ids,
         include_out_of_scope=include_out_of_scope,
     )
+    congress_hits: list[SearchHit] = []
+    if congress_count >= 2:
+        for ordinal in cpc_congress_ordinals(query):
+            formal_name = f"中国共产党第{ordinal}次全国代表大会"
+            targeted = search_keyword_index(
+                index_path=keyword_index_path,
+                query=formal_name,
+                aliases_path=aliases_path,
+                top_k=24,
+                document_ids=document_ids,
+                include_out_of_scope=include_out_of_scope,
+                section_path_contains=f"第{ordinal}次全国代表大会",
+            )
+            best_hits = _best_congress_hits(targeted.hits, query)
+            if best_hits:
+                congress_hits.append(best_hits[0])
+        keyword = _prepend_congress_keyword_hits(keyword, congress_hits)
     vector = search_vector_index(
         index_path=vector_index_path,
         model_cache_dir=model_cache_dir,

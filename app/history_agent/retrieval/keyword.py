@@ -293,6 +293,7 @@ def search_keyword_index(
     top_k: int = 10,
     document_ids: list[str] | None = None,
     include_out_of_scope: bool = False,
+    section_path_contains: str | None = None,
 ) -> SearchResponse:
     if not index_path.is_file():
         raise RetrievalError(f"Keyword index does not exist: {index_path}")
@@ -314,6 +315,14 @@ def search_keyword_index(
         placeholders = ", ".join("?" for _ in document_ids)
         conditions.append(f"m.document_id IN ({placeholders})")
         parameters.extend(document_ids)
+    if section_path_contains:
+        escaped_section = (
+            section_path_contains.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        conditions.append("m.section_path_json LIKE ? ESCAPE '\\'")
+        parameters.append(f"%{escaped_section}%")
     if explicit_year_range:
         conditions.append(
             "EXISTS (SELECT 1 FROM json_each(m.year_mentions_json) WHERE value BETWEEN ? AND ?)"

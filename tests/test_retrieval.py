@@ -1,4 +1,10 @@
-from history_agent.retrieval.hybrid import _primary_year, expand_query, fuse_search_responses
+from history_agent.retrieval.hybrid import (
+    _primary_year,
+    cpc_congress_ordinals,
+    expand_query,
+    fuse_search_responses,
+    search_hybrid_index,
+)
 from history_agent.retrieval.keyword import (
     hard_filter_people,
     has_explicit_year_range,
@@ -90,6 +96,17 @@ def test_cpc_congress_short_name_expands_to_formal_name() -> None:
     )
 
 
+def test_cpc_congress_range_expands_every_congress() -> None:
+    query = "中共一大到中共六大，介绍一下每次会议"
+
+    assert cpc_congress_ordinals(query) == ["一", "二", "三", "四", "五", "六"]
+    assert expand_query(query) == (
+        f"{query} 中国共产党第一次全国代表大会 中国共产党第二次全国代表大会 "
+        "中国共产党第三次全国代表大会 中国共产党第四次全国代表大会 "
+        "中国共产党第五次全国代表大会 中国共产党第六次全国代表大会"
+    )
+
+
 def test_generic_question_words_do_not_pollute_keyword_query() -> None:
     assert tokenize_query("中共一大的情况") == ["中共", "共一", "一大"]
 
@@ -131,6 +148,93 @@ def test_rrf_adds_intent_source_bonus() -> None:
     result = fuse_search_responses(keyword, vector, top_k=2)
 
     assert result.hits[0].chunk_id == "chronology"
+
+
+def test_congress_range_keeps_evidence_for_each_congress() -> None:
+    ordinals = ["一", "二", "三", "四", "五", "六"]
+    hits = [
+        _hit(f"sixth-{index}", index, page=index)
+        for index in range(1, 7)
+    ]
+    hits.extend(
+        _hit(f"congress-{ordinal}", index + 6, page=index + 6)
+        for index, ordinal in enumerate(ordinals[:-1], start=1)
+    )
+    for hit in hits[:6]:
+        hit.section_path = ["党的第六次全国代表大会"]
+    for ordinal, hit in zip(ordinals[:-1], hits[6:], strict=True):
+        hit.section_path = [f"党的第{ordinal}次全国代表大会"]
+    keyword = _response(hits).model_copy(
+        update={"query": "中共一大到中共六大，介绍一下每次会议"}
+    )
+
+    result = fuse_search_responses(keyword, _response([]), top_k=6)
+
+    assert {
+        section
+        for hit in result.hits
+        for section in hit.section_path
+    } == {f"党的第{ordinal}次全国代表大会" for ordinal in ordinals}
+
+
+def test_congress_range_prefers_opening_chunk_on_a_duplicate_page() -> None:
+    weak = _hit("weak", 1, page=5)
+    weak.section_path = ["党的第二次全国代表大会"]
+    opening = _hit("opening", 2, page=5)
+    opening.section_path = ["党的第二次全国代表大会"]
+    opening.text = "中国共产党第二次全国代表大会在上海举行。"
+    first = _hit("first", 3, page=1)
+    first.section_path = ["党的第一次全国代表大会"]
+    keyword = _response([weak, opening, first]).model_copy(
+        update={"query": "中共一大到中共二大，逐次介绍"}
+    )
+
+    result = fuse_search_responses(keyword, _response([]), top_k=2)
+
+    assert {hit.chunk_id for hit in result.hits} == {"first", "opening"}
+
+
+def test_hybrid_search_runs_a_section_targeted_query_for_each_congress(
+    monkeypatch, work_path
+) -> None:
+    targeted_sections: list[str] = []
+
+    def keyword_search(**kwargs):
+        section = kwargs.get("section_path_contains")
+        if section is None:
+            return _response([_hit("generic", 1, page=99)]).model_copy(
+                update={"query": kwargs["query"]}
+            )
+        targeted_sections.append(section)
+        ordinal = section.removeprefix("第").removesuffix("次全国代表大会")
+        hit = _hit(f"congress-{ordinal}", 1, page=len(targeted_sections))
+        hit.section_path = [f"党的第{ordinal}次全国代表大会"]
+        hit.text = f"中国共产党第{ordinal}次全国代表大会召开。"
+        return _response([hit]).model_copy(update={"query": kwargs["query"]})
+
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_keyword_index", keyword_search
+    )
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_vector_index",
+        lambda **kwargs: _response([]).model_copy(update={"query": kwargs["query"]}),
+    )
+
+    result = search_hybrid_index(
+        keyword_index_path=work_path / "keyword.db",
+        vector_index_path=work_path / "vector",
+        model_cache_dir=work_path / "models",
+        aliases_path=work_path / "aliases.json",
+        query="中共一大到中共六大，介绍一下每次会议",
+        top_k=6,
+    )
+
+    assert targeted_sections == [
+        f"第{ordinal}次全国代表大会" for ordinal in ["一", "二", "三", "四", "五", "六"]
+    ]
+    assert {hit.chunk_id for hit in result.hits} == {
+        f"congress-{ordinal}" for ordinal in ["一", "二", "三", "四", "五", "六"]
+    }
 
 
 def test_wide_period_query_balances_early_middle_and_late_evidence() -> None:
