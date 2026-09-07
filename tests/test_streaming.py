@@ -115,7 +115,9 @@ def test_stream_preserves_unicode_and_final_metadata(monkeypatch: pytest.MonkeyP
     assert body.closed
 
 
-def test_stream_repairs_once_and_replaces_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stream_repairs_in_background_without_clearing_draft(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     first = ChunkStream(
         [
             _chunk("参加有关会议。[E1]\n\n随后主持工作。", finish="stop", usage=20),
@@ -128,7 +130,13 @@ def test_stream_repairs_once_and_replaces_draft(monkeypatch: pytest.MonkeyPatch)
     requests = _provider(monkeypatch, [first, second])
     _context(monkeypatch)
     events = _events()
-    assert [e.event for e in events].count("reset") == 1
+    assert all(e.event != "reset" for e in events)
+    assert "".join(e.data["text"] for e in events if e.event == "delta") == (
+        "参加有关会议。[E1]\n\n随后主持工作。"
+    )
+    assert any(
+        e.event == "status" and e.data["message"] == "正在后台补全引用…" for e in events
+    )
     assert events[-1].data["answer"] == "参加有关会议并主持工作。[E1]"
     assert events[-1].data["llm_usage"] == {"total_tokens": 30}
     assert len(requests) == 2

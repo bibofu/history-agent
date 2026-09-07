@@ -129,7 +129,11 @@ async def _stream_llm_answer(
         async with aclosing(_stream_completion(settings, payload)) as completion:
             async for item in completion:
                 if isinstance(item, str):
-                    yield AnswerStreamEvent("delta", {"text": item})
+                    # Keep the first draft visible while a repair completion runs in
+                    # the background. Re-streaming the repair makes the answer clear
+                    # itself and type out again before the authoritative final event.
+                    if attempt == 0:
+                        yield AnswerStreamEvent("delta", {"text": item})
                 else:
                     result = item
         usage = _merge_usage(usage, result.usage)
@@ -176,7 +180,7 @@ async def _stream_llm_answer(
         payload = _repair_request_payload(
             payload, result.answer, citations, validation.uncited_claims
         )
-        yield AnswerStreamEvent("reset", {"message": "正在补全引用…"})
+        yield AnswerStreamEvent("status", {"message": "正在后台补全引用…"})
 
 
 async def stream_answer_question(

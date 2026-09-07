@@ -55,8 +55,7 @@ const server = createServer(async (req, res) => {
         res.end();
       }, 350);
     } else if (data.question.includes("修复")) {
-      later(() => send(res, "reset", {message: "正在补全引用…"}), 350);
-      later(() => send(res, "delta", {text: "修复后的事实。[E1]"}), 650);
+      later(() => send(res, "status", {message: "正在后台补全引用…"}), 350);
       later(() => { done = true; send(res, "done", final("修复后的事实。[E1]")); res.end(); }, 950);
     } else {
       later(() => send(res, "delta", {text: "\n\n第二段也已到达。"}), 450);
@@ -120,8 +119,9 @@ try {
   await page.getByRole("button", {name: "清空会话"}).click();
   assert.equal(await page.locator(".message:not(.welcome)").count(), 0);
   await ask("修复测试");
-  await current.getByText("正在补全引用…").waitFor();
-  assert.equal(await current.locator("h2").count(), 0);
+  await current.getByText("正在后台补全引用…").waitFor();
+  assert.equal(await current.locator("h2").textContent(), "正在输出");
+  assert.equal(await current.locator("strong").textContent(), "第一段");
   await current.getByText("修复后的事实。[E1]", {exact: true}).waitFor();
   await page.getByRole("button", {name: "发送", exact: true}).waitFor();
   assert.deepEqual(requests.at(-1).history, []);
