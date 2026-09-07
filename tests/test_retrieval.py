@@ -14,6 +14,7 @@ def _hit(
     *,
     page: int,
     source_type: str = "history",
+    years: list[int] | None = None,
 ) -> SearchHit:
     return SearchHit(
         rank=rank,
@@ -27,7 +28,7 @@ def _hit(
         pdf_page_end=page,
         section_path=[],
         text=f"evidence {chunk_id}",
-        year_mentions=[1956],
+        year_mentions=years or [1956],
         people=["周恩来"],
         extraction_methods=["text_layer"],
         score=float(10 - rank),
@@ -54,6 +55,7 @@ def test_query_routing_extracts_intent_and_period() -> None:
     assert infer_query_intent("周恩来在1956年主要有哪些经历") == "timeline"
     assert infer_query_intent("周恩来在长征期间有哪些经历") == "timeline"
     assert infer_query_intent("毛泽东关于调查研究的观点") == "viewpoint"
+    assert infer_query_intent("毛泽东对抗日战争的谋划") == "viewpoint"
     assert infer_query_intent("毛泽东在矛盾论中怎样分析主要矛盾") == "viewpoint"
     assert infer_query_intent("斯诺在西行漫记中怎样记述毛泽东") == "observation"
     assert infer_year_range("长征期间", []) == [1934, 1936]
@@ -110,3 +112,45 @@ def test_rrf_adds_intent_source_bonus() -> None:
     result = fuse_search_responses(keyword, vector, top_k=2)
 
     assert result.hits[0].chunk_id == "chronology"
+
+
+def test_wide_period_query_balances_early_middle_and_late_evidence() -> None:
+    hits = [
+        *[_hit(f"early-{index}", index, page=index, years=[1937]) for index in range(1, 7)],
+        *[
+            _hit(f"middle-{index}", index + 6, page=index + 6, years=[1941])
+            for index in range(1, 3)
+        ],
+        *[
+            _hit(f"late-{index}", index + 8, page=index + 8, years=[1945])
+            for index in range(1, 3)
+        ],
+    ]
+    keyword = _response(hits).model_copy(
+        update={"query": "抗日战争的谋划", "query_year_range": [1937, 1945]}
+    )
+
+    result = fuse_search_responses(keyword, _response([]), top_k=6)
+
+    assert [hit.chunk_id for hit in result.hits] == [
+        "early-1",
+        "early-2",
+        "middle-1",
+        "middle-2",
+        "late-1",
+        "late-2",
+    ]
+
+
+def test_focused_subperiod_query_keeps_relevance_order() -> None:
+    hits = [
+        *[_hit(f"early-{index}", index, page=index, years=[1937]) for index in range(1, 4)],
+        _hit("late", 4, page=4, years=[1945]),
+    ]
+    keyword = _response(hits).model_copy(
+        update={"query": "抗日战争初期的谋划", "query_year_range": [1937, 1945]}
+    )
+
+    result = fuse_search_responses(keyword, _response([]), top_k=3)
+
+    assert [hit.chunk_id for hit in result.hits] == ["early-1", "early-2", "early-3"]

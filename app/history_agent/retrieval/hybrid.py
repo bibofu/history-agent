@@ -8,6 +8,9 @@ from history_agent.retrieval.vector import search_vector_index
 
 RRF_K = 60
 INTENT_SOURCE_BONUS = 0.004
+TEMPORAL_BUCKET_COUNT = 3
+MIN_TEMPORAL_COVERAGE_YEARS = 5
+TEMPORAL_FOCUS_MARKERS = ("初期", "前期", "早期", "中期", "后期", "晚期", "末期")
 OBSERVATION_QUERY_MARKERS = ("怎样记述", "如何记述", "怎样描述", "如何描述")
 OBSERVATION_EXPANSION = "外貌 性格 生活 印象"
 
@@ -33,6 +36,58 @@ def _source_bonus(
     if intent == "observation" and source_type == "contemporary_observation":
         return INTENT_SOURCE_BONUS
     return 0.0
+
+
+def _primary_year(hit: SearchHit, start_year: int, end_year: int) -> int | None:
+    years = sorted(year for year in hit.year_mentions if start_year <= year <= end_year)
+    if not years:
+        return None
+    positions = [
+        (hit.text.find(f"{year}年"), year)
+        for year in years
+        if hit.text.find(f"{year}年") >= 0
+    ]
+    return min(positions)[1] if positions else years[0]
+
+
+def _select_with_temporal_coverage(
+    ranked: list[SearchHit],
+    *,
+    query: str,
+    query_year_range: list[int],
+    top_k: int,
+) -> list[SearchHit]:
+    if (
+        len(query_year_range) != 2
+        or query_year_range[1] - query_year_range[0] + 1 < MIN_TEMPORAL_COVERAGE_YEARS
+        or top_k < TEMPORAL_BUCKET_COUNT
+        or any(marker in query for marker in TEMPORAL_FOCUS_MARKERS)
+    ):
+        return ranked[:top_k]
+
+    start_year, end_year = query_year_range
+    span = end_year - start_year + 1
+    buckets: list[list[SearchHit]] = [[] for _ in range(TEMPORAL_BUCKET_COUNT)]
+    for hit in ranked:
+        year = _primary_year(hit, start_year, end_year)
+        if year is None:
+            continue
+        bucket_index = min(
+            TEMPORAL_BUCKET_COUNT - 1,
+            (year - start_year) * TEMPORAL_BUCKET_COUNT // span,
+        )
+        buckets[bucket_index].append(hit)
+
+    quota = max(1, top_k // TEMPORAL_BUCKET_COUNT)
+    selected_ids: set[str] = set()
+    for bucket in buckets:
+        for hit in bucket[:quota]:
+            selected_ids.add(hit.chunk_id)
+    for hit in ranked:
+        if len(selected_ids) >= top_k:
+            break
+        selected_ids.add(hit.chunk_id)
+    return [hit for hit in ranked if hit.chunk_id in selected_ids][:top_k]
 
 
 def fuse_search_responses(
@@ -86,17 +141,23 @@ def fuse_search_responses(
     )
     # A page may yield several adjacent chunks. One result per physical page gives
     # the answer layer a broader, less repetitive evidence set.
-    selected: list[SearchHit] = []
+    unique_pages: list[SearchHit] = []
     seen_pages: set[tuple[str, int]] = set()
     for hit in ranked:
         page_key = (hit.document_id, hit.pdf_page_start)
         if page_key in seen_pages:
             continue
         seen_pages.add(page_key)
-        hit.rank = len(selected) + 1
-        selected.append(hit)
-        if len(selected) == top_k:
-            break
+        unique_pages.append(hit)
+
+    selected = _select_with_temporal_coverage(
+        unique_pages,
+        query=keyword.query,
+        query_year_range=keyword.query_year_range,
+        top_k=top_k,
+    )
+    for rank, hit in enumerate(selected, start=1):
+        hit.rank = rank
 
     return SearchResponse(
         query=keyword.query,
