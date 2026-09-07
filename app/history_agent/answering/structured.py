@@ -104,15 +104,20 @@ def answer_structured_question(
     years = list(_YEAR.finditer(question))
     periods = list(_PERIOD.finditer(question))
     period_query = not years and len(periods) == 1
+    unbounded_intersection = intent == "intersection" and not years and not periods
+    start: int | None
+    end: int | None
     if period_query:
         start, end = PERIOD_RANGES[periods[0]["period"]]
     elif len(years) == 1:
         start = int(years[0]["start"])
         end = int(years[0]["end"] or start)
+    elif unbounded_intersection:
+        start = end = None
     else:
         return _response(request, intent, clarify)
     lower, upper = settings.research_start.year, settings.research_end.year
-    if not lower <= start <= end <= upper:
+    if start is not None and end is not None and not lower <= start <= end <= upper:
         return _response(
             request, intent, f"研究范围为 {lower}—{upper} 年，请提供范围内且起止顺序正确的年份。"
         )
@@ -159,12 +164,13 @@ def answer_structured_question(
             return _response(
                 request, intent, "交集查询需要两位不同人物；两个称呼可能是同一人的别名。"
             )
-        if period_query:
-            # Named periods ask for a synthesis of source passages. The hybrid retriever
-            # already understands their year ranges. Select that route BEFORE looking
-            # up joint-action candidates, and only after validating people/constraints.
-            # Never use retrieval as an outcome-dependent fallback for a failed lookup.
+        if period_query or unbounded_intersection:
+            # Named periods and well-formed two-person questions ask for synthesis of
+            # source passages. Select that route BEFORE looking up joint-action candidates,
+            # and only after validating people/constraints. Never use retrieval as an
+            # outcome-dependent fallback for a failed structured lookup.
             return None
+        assert start is not None and end is not None
         citations: list[Citation] = []
         lines: list[str] = []
         event_types = ["meeting"] if "会议" in question else None

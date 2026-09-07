@@ -71,11 +71,11 @@ def test_structured_api_bypasses_rag_and_llm(
 @pytest.mark.parametrize(
     "question",
     [
-        "周恩来和林彪有哪些交集",
         "周恩来与林彪在1900年有哪些交集",
         "周恩来与林彪在1944至1943年有哪些交集",
         "周恩来与林彪在1943年2月有哪些交集",
         "周恩来与林彪在1943年北京有哪些交集",
+        "周恩来与林彪在北京有哪些交集",
         "周恩来在1943年没有参加过哪些会议",
         "周恩来和张三在1943年有哪些交集",
         "周恩来和周恩来在1943年有哪些交集",
@@ -102,6 +102,10 @@ def test_general_questions_still_use_rag_route(work_path: Path) -> None:
         answer_structured_question(
             settings, QuestionRequest(question="毛泽东的早年经历如何影响他的调查研究观点")
         )
+        is None
+    )
+    assert (
+        answer_structured_question(settings, QuestionRequest(question="毛泽东和周恩来的交集"))
         is None
     )
 
