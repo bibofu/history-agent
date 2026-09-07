@@ -80,7 +80,7 @@ def test_quote_window_preserves_nearby_supporting_facts() -> None:
 def test_question_request_rejects_unbounded_history() -> None:
     request = QuestionRequest(question="测试问题")
 
-    assert request.top_k == 8
+    assert request.top_k == 12
     assert request.history == []
 
 

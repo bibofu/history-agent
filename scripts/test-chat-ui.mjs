@@ -95,6 +95,7 @@ try {
   assert.equal(await page.getByRole("button", {name: "停止生成", exact: true}).count(), 1);
   await current.getByText("第二段也已到达。").waitFor();
   await page.getByRole("heading", {name: "研究结论"}).waitFor();
+  assert.equal(requests.at(-1).top_k, 12);
   assert.equal(await current.locator("strong").textContent(), "重要事实");
   assert.equal(await current.locator("li").count(), 2);
   assert.equal(await current.locator("table tbody td").count(), 2);

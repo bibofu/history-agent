@@ -12,7 +12,7 @@ class ConversationMessage(BaseModel):
 
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
-    top_k: int = Field(default=8, ge=1, le=12)
+    top_k: int = Field(default=12, ge=1, le=12)
     history: list[ConversationMessage] = Field(default_factory=list, max_length=12)
 
 

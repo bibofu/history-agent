@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     llm_model: Literal["deepseek-v4-pro", "deepseek-v4-flash"] = "deepseek-v4-pro"
     llm_thinking: bool = False
     llm_reasoning_effort: Literal["low", "high", "max"] = "high"
-    llm_max_tokens: int = Field(default=2500, ge=256, le=16000)
+    llm_max_tokens: int = Field(default=5000, ge=256, le=16000)
     llm_timeout_seconds: float = Field(default=120.0, ge=10.0, le=600.0)
 
     @model_validator(mode="after")

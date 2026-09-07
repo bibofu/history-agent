@@ -90,7 +90,7 @@ async function ask(question) {
     const response = await fetch("/api/questions/stream", {
       method: "POST",
       headers: {"Content-Type": "application/json", "Accept": "text/event-stream"},
-      body: JSON.stringify({question, top_k: 8, history: history.slice(-8)}),
+      body: JSON.stringify({question, top_k: 12, history: history.slice(-8)}),
       signal: run.controller.signal
     });
     if (!response.ok) {
