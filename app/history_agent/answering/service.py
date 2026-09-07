@@ -9,7 +9,7 @@ import httpx
 
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.structured import answer_structured_question
-from history_agent.answering.validation import validate_grounded_answer
+from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.retrieval.hybrid import search_hybrid_index
 from history_agent.retrieval.models import SearchHit, SearchResponse
@@ -148,6 +148,40 @@ class LLMResult:
     error_code: str | None = None
     usage: dict[str, int] | None = None
     uncited_claims: tuple[str, ...] = ()
+
+
+def _salvage_llm_result(
+    answer: str,
+    citations: list[Citation],
+    uncited_claims: tuple[str, ...],
+    usage: dict[str, int] | None,
+) -> LLMResult | None:
+    salvaged = remove_uncited_claim_blocks(answer, uncited_claims)
+    if salvaged is None or not validate_grounded_answer(salvaged, citations).valid:
+        return None
+    return LLMResult(
+        answer=salvaged,
+        error_code="removed_uncited_claims",
+        usage=usage,
+        uncited_claims=uncited_claims,
+    )
+
+
+def _prefer_llm_result(
+    first: LLMResult | None,
+    second: LLMResult | None,
+    usage: dict[str, int] | None,
+) -> LLMResult | None:
+    candidates = [item for item in (first, second) if item is not None and item.answer]
+    if not candidates:
+        return None
+    preferred = max(candidates, key=lambda item: (len(item.answer or ""), item.error_code is None))
+    return LLMResult(
+        answer=preferred.answer,
+        error_code=preferred.error_code,
+        usage=usage,
+        uncited_claims=preferred.uncited_claims,
+    )
 
 
 def _deepseek_error_code(exc: httpx.HTTPError) -> str:
@@ -297,26 +331,47 @@ def _llm_answer(
             usage=first.usage,
             uncited_claims=validation.uncited_claims,
         )
+    safe_first = _salvage_llm_result(
+        first.answer, citations, validation.uncited_claims, first.usage
+    )
     repair_payload = _repair_request_payload(
         request_payload, first.answer, citations, validation.uncited_claims
     )
     repaired = _request_deepseek_completion(settings, repair_payload)
     combined_usage = _merge_usage(first.usage, repaired.usage)
     if repaired.answer is None:
+        preferred = _prefer_llm_result(safe_first, None, combined_usage)
+        if preferred is not None:
+            return preferred
         return LLMResult(
             answer=None,
             error_code=f"citation_repair_{repaired.error_code}",
             usage=combined_usage,
         )
     repaired_validation = validate_grounded_answer(repaired.answer, citations)
-    if not repaired_validation.valid:
-        return LLMResult(
-            answer=None,
-            error_code=f"citation_repair_{repaired_validation.error_code}",
-            usage=combined_usage,
-            uncited_claims=repaired_validation.uncited_claims,
+    if repaired_validation.valid:
+        preferred = _prefer_llm_result(
+            safe_first, LLMResult(answer=repaired.answer), combined_usage
         )
-    return LLMResult(answer=repaired.answer, usage=combined_usage)
+        assert preferred is not None
+        return preferred
+    safe_repaired = None
+    if repaired_validation.error_code == "uncited_core_claim":
+        safe_repaired = _salvage_llm_result(
+            repaired.answer,
+            citations,
+            repaired_validation.uncited_claims,
+            combined_usage,
+        )
+    preferred = _prefer_llm_result(safe_first, safe_repaired, combined_usage)
+    if preferred is not None:
+        return preferred
+    return LLMResult(
+        answer=None,
+        error_code=f"citation_repair_{repaired_validation.error_code}",
+        usage=combined_usage,
+        uncited_claims=repaired_validation.uncited_claims,
+    )
 
 
 def check_deepseek_connection(settings: Settings) -> dict[str, object]:
@@ -436,6 +491,11 @@ def _finish_answer(
             limitations.append(
                 f"DeepSeek 生成未通过（{llm_result.error_code}），已安全降级为证据摘录。"
             )
+    elif llm_result.error_code == "removed_uncited_claims":
+        limitations.append(
+            "生成草稿中的未引用段落已移除，其余内容已通过引用核查；"
+            "可展开“哪些草稿内容已移除”查看。"
+        )
     if citations:
         limitations.append("答案仅代表当前已入库文献的检索结果，不等同于完整历史结论。")
         if retrieval.query_intent == "intersection":

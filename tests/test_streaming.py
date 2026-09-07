@@ -226,10 +226,11 @@ def test_second_invalid_stream_does_not_retry_again(monkeypatch: pytest.MonkeyPa
     _context(monkeypatch)
     final = _events()[-1].data
     assert len(requests) == 2
-    assert final["llm_status"] == "fallback"
-    assert final["llm_error_code"] == "citation_repair_uncited_core_claim"
+    assert final["llm_status"] == "used"
+    assert final["llm_error_code"] == "removed_uncited_claims"
+    assert final["answer"] == "参加有关会议。[E1]"
     assert final["uncited_claims"] == ["随后主持工作。"]
-    assert any("哪些语句缺少引用" in item for item in final["limitations"])
+    assert any("未引用段落已移除" in item for item in final["limitations"])
 
 
 @pytest.mark.parametrize("missing_fact", [False, True])
@@ -281,9 +282,11 @@ def test_ceremony_overview_has_same_validation_and_diagnostics_in_both_apis(
     assert synchronous == streamed
     assert len(sync_calls) == len(requests) == expected_calls
     if missing_fact:
-        assert streamed["llm_status"] == "fallback"
+        assert streamed["llm_status"] == "used"
+        assert streamed["llm_error_code"] == "removed_uncited_claims"
         assert streamed["uncited_claims"] == ["随后主持其他会议。"]
         assert "随后主持其他会议" not in streamed["answer"]
+        assert fact in streamed["answer"]
     else:
         assert streamed["llm_status"] == "used"
         assert streamed["answer"] == draft

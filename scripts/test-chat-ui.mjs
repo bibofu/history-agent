@@ -48,6 +48,12 @@ const server = createServer(async (req, res) => {
         send(res, "done", {...final("本地证据摘录。[E1]"), generator_mode: "extractive", llm_status: "fallback", llm_error_code: "citation_repair_uncited_core_claim", uncited_claims: [rejectedClaim], limitations: ["生成回答仍有事实语句缺少引用，已改为展示证据摘录。"]});
         res.end();
       }, 350);
+    } else if (data.question.includes("移除")) {
+      later(() => {
+        done = true;
+        send(res, "done", {...final("保留的完整回答。[E1]"), llm_error_code: "removed_uncited_claims", uncited_claims: [rejectedClaim], limitations: ["生成草稿中的未引用段落已移除，其余内容已通过引用核查。"]});
+        res.end();
+      }, 350);
     } else if (data.question.includes("修复")) {
       later(() => send(res, "reset", {message: "正在补全引用…"}), 350);
       later(() => send(res, "delta", {text: "修复后的事实。[E1]"}), 650);
@@ -126,6 +132,11 @@ try {
   await current.getByText(/测试服务错误/).waitFor();
   assert.equal(requests.at(-1).history.length, 2);
   assert.equal(requests.at(-1).history[1].content, "修复后的事实。[E1]");
+  await ask("移除测试");
+  const removedDiagnostic = current.locator(".citation-diagnostics");
+  await removedDiagnostic.getByText("哪些草稿内容已移除", {exact: true}).waitFor();
+  assert.equal(await current.locator(".markdown-body").textContent(), "保留的完整回答。[E1]\n");
+  assert.equal(await removedDiagnostic.locator("li").textContent(), rejectedClaim);
   await ask("降级原因测试");
   const diagnostic = current.locator(".citation-diagnostics");
   await diagnostic.waitFor();
@@ -144,7 +155,7 @@ try {
   assert(cancelled.includes("停止测试") && cancelled.includes("清空测试"));
   assert.equal(await page.getByText("旧回答不应回来").count(), 0);
   assert.deepEqual(errors, []);
-  console.log("PASS: incremental Markdown, headings/lists/tables/code/quotes, sanitization, mobile layout, citations, fallback diagnostics, abort, clear, repair, disconnect, history isolation.");
+  console.log("PASS: incremental Markdown, headings/lists/tables/code/quotes, sanitization, mobile layout, citations, selective removal, fallback diagnostics, abort, clear, repair, disconnect, history isolation.");
 } finally {
   for (const timer of timers) clearTimeout(timer);
   await browser?.close();

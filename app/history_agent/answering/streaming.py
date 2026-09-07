@@ -19,8 +19,10 @@ from history_agent.answering.service import (
     _finish_answer,
     _llm_request_payload,
     _merge_usage,
+    _prefer_llm_result,
     _repair_request_payload,
     _retrieve_context,
+    _salvage_llm_result,
 )
 from history_agent.answering.structured import answer_structured_question
 from history_agent.answering.validation import validate_grounded_answer
@@ -120,6 +122,7 @@ async def _stream_llm_answer(
 ) -> AsyncGenerator[AnswerStreamEvent | LLMResult, None]:
     payload = _llm_request_payload(settings=settings, request=request, citations=citations)
     usage: dict[str, int] | None = None
+    safe_first: LLMResult | None = None
     for attempt in range(2):
         result = LLMResult(answer=None, error_code="incomplete_stream")
         # Closing nested iterators releases the upstream HTTP connection on cancellation.
@@ -132,14 +135,37 @@ async def _stream_llm_answer(
         usage = _merge_usage(usage, result.usage)
         prefix = "citation_repair_" if attempt else ""
         if result.answer is None:
+            preferred = _prefer_llm_result(safe_first, None, usage)
+            if preferred is not None:
+                yield preferred
+                return
             yield LLMResult(answer=None, error_code=f"{prefix}{result.error_code}", usage=usage)
             return
         yield AnswerStreamEvent("status", {"message": "正在核查引用…"})
         validation = validate_grounded_answer(result.answer, citations)
         if validation.valid:
-            yield LLMResult(answer=result.answer, usage=usage)
+            preferred = _prefer_llm_result(
+                safe_first, LLMResult(answer=result.answer), usage
+            )
+            assert preferred is not None
+            yield preferred
             return
+        if validation.error_code == "uncited_core_claim":
+            salvaged = _salvage_llm_result(
+                result.answer, citations, validation.uncited_claims, usage
+            )
+            if attempt:
+                preferred = _prefer_llm_result(safe_first, salvaged, usage)
+                if preferred is not None:
+                    yield preferred
+                    return
+            else:
+                safe_first = salvaged
         if attempt or validation.error_code != "uncited_core_claim":
+            preferred = _prefer_llm_result(safe_first, None, usage)
+            if preferred is not None:
+                yield preferred
+                return
             yield LLMResult(
                 answer=None,
                 error_code=f"{prefix}{validation.error_code}",

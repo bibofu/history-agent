@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from markdown_it import MarkdownIt
@@ -60,6 +61,13 @@ class AnswerValidationResult:
     citation_mismatches: tuple[str, ...] = ()
 
 
+@dataclass
+class _ClaimBlock:
+    text: str
+    start_line: int | None
+    end_line: int | None
+
+
 def _claim_text(line: str) -> str:
     return EVIDENCE_MARKER.sub("", line).strip()
 
@@ -73,9 +81,9 @@ def _node_text(node: SyntaxTreeNode) -> str:
     return node.content
 
 
-def _claim_blocks(answer: str) -> list[str]:
+def _claim_blocks(answer: str) -> list[_ClaimBlock]:
     """Respect Markdown paragraph, quotation, list-item and table-row boundaries."""
-    blocks: list[str] = []
+    blocks: list[_ClaimBlock] = []
 
     def visit(container: SyntaxTreeNode) -> None:
         preceding_paragraph: int | None = None
@@ -89,7 +97,9 @@ def _claim_blocks(answer: str) -> list[str]:
                 ):
                     # A citation on its own line belongs only to the immediately
                     # preceding paragraph in this container, never another list item.
-                    blocks[preceding_paragraph] += " " + text
+                    blocks[preceding_paragraph].text += " " + text
+                    if child.map is not None:
+                        blocks[preceding_paragraph].end_line = child.map[1]
                     continue
                 is_undated_heading = child.type == "heading" and not DATE_SIGNAL.search(text)
                 is_nested_list_label = container.type == "list_item" and any(
@@ -107,7 +117,8 @@ def _claim_blocks(answer: str) -> list[str]:
                 ):
                     preceding_paragraph = None
                     continue
-                blocks.append(text)
+                start_line, end_line = child.map if child.map is not None else (None, None)
+                blocks.append(_ClaimBlock(text, start_line, end_line))
                 preceding_paragraph = len(blocks) - 1 if child.type == "paragraph" else None
             else:
                 preceding_paragraph = None
@@ -156,7 +167,9 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
     blocks = _claim_blocks(answer)
     # Markdown can decode escaped brackets/entities into visible evidence IDs.
     # Validate those too before looking them up while checking source metadata.
-    markers = EVIDENCE_MARKER.findall(answer) + EVIDENCE_MARKER.findall("\n".join(blocks))
+    markers = EVIDENCE_MARKER.findall(answer) + EVIDENCE_MARKER.findall(
+        "\n".join(block.text for block in blocks)
+    )
     used_evidence_ids = tuple(dict.fromkeys(markers))
     if not markers:
         return AnswerValidationResult(
@@ -175,10 +188,10 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
     uncited_claims: list[str] = []
     citation_mismatches: list[str] = []
     for block in blocks:
-        block_markers = EVIDENCE_MARKER.findall(block)
-        if _is_core_fact_block(block) and not block_markers:
-            uncited_claims.append(_claim_text(block))
-        for match in SOURCE_PAGE_REFERENCE.finditer(block):
+        block_markers = EVIDENCE_MARKER.findall(block.text)
+        if _is_core_fact_block(block.text) and not block_markers:
+            uncited_claims.append(_claim_text(block.text))
+        for match in SOURCE_PAGE_REFERENCE.finditer(block.text):
             claimed_page = int(match.group("page"))
             claimed_document = match.group("document")
             matching_citation = any(
@@ -208,3 +221,28 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
         valid=True,
         used_evidence_ids=used_evidence_ids,
     )
+
+
+def remove_uncited_claim_blocks(answer: str, uncited_claims: tuple[str, ...]) -> str | None:
+    """Remove only source blocks rejected for missing citations.
+
+    The caller must validate the returned Markdown again before using it. Returning
+    ``None`` keeps the safe extractive fallback for structures without source maps.
+    """
+
+    remaining = Counter(uncited_claims)
+    removed_lines: set[int] = set()
+    for block in _claim_blocks(answer):
+        claim = _claim_text(block.text)
+        if not remaining[claim]:
+            continue
+        if block.start_line is None or block.end_line is None:
+            return None
+        removed_lines.update(range(block.start_line, block.end_line))
+        remaining[claim] -= 1
+    if any(remaining.values()) or not removed_lines:
+        return None
+    lines = answer.splitlines(keepends=True)
+    candidate = "".join(line for index, line in enumerate(lines) if index not in removed_lines)
+    candidate = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", candidate).strip()
+    return candidate or None
