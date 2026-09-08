@@ -2,14 +2,14 @@
 
 本文描述仓库当前实际运行的 RAG 链路，包括 PDF 抽取、清洗与分片、关键词和向量索引、查询理解、双路召回、融合与重排、Top-K、证据构造、DeepSeek 生成、流式输出和引用校验。
 
-实现快照日期为 2026-09-07。当前已构建索引的统计来自 2026-09-05 的 `data/reports/*_latest.json` 报告。
+实现快照日期为 2026-09-08。当前已构建索引的统计来自 2026-09-05 的 `data/reports/*_latest.json` 报告。
 
 ## 1. 总体架构
 
 项目有两条问答路径：
 
 1. 形式严格的“人物 + 整年/年份区间 + 经历或交集”问题，优先查询结构化研究数据库。
-2. 普通历史问题、观点问题、历史时期问题，以及不限定年份的两人交集问题，进入本文描述的混合 RAG。
+2. 普通历史问题、观点问题、历史时期问题，以及不限定年份的两人交集问题，先由可降级的 LLM 查询理解器生成结构化计划，再进入本文描述的混合 RAG。
 
 已识别的时期问题和不限定年份的交集问题虽然会先经过结构化路由检查，但检查通过后会主动转回混合 RAG。结构化路径不使用向量索引，也不调用 DeepSeek，因此不能把所有聊天回答都理解为 RAG 输出。
 
@@ -27,7 +27,10 @@ flowchart LR
 
     Q[用户问题] --> R{结构化路由}
     R -->|严格年份时间线或交集| S[结构化研究库]
-    R -->|普通 RAG 问题| T[意图、人物、年份解析]
+    R -->|普通 RAG 问题| P[DeepSeek JSON 查询理解]
+    P --> J[Pydantic 校验 / 原问题保留]
+    J --> T[规则解析与检索扩展]
+    P -.失败降级.-> T
     T --> H
     T --> I
     H --> U[RRF 融合]
@@ -308,7 +311,9 @@ candidate_limit = min(500, max(100, top_k × 20))
 
 ## 7. 查询理解和过滤
 
-关键词和向量分支共享同一套规则式查询解析。
+形式严格的结构化问题不调用模型。其他自由问法在混合检索前默认调用 `deepseek-v4-flash` 非思考模式，要求以 JSON 输出：规范问题、意图、实体及其规范名、起止年份、覆盖方式、不可丢弃的约束、是否需要澄清，以及最多 4 条短检索表达式。模型只负责理解问题，不回答历史事实，也不会收到本地史料。
+
+计划必须通过本地 Pydantic schema、年份完整性和澄清问题校验。有效计划的规范问题、检索表达式、实体规范名和意图提示会追加到检索串；用户原问题始终原样放在最前面，因此月份、地点、否定、比较对象和来源限制不会因模型改写而从检索输入中消失。模型未配置、关闭、超时、限流或返回非法计划时，系统直接使用原问题走现有规则式解析。关键词和向量分支仍共享这套确定性解析，作为执行层和离线降级路径。
 
 ### 7.1 意图识别
 
@@ -322,7 +327,7 @@ candidate_limit = min(500, max(100, top_k × 20))
 | `timeline` | 问题含年份或已知时期，同时含经历、做了什么、活动、任职、担任、职务、主要做 |
 | `general` | 以上均未匹配 |
 
-观察类问题只有在包含“怎样记述、如何记述、怎样描述、如何描述”时扩展查询，在原问题后追加“外貌 性格 生活 印象”。其他问题没有同义词扩展、HyDE 或 LLM 改写。
+观察类问题仍会在包含“怎样记述、如何记述、怎样描述、如何描述”时追加“外貌 性格 生活 印象”。查询计划还会按已校验意图追加少量检索提示词，例如 timeline 的“经历、活动、时间线”和 viewpoint 的“观点、论述、主张、策略”；项目不使用 HyDE，查询理解器不得生成历史事实作为伪文档。
 
 ### 7.2 历史时期映射
 
@@ -490,6 +495,8 @@ RRF 后再按查询意图增加 0.004：
 | 超时 | 120 秒 |
 | 输入历史 | 后端最多使用最近 6 条消息 |
 
+查询理解器默认使用 `deepseek-v4-flash`、关闭 thinking、JSON Output、`max_tokens=700`、超时 20 秒，同样最多读取最近 6 条消息。API 最终结果通过 `query_plan`、`query_planner_status`、`query_planner_model`、`query_planner_usage` 和 `query_planner_error_code` 暴露规划结果与诊断；答案生成的用量仍单独记录在 `llm_usage`。
+
 网页每次提交最近 8 条历史消息，请求模型允许最多 12 条；真正构建 DeepSeek prompt 时再截取最后 6 条。
 
 系统提示词要求模型：
@@ -637,6 +644,7 @@ uv run history-agent eval answers --top-k 10
 | 章节结构恢复 | `app/history_agent/processing/structure.py` |
 | 分片和元数据 | `app/history_agent/processing/chunks.py` |
 | 关键词索引与查询解析 | `app/history_agent/retrieval/keyword.py` |
+| LLM 查询理解与安全降级 | `app/history_agent/answering/query_understanding.py` |
 | 向量索引与召回 | `app/history_agent/retrieval/vector.py` |
 | RRF、按页去重、时间覆盖 | `app/history_agent/retrieval/hybrid.py` |
 | 证据构造与同步生成 | `app/history_agent/answering/service.py` |
@@ -645,4 +653,3 @@ uv run history-agent eval answers --top-k 10
 | 结构化问答路由 | `app/history_agent/answering/structured.py` |
 | Web API | `app/history_agent/web/app.py` |
 | 前端流式与 Markdown | `app/history_agent/web/static/app.js`、`markdown.js` |
-

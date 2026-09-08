@@ -8,7 +8,8 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from history_agent.answering.models import QuestionRequest
+from history_agent.answering.models import QueryPlan, QuestionRequest
+from history_agent.answering.query_understanding import QueryPlanningResult
 from history_agent.answering.service import AnswerContext, LLMResult, answer_question
 from history_agent.answering.streaming import _stream_completion, stream_answer_question
 from history_agent.config import Settings
@@ -42,7 +43,11 @@ def _chunk(text: str | None = None, *, finish: str | None = None, usage: int = 0
 
 
 def _settings() -> Settings:
-    return Settings(_env_file=None, llm_api_key="test-only-key")
+    return Settings(
+        _env_file=None,
+        llm_api_key="test-only-key",
+        llm_query_planning=False,
+    )
 
 
 def _provider(
@@ -182,6 +187,43 @@ def test_no_model_configuration_finishes_without_network(monkeypatch: pytest.Mon
     _context(monkeypatch)
     data = _events(_settings().model_copy(update={"llm_api_key": None}))[-1].data
     assert data["llm_status"] == "disabled"
+
+
+def test_stream_uses_semantic_plan_before_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
+    plan = QueryPlan(
+        intent="event_overview",
+        normalized_question="介绍中国共产党第一次全国代表大会",
+        search_queries=["中国共产党第一次全国代表大会 代表 决议"],
+    )
+    planning = QueryPlanningResult(
+        plan,
+        "used",
+        model_name="deepseek-v4-flash",
+        usage={"total_tokens": 50},
+    )
+    context = AnswerContext(_response([]), [], "no_evidence", None)
+    received: list[QueryPlanningResult] = []
+    monkeypatch.setattr(
+        "history_agent.answering.streaming.answer_structured_question", lambda *a: None
+    )
+    monkeypatch.setattr(
+        "history_agent.answering.streaming.plan_question", lambda *a: planning
+    )
+
+    def retrieve(*args: Any) -> AnswerContext:
+        received.append(args[-1])
+        return context
+
+    monkeypatch.setattr("history_agent.answering.streaming._retrieve_context", retrieve)
+    settings = _settings().model_copy(update={"llm_query_planning": True})
+    events = _events(settings)
+
+    assert received == [planning]
+    assert any(
+        event.event == "status" and "规划检索" in event.data["message"] for event in events
+    )
+    assert events[-1].data["query_planner_status"] == "used"
+    assert events[-1].data["query_plan"]["normalized_question"] == plan.normalized_question
 
 
 def test_stream_endpoint_sends_final_result_and_safe_error(monkeypatch: pytest.MonkeyPatch) -> None:

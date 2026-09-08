@@ -15,6 +15,9 @@ def test_settings_resolve_paths(work_path: Path) -> None:
     assert settings.research_end == date(1978, 12, 31)
     assert settings.environment == "development"
     assert settings.llm_max_tokens == 5000
+    assert settings.llm_query_planning is True
+    assert settings.llm_query_planner_model == "deepseek-v4-flash"
+    assert settings.llm_query_planner_timeout_seconds == 20
 
 
 def test_invalid_research_range_is_rejected(work_path: Path) -> None:

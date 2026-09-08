@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     llm_reasoning_effort: Literal["low", "high", "max"] = "high"
     llm_max_tokens: int = Field(default=5000, ge=256, le=16000)
     llm_timeout_seconds: float = Field(default=120.0, ge=10.0, le=600.0)
+    llm_query_planning: bool = True
+    llm_query_planner_model: Literal["deepseek-v4-pro", "deepseek-v4-flash"] = (
+        "deepseek-v4-flash"
+    )
+    llm_query_planner_max_tokens: int = Field(default=700, ge=256, le=2000)
+    llm_query_planner_timeout_seconds: float = Field(default=20.0, ge=5.0, le=120.0)
 
     @model_validator(mode="after")
     def resolve_paths_and_validate_dates(self) -> Settings:
@@ -157,6 +163,10 @@ class Settings(BaseSettings):
             "llm_thinking": self.llm_thinking,
             "llm_reasoning_effort": self.llm_reasoning_effort,
             "llm_max_tokens": self.llm_max_tokens,
+            "llm_query_planning": self.llm_query_planning,
+            "llm_query_planner_model": self.llm_query_planner_model,
+            "llm_query_planner_max_tokens": self.llm_query_planner_max_tokens,
+            "llm_query_planner_timeout_seconds": self.llm_query_planner_timeout_seconds,
         }
 
 

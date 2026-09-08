@@ -12,9 +12,11 @@ import httpx
 from starlette.concurrency import run_in_threadpool
 
 from history_agent.answering.models import Citation, QuestionRequest
+from history_agent.answering.query_understanding import plan_question
 from history_agent.answering.service import (
     LLMResult,
     _chat_completions_url,
+    _clarification_response,
     _deepseek_error_code,
     _finish_answer,
     _llm_request_payload,
@@ -186,12 +188,19 @@ async def _stream_llm_answer(
 async def stream_answer_question(
     settings: Settings, request: QuestionRequest
 ) -> AsyncGenerator[AnswerStreamEvent, None]:
-    yield AnswerStreamEvent("status", {"message": "正在检索本地史料…"})
+    yield AnswerStreamEvent("status", {"message": "正在分析问题…"})
     structured = await run_in_threadpool(answer_structured_question, settings, request)
     if structured is not None:
         yield AnswerStreamEvent("done", structured.model_dump())
         return
-    context = await run_in_threadpool(_retrieve_context, settings, request)
+    if settings.llm_query_planning and settings.llm_enabled:
+        yield AnswerStreamEvent("status", {"message": "正在理解问题并规划检索…"})
+    planning = await run_in_threadpool(plan_question, settings, request)
+    if planning.plan is not None and planning.plan.needs_clarification:
+        yield AnswerStreamEvent("done", _clarification_response(request, planning).model_dump())
+        return
+    yield AnswerStreamEvent("status", {"message": "正在检索本地史料…"})
+    context = await run_in_threadpool(_retrieve_context, settings, request, planning)
     result = LLMResult(answer=None, error_code="not_configured")
     if not context.citations:
         result = LLMResult(answer=None, error_code="no_evidence")
@@ -203,6 +212,6 @@ async def stream_answer_question(
                     result = item
                 else:
                     yield item
-    final = _finish_answer(settings, request, context, result)
+    final = _finish_answer(settings, request, context, result, planning)
     # Always replace provisional text, including repaired answers and safe fallbacks.
     yield AnswerStreamEvent("done", final.model_dump())

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,40 @@ class QuestionRequest(BaseModel):
     question: str = Field(min_length=2, max_length=500)
     top_k: int = Field(default=12, ge=1, le=12)
     history: list[ConversationMessage] = Field(default_factory=list, max_length=12)
+
+
+class QueryEntity(BaseModel):
+    type: Literal["person", "organization", "event", "place", "document", "other"]
+    text: str = Field(min_length=1, max_length=80)
+    canonical: str = Field(min_length=1, max_length=120)
+
+
+ShortQueryText = Annotated[str, Field(min_length=1, max_length=180)]
+ConstraintText = Annotated[str, Field(min_length=1, max_length=120)]
+
+
+class QueryPlan(BaseModel):
+    """Validated semantic interpretation used to build a retrieval query."""
+
+    intent: Literal[
+        "general",
+        "event_overview",
+        "timeline",
+        "intersection",
+        "viewpoint",
+        "observation",
+        "comparison",
+        "causal_analysis",
+    ] = "general"
+    normalized_question: str = Field(min_length=2, max_length=500)
+    search_queries: list[ShortQueryText] = Field(default_factory=list, max_length=4)
+    entities: list[QueryEntity] = Field(default_factory=list, max_length=12)
+    start_year: int | None = Field(default=None, ge=1800, le=2100)
+    end_year: int | None = Field(default=None, ge=1800, le=2100)
+    coverage: Literal["relevance", "per_year", "per_item", "balanced_period"] = "relevance"
+    constraints: list[ConstraintText] = Field(default_factory=list, max_length=12)
+    needs_clarification: bool = False
+    clarification_question: str | None = Field(default=None, max_length=300)
 
 
 class Citation(BaseModel):
@@ -40,6 +74,13 @@ class AnswerResponse(BaseModel):
     llm_usage: dict[str, int] | None = None
     llm_error_code: str | None = None
     uncited_claims: list[str] = Field(default_factory=list)
+    query_plan: QueryPlan | None = None
+    query_planner_status: Literal["used", "disabled", "fallback", "not_applicable"] = (
+        "not_applicable"
+    )
+    query_planner_model: str | None = None
+    query_planner_usage: dict[str, int] | None = None
+    query_planner_error_code: str | None = None
     retrieval_mode: str
     query_intent: str
     citations: list[Citation]

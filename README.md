@@ -230,7 +230,9 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 首次构建向量索引会下载中文嵌入模型。运行数据保存在 `data/`：SQLite 数据库、逐页文本、OCR、chunks、年谱事件候选、检索索引、质量报告和任务运行记录都可以删除后重建，不提交 Git。
 
-项目已接入 DeepSeek V4，默认模型为 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
+项目已接入 DeepSeek V4。自由问法进入混合 RAG 前，默认先由 `deepseek-v4-flash` 以非思考 JSON 模式完成查询理解：规范化简称与别名，识别人物、事件、时间、意图、逐年/逐项/分阶段覆盖要求，并生成最多 4 条检索表达式。查询计划通过本地 Pydantic schema 后才会用于检索，而且最终检索串始终保留用户原问题，不能静默丢弃月份、地点、否定或来源限制；解析超时、返回非法 JSON 或不可用时自动退回原问题。形式严格的“人物 + 整年/年份区间 + 经历或交集”仍直接查询结构化研究库，不额外调用模型。
+
+证据回答默认使用 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。查询理解器可分别通过 `HISTORY_AGENT_LLM_QUERY_PLANNING`、`HISTORY_AGENT_LLM_QUERY_PLANNER_MODEL` 和 `HISTORY_AGENT_LLM_QUERY_PLANNER_MAX_TOKENS` 配置。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
 
 生成答案如果只因部分事实要点漏写证据编号而未通过校验，系统会把具体漏引要点反馈给 DeepSeek，自动修复一次引用；第二次仍不合格才降级为证据摘录。修复请求只允许使用原证据包，不得增加新事实，两次调用的 Token 用量会合并返回。伪造证据编号、文献名或 PDF 页码等错误不会触发自动修复。
 
@@ -240,7 +242,7 @@ uv sync --extra ocr --extra vector --extra app --group dev
 DEEPSEEK_API_KEY=你的密钥
 ```
 
-保存后运行 `history-agent llm check` 验证连接，再重启 Web 服务。也可以在 `.env` 中将 `HISTORY_AGENT_LLM_MODEL` 改为 `deepseek-v4-flash`。没有配置密钥时，页面继续使用“证据摘录模式”；DeepSeek 超时、余额不足、认证失败或返回虚构证据编号时，也会自动安全降级，不影响本地检索和引用展示。
+保存后运行 `history-agent llm check` 验证连接，再重启 Web 服务。也可以在 `.env` 中将 `HISTORY_AGENT_LLM_MODEL` 改为 `deepseek-v4-flash`。没有配置密钥时，查询理解退回原问题，页面继续使用“证据摘录模式”；DeepSeek 超时、余额不足、认证失败、查询计划非法或返回虚构证据编号时，也会自动安全降级，不影响本地检索和引用展示。查询理解会把当前问题和最近 6 条对话发送给 DeepSeek，但不会发送本地史料；最终回答生成仍只发送检索出的短证据包。
 
 `research enrich-events` 是独立的批处理入口，默认一次最多处理 5 条，每个事件发送的全部证据正文合计硬限制为 1200 字符。它使用 DeepSeek JSON Output，但仍在本地执行严格 schema 与原文子串校验；模型不能修改日期、事件原文或证据页码，也不能直接把记录标为“已确认”。每次原始响应、模型与提示词版本、调用前后快照和 Token 用量都会写入 SQLite，结果统一进入复核队列。该命令会把选中事件的短证据发送到 DeepSeek；对资料出境有要求时，应只运行 `--dry-run`，或先完成相应授权与脱敏。JSON Output 参数以 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/json_mode/) 为准。
 

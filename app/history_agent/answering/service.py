@@ -8,6 +8,11 @@ from typing import Any, Literal, cast
 import httpx
 
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
+from history_agent.answering.query_understanding import (
+    QueryPlanningResult,
+    plan_question,
+    retrieval_query,
+)
 from history_agent.answering.structured import answer_structured_question
 from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
@@ -438,15 +443,23 @@ class AnswerContext:
     unsupported_entity: str | None
 
 
-def _retrieve_context(settings: Settings, request: QuestionRequest) -> AnswerContext:
+def _retrieve_context(
+    settings: Settings,
+    request: QuestionRequest,
+    planning: QueryPlanningResult | None = None,
+) -> AnswerContext:
+    planned_query = retrieval_query(
+        request.question, planning.plan if planning is not None else None
+    )
     retrieval = search_hybrid_index(
         keyword_index_path=settings.keyword_index_path,
         vector_index_path=settings.vector_index_path,
         model_cache_dir=settings.model_cache_dir / "fastembed",
         aliases_path=settings.person_aliases_path,
-        query=request.question,
+        query=planned_query,
         top_k=request.top_k,
     )
+    retrieval = retrieval.model_copy(update={"query": request.question})
     keyword_backed = [hit for hit in retrieval.hits if hit.keyword_rank is not None]
     unsupported_entity = _unsupported_leading_entity(request.question, retrieval.hits)
     if not keyword_backed or unsupported_entity:
@@ -467,7 +480,11 @@ def _retrieve_context(settings: Settings, request: QuestionRequest) -> AnswerCon
 
 
 def _finish_answer(
-    settings: Settings, request: QuestionRequest, context: AnswerContext, llm_result: LLMResult
+    settings: Settings,
+    request: QuestionRequest,
+    context: AnswerContext,
+    llm_result: LLMResult,
+    planning: QueryPlanningResult | None = None,
 ) -> AnswerResponse:
     retrieval, citations = context.retrieval, context.citations
     unsupported_entity = context.unsupported_entity
@@ -512,6 +529,10 @@ def _finish_answer(
                 f"时期名称按 {start_year}—{end_year} 年范围召回资料；"
                 "这不是精确起止日期，具体活动的时期归属须结合原文核对。"
             )
+    if planning is not None and planning.status == "fallback":
+        limitations.append(
+            f"查询理解模型未通过（{planning.error_code}），本次已使用用户原问题检索。"
+        )
     return AnswerResponse(
         question=request.question,
         answer=answer,
@@ -530,6 +551,11 @@ def _finish_answer(
         llm_usage=llm_result.usage,
         llm_error_code=llm_result.error_code if citations and settings.llm_enabled else None,
         uncited_claims=list(llm_result.uncited_claims),
+        query_plan=planning.plan if planning is not None else None,
+        query_planner_status=planning.status if planning is not None else "not_applicable",
+        query_planner_model=planning.model_name if planning is not None else None,
+        query_planner_usage=planning.usage if planning is not None else None,
+        query_planner_error_code=planning.error_code if planning is not None else None,
         retrieval_mode=retrieval.retrieval_mode,
         query_intent=retrieval.query_intent,
         citations=citations,
@@ -537,14 +563,40 @@ def _finish_answer(
     )
 
 
+def _clarification_response(
+    request: QuestionRequest, planning: QueryPlanningResult
+) -> AnswerResponse:
+    assert planning.plan is not None
+    assert planning.plan.clarification_question is not None
+    return AnswerResponse(
+        question=request.question,
+        answer=planning.plan.clarification_question,
+        evidence_status="no_evidence",
+        generator_mode="extractive",
+        llm_status="not_applicable",
+        query_plan=planning.plan,
+        query_planner_status=planning.status,
+        query_planner_model=planning.model_name,
+        query_planner_usage=planning.usage,
+        query_planner_error_code=planning.error_code,
+        retrieval_mode="query_clarification",
+        query_intent=planning.plan.intent,
+        citations=[],
+        limitations=["问题存在会改变检索范围的歧义，澄清后再查询可避免丢弃限制条件。"],
+    )
+
+
 def answer_question(settings: Settings, request: QuestionRequest) -> AnswerResponse:
     structured = answer_structured_question(settings, request)
     if structured is not None:
         return structured
-    context = _retrieve_context(settings, request)
+    planning = plan_question(settings, request)
+    if planning.plan is not None and planning.plan.needs_clarification:
+        return _clarification_response(request, planning)
+    context = _retrieve_context(settings, request, planning)
     llm_result = (
         _llm_answer(settings=settings, request=request, citations=context.citations)
         if context.citations
         else LLMResult(answer=None, error_code="no_evidence")
     )
-    return _finish_answer(settings, request, context, llm_result)
+    return _finish_answer(settings, request, context, llm_result, planning)

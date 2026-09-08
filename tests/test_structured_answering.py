@@ -51,6 +51,7 @@ def test_structured_api_bypasses_rag_and_llm(
 
     monkeypatch.setattr("history_agent.answering.service.search_hybrid_index", unexpected)
     monkeypatch.setattr("history_agent.answering.service._llm_answer", unexpected)
+    monkeypatch.setattr("history_agent.answering.service.plan_question", unexpected)
     response = TestClient(create_app(settings)).post(
         "/api/questions", json={"question": question, "top_k": 1}
     )

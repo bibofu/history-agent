@@ -77,6 +77,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "llm_provider": active_settings.llm_provider,
             "llm_model": active_settings.llm_model,
             "llm_thinking": active_settings.llm_thinking,
+            "llm_query_planning": active_settings.llm_query_planning,
+            "llm_query_planner_model": active_settings.llm_query_planner_model,
             "research_range": [
                 active_settings.research_start.year,
                 active_settings.research_end.year,
