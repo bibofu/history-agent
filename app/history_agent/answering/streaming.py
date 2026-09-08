@@ -201,6 +201,11 @@ async def _stream_llm_answer(
                 if preferred is not None:
                     yield preferred
                     return
+            elif salvaged is not None:
+                # The first draft is already safe after removing rejected blocks;
+                # do not add a second upstream round trip merely to recover prose.
+                yield salvaged
+                return
             else:
                 safe_first = salvaged
         if attempt or validation.error_code != "uncited_core_claim":

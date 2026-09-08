@@ -1,3 +1,5 @@
+from threading import Barrier
+
 import pytest
 from history_agent.errors import RetrievalError
 from history_agent.retrieval.hybrid import (
@@ -393,3 +395,28 @@ def test_planned_queries_run_independently_and_preserve_per_item_coverage(
     assert seen_queries == ["原问题", "子问题一", "子问题二"]
     assert {hit.chunk_id for hit in result.hits} == {"原问题", "子问题一", "子问题二"}
     assert result.retrieval_mode == "planned_hybrid_rrf"
+
+
+def test_keyword_and_vector_branches_run_concurrently(monkeypatch, work_path) -> None:
+    rendezvous = Barrier(2)
+
+    def keyword_search(**kwargs):
+        rendezvous.wait(timeout=2)
+        return _response([_hit("keyword", 1, page=1)])
+
+    def vector_search(**kwargs):
+        rendezvous.wait(timeout=2)
+        return _response([_hit("vector", 1, page=2)])
+
+    monkeypatch.setattr("history_agent.retrieval.hybrid.search_keyword_index", keyword_search)
+    monkeypatch.setattr("history_agent.retrieval.hybrid.search_vector_index", vector_search)
+
+    result = search_hybrid_index(
+        keyword_index_path=work_path / "keyword.db",
+        vector_index_path=work_path / "vector",
+        model_cache_dir=work_path / "models",
+        aliases_path=work_path / "aliases.json",
+        query="测试问题",
+    )
+
+    assert result.retrieval_mode == "hybrid_rrf"

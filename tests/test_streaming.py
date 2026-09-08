@@ -120,7 +120,7 @@ def test_stream_preserves_unicode_and_final_metadata(monkeypatch: pytest.MonkeyP
     assert body.closed
 
 
-def test_stream_repairs_in_background_without_clearing_draft(
+def test_stream_returns_valid_salvage_without_background_repair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first = ChunkStream(
@@ -139,13 +139,12 @@ def test_stream_repairs_in_background_without_clearing_draft(
     assert "".join(e.data["text"] for e in events if e.event == "delta") == (
         "参加有关会议。[E1]\n\n随后主持工作。"
     )
-    assert any(
+    assert not any(
         e.event == "status" and e.data["message"] == "正在后台补全引用…" for e in events
     )
-    assert events[-1].data["answer"] == "参加有关会议并主持工作。[E1]"
-    assert events[-1].data["llm_usage"] == {"total_tokens": 30}
-    assert len(requests) == 2
-    assert "随后主持工作" in requests[1]["messages"][-1]["content"]
+    assert events[-1].data["answer"] == "参加有关会议。[E1]"
+    assert events[-1].data["llm_usage"] == {"total_tokens": 20}
+    assert len(requests) == 1
 
 
 @pytest.mark.parametrize(
@@ -270,12 +269,12 @@ def test_cancelling_answer_closes_nested_provider(monkeypatch: pytest.MonkeyPatc
     asyncio.run(cancel())
 
 
-def test_second_invalid_stream_does_not_retry_again(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_valid_stream_salvage_does_not_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     invalid = [_chunk("参加有关会议。[E1]\n\n随后主持工作。", finish="stop"), b"data: [DONE]\n\n"]
     requests = _provider(monkeypatch, [ChunkStream(invalid), ChunkStream(invalid)])
     _context(monkeypatch)
     final = _events()[-1].data
-    assert len(requests) == 2
+    assert len(requests) == 1
     assert final["llm_status"] == "used"
     assert final["llm_error_code"] == "removed_uncited_claims"
     assert final["answer"] == "参加有关会议。[E1]"
@@ -314,7 +313,7 @@ def test_ceremony_overview_has_same_validation_and_diagnostics_in_both_apis(
         )
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    expected_calls = 2 if missing_fact else 1
+    expected_calls = 1
     requests = _provider(
         monkeypatch,
         [

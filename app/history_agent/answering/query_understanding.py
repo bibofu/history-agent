@@ -195,7 +195,9 @@ def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -
     if plan is None:
         return QueryExecution(question, (), None)
     hint = INTENT_HINTS.get(plan.intent)
-    parts = [plan.normalized_question, *plan.search_queries]
+    # Retrieval-oriented rewrites are more valuable than the prose-normalized
+    # question because the original question is always executed separately.
+    parts = [*plan.search_queries, plan.normalized_question]
     for entity in plan.entities:
         if entity.canonical != entity.text and not any(
             entity.canonical in part for part in parts
@@ -222,7 +224,8 @@ def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -
         query_people=_known_people(plan, aliases_path),
         coverage=plan.coverage,
     )
-    return QueryExecution(question, tuple(unique[:8]), retrieval_plan)
+    query_limit = 8 if plan.coverage == "per_item" else 2
+    return QueryExecution(question, tuple(unique[:query_limit]), retrieval_plan)
 
 
 def retrieval_query(question: str, plan: QueryPlan | None) -> str:

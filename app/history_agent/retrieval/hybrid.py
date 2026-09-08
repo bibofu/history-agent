@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from history_agent.errors import RetrievalError
@@ -369,8 +370,9 @@ def _search_one(
     vector: SearchResponse | None = None
     keyword_error: Exception | None = None
     vector_error: Exception | None = None
-    try:
-        keyword = search_keyword_index(
+
+    def keyword_branch() -> SearchResponse:
+        result = search_keyword_index(
             index_path=keyword_index_path,
             query=search_query,
             aliases_path=aliases_path,
@@ -396,14 +398,11 @@ def _search_one(
                 best_hits = _best_congress_hits(targeted.hits, query)
                 if best_hits:
                     congress_hits.append(best_hits[0])
-            keyword = _prepend_congress_keyword_hits(keyword, congress_hits)
-    except Exception as exc:
-        keyword_error = exc
-        logger.warning(
-            "keyword retrieval degraded", extra={"context": {"error": type(exc).__name__}}
-        )
-    try:
-        vector = search_vector_index(
+            result = _prepend_congress_keyword_hits(result, congress_hits)
+        return result
+
+    def vector_branch() -> SearchResponse:
+        return search_vector_index(
             index_path=vector_index_path,
             model_cache_dir=model_cache_dir,
             aliases_path=aliases_path,
@@ -413,11 +412,26 @@ def _search_one(
             include_out_of_scope=include_out_of_scope,
             plan=plan,
         )
-    except Exception as exc:
-        vector_error = exc
-        logger.warning(
-            "vector retrieval degraded", extra={"context": {"error": type(exc).__name__}}
-        )
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="retrieval") as executor:
+        keyword_future = executor.submit(keyword_branch)
+        vector_future = executor.submit(vector_branch)
+        try:
+            keyword = keyword_future.result()
+        except Exception as exc:
+            keyword_error = exc
+            logger.warning(
+                "keyword retrieval degraded",
+                extra={"context": {"error": type(exc).__name__}},
+            )
+        try:
+            vector = vector_future.result()
+        except Exception as exc:
+            vector_error = exc
+            logger.warning(
+                "vector retrieval degraded",
+                extra={"context": {"error": type(exc).__name__}},
+            )
     coverage = plan.coverage if plan is not None else "auto"
     if keyword is not None and vector is not None:
         return fuse_search_responses(keyword, vector, top_k=top_k, coverage=coverage)

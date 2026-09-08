@@ -333,7 +333,7 @@ def test_validation_rejects_mismatched_document_name() -> None:
     assert result.error_code == "citation_metadata_mismatch"
 
 
-def test_deepseek_removes_uncited_block_when_repair_still_invalid(
+def test_deepseek_removes_uncited_block_without_repair_round_trip(
     monkeypatch: Any,
 ) -> None:
     calls = 0
@@ -368,10 +368,10 @@ def test_deepseek_removes_uncited_block_when_repair_still_invalid(
     assert result.answer == "1956年1月，周恩来参加有关会议。[E1]"
     assert result.error_code == "removed_uncited_claims"
     assert result.uncited_claims == ("随后主持科学规划工作。",)
-    assert calls == 2
+    assert calls == 1
 
 
-def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> None:
+def test_deepseek_prefers_valid_salvage_over_repair_round_trip(monkeypatch: Any) -> None:
     responses = iter(
         [
             {
@@ -425,17 +425,14 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
         citations=[_citation()],
     )
 
-    assert result.answer == ("1956年1月，周恩来参加有关会议。[E1]\n\n随后主持科学规划工作。[E1]")
+    assert result.answer == "1956年1月，周恩来参加有关会议。[E1]"
+    assert result.error_code == "removed_uncited_claims"
     assert result.usage == {
-        "prompt_tokens": 25,
-        "completion_tokens": 5,
-        "total_tokens": 30,
+        "prompt_tokens": 10,
+        "completion_tokens": 2,
+        "total_tokens": 12,
     }
-    assert len(request_bodies) == 2
-    repair_messages = request_bodies[1]["messages"]
-    assert repair_messages[-2]["role"] == "assistant"
-    assert "随后主持科学规划工作" in repair_messages[-1]["content"]
-    assert "没有证据支持的事实必须删除" in repair_messages[-1]["content"]
+    assert len(request_bodies) == 1
 
 
 @pytest.mark.parametrize(

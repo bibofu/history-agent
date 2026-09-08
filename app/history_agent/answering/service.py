@@ -358,6 +358,10 @@ def _llm_answer(
     safe_first = _salvage_llm_result(
         first.answer, citations, validation.uncited_claims, first.usage
     )
+    # A validated salvage is already safe to return. A second LLM round trip only
+    # tries to recover removed prose and was the dominant latency in common cases.
+    if safe_first is not None:
+        return safe_first
     repair_payload = _repair_request_payload(
         request_payload, first.answer, citations, validation.uncited_claims
     )

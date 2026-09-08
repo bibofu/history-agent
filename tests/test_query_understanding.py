@@ -119,6 +119,21 @@ def test_query_execution_keeps_variants_independent_and_compiles_typed_filters()
     assert execution.retrieval_plan.coverage == "per_year"
 
 
+def test_query_execution_caps_ordinary_queries_but_keeps_per_item_expansion() -> None:
+    payload = _plan_payload()
+    payload["search_queries"] = [f"检索表达式{index}" for index in range(1, 6)]
+    ordinary = QueryPlan.model_validate(payload)
+    aliases = Path("config/person_aliases.json")
+
+    ordinary_execution = query_execution("原问题", ordinary, aliases)
+    per_item_execution = query_execution(
+        "原问题", ordinary.model_copy(update={"coverage": "per_item"}), aliases
+    )
+
+    assert ordinary_execution.additional_queries == ("检索表达式1", "检索表达式2")
+    assert len(per_item_execution.additional_queries) == 6
+
+
 def test_query_planner_can_request_clarification(monkeypatch: Any) -> None:
     payload = _plan_payload()
     payload.update(
