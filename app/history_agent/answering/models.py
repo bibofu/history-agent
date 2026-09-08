@@ -40,7 +40,7 @@ class QueryPlan(BaseModel):
         "causal_analysis",
     ] = "general"
     normalized_question: str = Field(min_length=2, max_length=500)
-    search_queries: list[ShortQueryText] = Field(default_factory=list, max_length=4)
+    search_queries: list[ShortQueryText] = Field(default_factory=list, max_length=8)
     entities: list[QueryEntity] = Field(default_factory=list, max_length=12)
     start_year: int | None = Field(default=None, ge=1800, le=2100)
     end_year: int | None = Field(default=None, ge=1800, le=2100)
@@ -74,6 +74,7 @@ class AnswerResponse(BaseModel):
     llm_usage: dict[str, int] | None = None
     llm_error_code: str | None = None
     uncited_claims: list[str] = Field(default_factory=list)
+    unsupported_claims: list[str] = Field(default_factory=list)
     query_plan: QueryPlan | None = None
     query_planner_status: Literal["used", "disabled", "fallback", "not_applicable"] = (
         "not_applicable"

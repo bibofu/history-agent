@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import httpx
 from pydantic import ValidationError
 
 from history_agent.answering.models import QueryPlan, QuestionRequest
+from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.config import Settings
+from history_agent.processing.chunks import load_person_aliases
+from history_agent.retrieval.models import RetrievalPlan
 
 PROMPT_VERSION = "query-understanding-v1"
 INTENT_HINTS = {
@@ -28,6 +32,13 @@ class QueryPlanningResult:
     model_name: str | None = None
     usage: dict[str, int] | None = None
     error_code: str | None = None
+
+
+@dataclass(frozen=True)
+class QueryExecution:
+    primary_query: str
+    additional_queries: tuple[str, ...]
+    retrieval_plan: RetrievalPlan | None
 
 
 def _error_code(exc: httpx.HTTPError) -> str:
@@ -49,7 +60,7 @@ def _messages(settings: Settings, request: QuestionRequest) -> list[dict[str, st
             "causal_analysis"
         ),
         "normalized_question": "完整保留约束并规范化简称、别名和指代后的问题",
-        "search_queries": ["1至4条简短的本地史料检索表达式"],
+        "search_queries": ["1至8条可独立执行的简短本地史料检索表达式"],
         "entities": [
             {
                 "type": "person|organization|event|place|document|other",
@@ -78,9 +89,7 @@ def _messages(settings: Settings, request: QuestionRequest) -> list[dict[str, st
         f"研究时间边界是{settings.research_start.year}—{settings.research_end.year}年。"
         f"输出字段示意：{json.dumps(schema, ensure_ascii=False)}"
     )
-    history = "\n".join(
-        f"{item.role}: {item.content}" for item in request.history[-6:]
-    )
+    history = "\n".join(f"{item.role}: {item.content}" for item in request.history[-6:])
     content = f"当前问题：{request.question}"
     if history:
         content = f"最近对话：\n{history}\n\n{content}"
@@ -104,26 +113,38 @@ def _validated_plan(content: str) -> QueryPlan:
     return plan
 
 
-def plan_question(settings: Settings, request: QuestionRequest) -> QueryPlanningResult:
+def plan_question(
+    settings: Settings,
+    request: QuestionRequest,
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
+) -> QueryPlanningResult:
     if not settings.llm_query_planning or not settings.llm_enabled:
         return QueryPlanningResult(None, "disabled")
     assert settings.llm_api_key is not None
     try:
-        response = httpx.post(
-            settings.llm_base_url.rstrip("/") + "/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": settings.llm_query_planner_model,
-                "messages": _messages(settings, request),
-                "response_format": {"type": "json_object"},
-                "stream": False,
-                "max_tokens": settings.llm_query_planner_max_tokens,
-                "thinking": {"type": "disabled"},
-            },
-            timeout=settings.llm_query_planner_timeout_seconds,
+        timeout = (
+            budget.timeout(settings.llm_query_planner_timeout_seconds)
+            if budget is not None
+            else settings.llm_query_planner_timeout_seconds
+        )
+        headers = {
+            "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
+            "Content-Type": "application/json",
+        }
+        request_payload: dict[str, object] = {
+            "model": settings.llm_query_planner_model,
+            "messages": _messages(settings, request),
+            "response_format": {"type": "json_object"},
+            "stream": False,
+            "max_tokens": settings.llm_query_planner_max_tokens,
+            "thinking": {"type": "disabled"},
+        }
+        url = settings.llm_base_url.rstrip("/") + "/chat/completions"
+        response = (
+            runtime.post(url, headers=headers, json=request_payload, timeout=timeout)
+            if runtime is not None
+            else httpx.post(url, headers=headers, json=request_payload, timeout=timeout)
         )
         response.raise_for_status()
         payload = response.json()
@@ -153,8 +174,59 @@ def plan_question(settings: Settings, request: QuestionRequest) -> QueryPlanning
         )
 
 
+def _known_people(plan: QueryPlan, aliases_path: Path) -> list[str]:
+    aliases = load_person_aliases(aliases_path)
+    by_form = {
+        form: canonical for canonical, forms in aliases.items() for form in [canonical, *forms]
+    }
+    people: list[str] = []
+    for entity in plan.entities:
+        if entity.type != "person":
+            continue
+        canonical = by_form.get(entity.canonical) or by_form.get(entity.text)
+        if canonical and canonical not in people:
+            people.append(canonical)
+    return people
+
+
+def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -> QueryExecution:
+    """Compile an LLM plan into independently executable, locally validated retrieval input."""
+
+    if plan is None:
+        return QueryExecution(question, (), None)
+    hint = INTENT_HINTS.get(plan.intent)
+    parts = [plan.normalized_question, *plan.search_queries]
+    for entity in plan.entities:
+        if entity.canonical != entity.text and not any(
+            entity.canonical in part for part in parts
+        ):
+            parts.append(entity.canonical)
+    constraint_hint = " ".join(plan.constraints)
+    if constraint_hint:
+        parts = [f"{part} {constraint_hint}" for part in parts]
+    if hint:
+        parts = [f"{part} {hint}" for part in parts]
+    unique: list[str] = []
+    for part in parts:
+        compact = " ".join(part.split()).strip()
+        if compact and compact != question and compact not in unique:
+            unique.append(compact)
+    year_range: list[int] = []
+    if plan.start_year is not None and plan.end_year is not None:
+        year_range = [plan.start_year, plan.end_year]
+    years = year_range[:1] if year_range and year_range[0] == year_range[1] else []
+    retrieval_plan = RetrievalPlan(
+        query_intent=plan.intent,
+        query_years=years,
+        query_year_range=year_range,
+        query_people=_known_people(plan, aliases_path),
+        coverage=plan.coverage,
+    )
+    return QueryExecution(question, tuple(unique[:8]), retrieval_plan)
+
+
 def retrieval_query(question: str, plan: QueryPlan | None) -> str:
-    """Keep the original verbatim, then add only validated semantic expansions."""
+    """Compatibility helper returning the visible aggregate of planned query variants."""
 
     if plan is None:
         return question
@@ -163,9 +235,4 @@ def retrieval_query(question: str, plan: QueryPlan | None) -> str:
     hint = INTENT_HINTS.get(plan.intent)
     if hint:
         parts.append(hint)
-    unique: list[str] = []
-    for part in parts:
-        compact = " ".join(part.split()).strip()
-        if compact and compact not in unique:
-            unique.append(compact)
-    return " ".join(unique)
+    return " ".join(dict.fromkeys(" ".join(part.split()) for part in parts if part.strip()))

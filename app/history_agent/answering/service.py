@@ -11,8 +11,9 @@ from history_agent.answering.models import AnswerResponse, Citation, QuestionReq
 from history_agent.answering.query_understanding import (
     QueryPlanningResult,
     plan_question,
-    retrieval_query,
+    query_execution,
 )
+from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.structured import answer_structured_question
 from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
@@ -153,22 +154,28 @@ class LLMResult:
     error_code: str | None = None
     usage: dict[str, int] | None = None
     uncited_claims: tuple[str, ...] = ()
+    unsupported_claims: tuple[str, ...] = ()
 
 
 def _salvage_llm_result(
     answer: str,
     citations: list[Citation],
-    uncited_claims: tuple[str, ...],
+    rejected_claims: tuple[str, ...],
     usage: dict[str, int] | None,
+    *,
+    error_code: str = "removed_uncited_claims",
+    uncited_claims: tuple[str, ...] = (),
+    unsupported_claims: tuple[str, ...] = (),
 ) -> LLMResult | None:
-    salvaged = remove_uncited_claim_blocks(answer, uncited_claims)
+    salvaged = remove_uncited_claim_blocks(answer, rejected_claims)
     if salvaged is None or not validate_grounded_answer(salvaged, citations).valid:
         return None
     return LLMResult(
         answer=salvaged,
-        error_code="removed_uncited_claims",
+        error_code=error_code,
         usage=usage,
         uncited_claims=uncited_claims,
+        unsupported_claims=unsupported_claims,
     )
 
 
@@ -186,6 +193,7 @@ def _prefer_llm_result(
         error_code=preferred.error_code,
         usage=usage,
         uncited_claims=preferred.uncited_claims,
+        unsupported_claims=preferred.unsupported_claims,
     )
 
 
@@ -209,18 +217,27 @@ def _merge_usage(*items: dict[str, int] | None) -> dict[str, int] | None:
 
 
 def _request_deepseek_completion(
-    settings: Settings, request_payload: dict[str, object]
+    settings: Settings,
+    request_payload: dict[str, object],
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
 ) -> LLMResult:
     assert settings.llm_api_key is not None
     try:
-        result = httpx.post(
-            _chat_completions_url(settings.llm_base_url),
-            headers={
-                "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-                "Content-Type": "application/json",
-            },
-            json=request_payload,
-            timeout=settings.llm_timeout_seconds,
+        timeout = (
+            budget.timeout(settings.llm_timeout_seconds)
+            if budget is not None
+            else settings.llm_timeout_seconds
+        )
+        url = _chat_completions_url(settings.llm_base_url)
+        headers = {
+            "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
+            "Content-Type": "application/json",
+        }
+        result = (
+            runtime.post(url, headers=headers, json=request_payload, timeout=timeout)
+            if runtime is not None
+            else httpx.post(url, headers=headers, json=request_payload, timeout=timeout)
         )
         result.raise_for_status()
         payload = result.json()
@@ -300,11 +317,14 @@ def _repair_request_payload(
     answer: str,
     citations: list[Citation],
     uncited_claims: tuple[str, ...],
+    *,
+    semantic_mismatch: bool = False,
 ) -> dict[str, object]:
     missing_claims = "\n".join(f"- {claim}" for claim in uncited_claims)
     valid_markers = "、".join(f"[{item.evidence_id}]" for item in citations)
+    problem = "引用与事实要点不一致" if semantic_mismatch else "部分事实要点缺少引用"
     repair_instruction = (
-        "上一版回答因部分事实要点缺少引用而未通过校验。请重新输出完整回答，不要增加新事实，"
+        f"上一版回答因{problem}而未通过校验。请重新输出完整回答，不要增加新事实，"
         "根据原文修复引用覆盖：有证据支持才添加对应编号，没有证据支持的事实必须删除，"
         "不能随意挂靠引用。每个包含日期、职务、地点、行动、会议决定或人物关系的段落、"
         f"列表项或表格行都要使用对应的合法编号（仅限：{valid_markers}）。"
@@ -322,31 +342,53 @@ def _repair_request_payload(
 
 
 def _llm_answer(
-    *, settings: Settings, request: QuestionRequest, citations: list[Citation]
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
 ) -> LLMResult:
     if not settings.llm_enabled:
         return LLMResult(answer=None, error_code="not_configured")
     request_payload = _llm_request_payload(settings=settings, request=request, citations=citations)
-    first = _request_deepseek_completion(settings, request_payload)
+    first = _request_deepseek_completion(settings, request_payload, runtime, budget)
     if first.answer is None:
         return first
     validation = validate_grounded_answer(first.answer, citations)
     if validation.valid:
         return first
-    if validation.error_code != "uncited_core_claim":
+    repairable = {"uncited_core_claim", "citation_entailment_mismatch"}
+    if validation.error_code not in repairable:
         return LLMResult(
             answer=None,
             error_code=validation.error_code,
             usage=first.usage,
             uncited_claims=validation.uncited_claims,
+            unsupported_claims=validation.unsupported_claims,
         )
+    rejected_claims = validation.uncited_claims or validation.unsupported_claims
     safe_first = _salvage_llm_result(
-        first.answer, citations, validation.uncited_claims, first.usage
+        first.answer,
+        citations,
+        rejected_claims,
+        first.usage,
+        error_code=(
+            "removed_unsupported_claims"
+            if validation.unsupported_claims
+            else "removed_uncited_claims"
+        ),
+        uncited_claims=validation.uncited_claims,
+        unsupported_claims=validation.unsupported_claims,
     )
     repair_payload = _repair_request_payload(
-        request_payload, first.answer, citations, validation.uncited_claims
+        request_payload,
+        first.answer,
+        citations,
+        rejected_claims,
+        semantic_mismatch=bool(validation.unsupported_claims),
     )
-    repaired = _request_deepseek_completion(settings, repair_payload)
+    repaired = _request_deepseek_completion(settings, repair_payload, runtime, budget)
     combined_usage = _merge_usage(first.usage, repaired.usage)
     if repaired.answer is None:
         preferred = _prefer_llm_result(safe_first, None, combined_usage)
@@ -365,12 +407,22 @@ def _llm_answer(
         assert preferred is not None
         return preferred
     safe_repaired = None
-    if repaired_validation.error_code == "uncited_core_claim":
+    if repaired_validation.error_code in repairable:
+        rejected_repaired = (
+            repaired_validation.uncited_claims or repaired_validation.unsupported_claims
+        )
         safe_repaired = _salvage_llm_result(
             repaired.answer,
             citations,
-            repaired_validation.uncited_claims,
+            rejected_repaired,
             combined_usage,
+            error_code=(
+                "removed_unsupported_claims"
+                if repaired_validation.unsupported_claims
+                else "removed_uncited_claims"
+            ),
+            uncited_claims=repaired_validation.uncited_claims,
+            unsupported_claims=repaired_validation.unsupported_claims,
         )
     preferred = _prefer_llm_result(safe_first, safe_repaired, combined_usage)
     if preferred is not None:
@@ -380,6 +432,7 @@ def _llm_answer(
         error_code=f"citation_repair_{repaired_validation.error_code}",
         usage=combined_usage,
         uncited_claims=repaired_validation.uncited_claims,
+        unsupported_claims=repaired_validation.unsupported_claims,
     )
 
 
@@ -448,21 +501,26 @@ def _retrieve_context(
     request: QuestionRequest,
     planning: QueryPlanningResult | None = None,
 ) -> AnswerContext:
-    planned_query = retrieval_query(
-        request.question, planning.plan if planning is not None else None
+    execution = query_execution(
+        request.question,
+        planning.plan if planning is not None else None,
+        settings.person_aliases_path,
     )
     retrieval = search_hybrid_index(
         keyword_index_path=settings.keyword_index_path,
         vector_index_path=settings.vector_index_path,
         model_cache_dir=settings.model_cache_dir / "fastembed",
         aliases_path=settings.person_aliases_path,
-        query=planned_query,
+        query=execution.primary_query,
         top_k=request.top_k,
+        plan=execution.retrieval_plan,
+        additional_queries=list(execution.additional_queries),
     )
     retrieval = retrieval.model_copy(update={"query": request.question})
     keyword_backed = [hit for hit in retrieval.hits if hit.keyword_rank is not None]
     unsupported_entity = _unsupported_leading_entity(request.question, retrieval.hits)
-    if not keyword_backed or unsupported_entity:
+    keyword_unavailable = "keyword" in retrieval.degraded_components
+    if (not keyword_backed and not keyword_unavailable) or unsupported_entity:
         citations: list[Citation] = []
         evidence_status: Literal["supported", "partial", "no_evidence"] = "no_evidence"
     else:
@@ -470,6 +528,7 @@ def _retrieve_context(
         evidence_status = (
             "supported"
             if retrieval.query_intent != "intersection"
+            and not retrieval.degraded_components
             and any(
                 hit.keyword_rank is not None and hit.vector_rank is not None
                 for hit in retrieval.hits[:5]
@@ -514,10 +573,17 @@ def _finish_answer(
             )
     elif llm_result.error_code == "removed_uncited_claims":
         limitations.append(
-            "生成草稿中的未引用段落已移除，其余内容已通过引用核查；"
-            "可展开“哪些草稿内容已移除”查看。"
+            "生成草稿中的未引用段落已移除，其余内容已通过引用核查；可展开“哪些草稿内容已移除”查看。"
         )
+    elif llm_result.error_code == "removed_unsupported_claims":
+        limitations.append("生成草稿中与所引证据不一致的段落已移除，其余内容已通过引用核查。")
     if citations:
+        if retrieval.degraded_components:
+            limitations.append(
+                "检索已降级："
+                + "、".join(retrieval.degraded_components)
+                + " 分支暂不可用，当前结果可能不完整。"
+            )
         limitations.append("答案仅代表当前已入库文献的检索结果，不等同于完整历史结论。")
         if retrieval.query_intent == "intersection":
             limitations.append(
@@ -551,6 +617,7 @@ def _finish_answer(
         llm_usage=llm_result.usage,
         llm_error_code=llm_result.error_code if citations and settings.llm_enabled else None,
         uncited_claims=list(llm_result.uncited_claims),
+        unsupported_claims=list(llm_result.unsupported_claims),
         query_plan=planning.plan if planning is not None else None,
         query_planner_status=planning.status if planning is not None else "not_applicable",
         query_planner_model=planning.model_name if planning is not None else None,
@@ -586,16 +653,28 @@ def _clarification_response(
     )
 
 
-def answer_question(settings: Settings, request: QuestionRequest) -> AnswerResponse:
+def answer_question(
+    settings: Settings,
+    request: QuestionRequest,
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
+) -> AnswerResponse:
+    budget = budget or RequestBudget.start(settings.request_timeout_seconds)
     structured = answer_structured_question(settings, request)
     if structured is not None:
         return structured
-    planning = plan_question(settings, request)
+    planning = plan_question(settings, request, runtime, budget)
     if planning.plan is not None and planning.plan.needs_clarification:
         return _clarification_response(request, planning)
     context = _retrieve_context(settings, request, planning)
     llm_result = (
-        _llm_answer(settings=settings, request=request, citations=context.citations)
+        _llm_answer(
+            settings=settings,
+            request=request,
+            citations=context.citations,
+            runtime=runtime,
+            budget=budget,
+        )
         if context.citations
         else LLMResult(answer=None, error_code="no_evidence")
     )

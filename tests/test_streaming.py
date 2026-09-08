@@ -68,8 +68,9 @@ def _provider(
     return requests
 
 
-def _context(monkeypatch: pytest.MonkeyPatch) -> None:
-    context = AnswerContext(_response([_hit("one", 1, page=688)]), [_citation()], "partial", None)
+def _context(monkeypatch: pytest.MonkeyPatch, quote: str | None = None) -> None:
+    citation = _citation(quote) if quote is not None else _citation()
+    context = AnswerContext(_response([_hit("one", 1, page=688)]), [citation], "partial", None)
     monkeypatch.setattr(
         "history_agent.answering.streaming.answer_structured_question", lambda *a: None
     )
@@ -133,7 +134,7 @@ def test_stream_repairs_in_background_without_clearing_draft(
         [_chunk("参加有关会议并主持工作。[E1]", finish="stop", usage=10), b"data: [DONE]\n\n"]
     )
     requests = _provider(monkeypatch, [first, second])
-    _context(monkeypatch)
+    _context(monkeypatch, "参加有关会议并主持工作。")
     events = _events()
     assert all(e.event != "reset" for e in events)
     assert "".join(e.data["text"] for e in events if e.event == "delta") == (

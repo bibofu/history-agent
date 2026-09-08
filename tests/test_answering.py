@@ -269,27 +269,42 @@ def test_validation_rejects_uncited_core_fact_line() -> None:
     assert result.uncited_claims == ("随后主持科学规划工作。",)
 
 
+def test_validation_rejects_claim_not_supported_by_attached_citation() -> None:
+    result = validate_grounded_answer(
+        "1970年，林彪主持经济工作会议。[E1]",
+        [_citation("【1956年1月】周恩来参加会议并讨论科学规划。")],
+    )
+
+    assert result.valid is False
+    assert result.error_code == "citation_entailment_mismatch"
+    assert result.unsupported_claims == ("1970年，林彪主持经济工作会议。",)
+
+    wrong_action = validate_grounded_answer(
+        "1956年1月，周恩来主持有关会议。[E1]", [_citation()]
+    )
+    assert wrong_action.error_code == "citation_entailment_mismatch"
+
+
 def test_uncited_markdown_label_is_removed_without_collapsing_cited_answer() -> None:
     draft = (
         "# 毛泽东对蒋介石的评价\n\n"
         "**晚年：称蒋介石为“老朋友”，主张和平谈判**\n\n"
         "1960年，毛泽东称蒋介石为老朋友。[E1]"
     )
-    validation = validate_grounded_answer(draft, [_citation()])
+    matching_citation = _citation("【1960年】毛泽东称蒋介石为老朋友。")
+    validation = validate_grounded_answer(draft, [matching_citation])
 
     assert validation.error_code == "uncited_core_claim"
     assert validation.uncited_claims == ("晚年：称蒋介石为“老朋友”，主张和平谈判",)
     salvaged = remove_uncited_claim_blocks(draft, validation.uncited_claims)
-    assert salvaged == (
-        "# 毛泽东对蒋介石的评价\n\n1960年，毛泽东称蒋介石为老朋友。[E1]"
-    )
-    assert validate_grounded_answer(salvaged, [_citation()]).valid
+    assert salvaged == ("# 毛泽东对蒋介石的评价\n\n1960年，毛泽东称蒋介石为老朋友。[E1]")
+    assert validate_grounded_answer(salvaged, [matching_citation]).valid
 
 
 def test_validation_accepts_wrapped_fact_with_citation_in_same_list_item() -> None:
     result = validate_grounded_answer(
         "- 1956年1月，周恩来参加有关会议。\n  随后主持科学规划工作。[E1]",
-        [_citation()],
+        [_citation("【1956年1月】周恩来参加有关会议，随后主持科学规划工作。")],
     )
 
     assert result.valid is True
@@ -298,7 +313,7 @@ def test_validation_accepts_wrapped_fact_with_citation_in_same_list_item() -> No
 def test_validation_accepts_multiline_paragraph_with_trailing_citation() -> None:
     result = validate_grounded_answer(
         "1956年1月，周恩来参加有关会议。\n随后主持科学规划工作。相关情况见年谱记载。[E1]",
-        [_citation()],
+        [_citation("【1956年1月】周恩来参加有关会议，随后主持科学规划工作。")],
     )
 
     assert result.valid is True
@@ -422,7 +437,7 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
     result = _llm_answer(
         settings=Settings(_env_file=None, llm_api_key="sk-test"),
         request=QuestionRequest(question="周恩来在1956年做了什么？"),
-        citations=[_citation()],
+        citations=[_citation("【1956年1月】周恩来参加有关会议，随后主持科学规划工作。")],
     )
 
     assert result.answer == ("1956年1月，周恩来参加有关会议。[E1]\n\n随后主持科学规划工作。[E1]")
@@ -436,6 +451,35 @@ def test_deepseek_repairs_missing_core_fact_citation_once(monkeypatch: Any) -> N
     assert repair_messages[-2]["role"] == "assistant"
     assert "随后主持科学规划工作" in repair_messages[-1]["content"]
     assert "没有证据支持的事实必须删除" in repair_messages[-1]["content"]
+
+
+def test_deepseek_repairs_semantically_mismatched_citation_once(monkeypatch: Any) -> None:
+    responses = iter(
+        [
+            {"choices": [{"message": {"content": "1970年，林彪主持会议。[E1]"}}]},
+            {
+                "choices": [
+                    {"message": {"content": "1956年1月，周恩来参加有关会议。[E1]"}}
+                ]
+            },
+        ]
+    )
+    request_bodies: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        request_bodies.append(kwargs["json"])
+        return httpx.Response(200, request=httpx.Request("POST", url), json=next(responses))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _llm_answer(
+        settings=Settings(_env_file=None, llm_api_key="sk-test"),
+        request=QuestionRequest(question="周恩来在1956年做了什么？"),
+        citations=[_citation()],
+    )
+
+    assert result.answer == "1956年1月，周恩来参加有关会议。[E1]"
+    assert len(request_bodies) == 2
+    assert "引用与事实要点不一致" in request_bodies[1]["messages"][-1]["content"]
 
 
 @pytest.mark.parametrize(

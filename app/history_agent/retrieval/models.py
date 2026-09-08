@@ -1,6 +1,29 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+class RetrievalPlan(BaseModel):
+    """Typed filters and coverage requirements shared by all retrieval branches."""
+
+    query_intent: Literal[
+        "general",
+        "event_overview",
+        "timeline",
+        "intersection",
+        "viewpoint",
+        "observation",
+        "comparison",
+        "causal_analysis",
+    ]
+    query_years: list[int] = Field(default_factory=list)
+    query_year_range: list[int] = Field(default_factory=list, max_length=2)
+    query_people: list[str] = Field(default_factory=list)
+    coverage: Literal["relevance", "per_year", "per_item", "balanced_period"] = (
+        "relevance"
+    )
 
 
 class KeywordIndexSummary(BaseModel):
@@ -64,3 +87,4 @@ class SearchResponse(BaseModel):
     include_out_of_scope: bool
     hits: list[SearchHit]
     retrieval_mode: str = "keyword"
+    degraded_components: list[str] = Field(default_factory=list)

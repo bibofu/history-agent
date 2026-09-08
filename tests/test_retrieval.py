@@ -1,3 +1,5 @@
+import pytest
+from history_agent.errors import RetrievalError
 from history_agent.retrieval.hybrid import (
     _primary_year,
     cpc_congress_ordinals,
@@ -12,7 +14,7 @@ from history_agent.retrieval.keyword import (
     infer_year_range,
     tokenize_query,
 )
-from history_agent.retrieval.models import SearchHit, SearchResponse
+from history_agent.retrieval.models import RetrievalPlan, SearchHit, SearchResponse
 
 
 def _hit(
@@ -87,12 +89,9 @@ def test_observation_query_expansion_is_restrained() -> None:
 
 
 def test_cpc_congress_short_name_expands_to_formal_name() -> None:
-    assert expand_query("中共一大的情况") == (
-        "中共一大的情况 中国共产党第一次全国代表大会"
-    )
+    assert expand_query("中共一大的情况") == ("中共一大的情况 中国共产党第一次全国代表大会")
     assert expand_query("比较中共一大和中共二大") == (
-        "比较中共一大和中共二大 "
-        "中国共产党第一次全国代表大会 中国共产党第二次全国代表大会"
+        "比较中共一大和中共二大 中国共产党第一次全国代表大会 中国共产党第二次全国代表大会"
     )
 
 
@@ -152,10 +151,7 @@ def test_rrf_adds_intent_source_bonus() -> None:
 
 def test_congress_range_keeps_evidence_for_each_congress() -> None:
     ordinals = ["一", "二", "三", "四", "五", "六"]
-    hits = [
-        _hit(f"sixth-{index}", index, page=index)
-        for index in range(1, 7)
-    ]
+    hits = [_hit(f"sixth-{index}", index, page=index) for index in range(1, 7)]
     hits.extend(
         _hit(f"congress-{ordinal}", index + 6, page=index + 6)
         for index, ordinal in enumerate(ordinals[:-1], start=1)
@@ -164,17 +160,13 @@ def test_congress_range_keeps_evidence_for_each_congress() -> None:
         hit.section_path = ["党的第六次全国代表大会"]
     for ordinal, hit in zip(ordinals[:-1], hits[6:], strict=True):
         hit.section_path = [f"党的第{ordinal}次全国代表大会"]
-    keyword = _response(hits).model_copy(
-        update={"query": "中共一大到中共六大，介绍一下每次会议"}
-    )
+    keyword = _response(hits).model_copy(update={"query": "中共一大到中共六大，介绍一下每次会议"})
 
     result = fuse_search_responses(keyword, _response([]), top_k=6)
 
-    assert {
-        section
-        for hit in result.hits
-        for section in hit.section_path
-    } == {f"党的第{ordinal}次全国代表大会" for ordinal in ordinals}
+    assert {section for hit in result.hits for section in hit.section_path} == {
+        f"党的第{ordinal}次全国代表大会" for ordinal in ordinals
+    }
 
 
 def test_congress_range_prefers_opening_chunk_on_a_duplicate_page() -> None:
@@ -212,9 +204,7 @@ def test_hybrid_search_runs_a_section_targeted_query_for_each_congress(
         hit.text = f"中国共产党第{ordinal}次全国代表大会召开。"
         return _response([hit]).model_copy(update={"query": kwargs["query"]})
 
-    monkeypatch.setattr(
-        "history_agent.retrieval.hybrid.search_keyword_index", keyword_search
-    )
+    monkeypatch.setattr("history_agent.retrieval.hybrid.search_keyword_index", keyword_search)
     monkeypatch.setattr(
         "history_agent.retrieval.hybrid.search_vector_index",
         lambda **kwargs: _response([]).model_copy(update={"query": kwargs["query"]}),
@@ -244,10 +234,7 @@ def test_wide_period_query_balances_early_middle_and_late_evidence() -> None:
             _hit(f"middle-{index}", index + 6, page=index + 6, years=[1941])
             for index in range(1, 3)
         ],
-        *[
-            _hit(f"late-{index}", index + 8, page=index + 8, years=[1945])
-            for index in range(1, 3)
-        ],
+        *[_hit(f"late-{index}", index + 8, page=index + 8, years=[1945]) for index in range(1, 3)],
     ]
     keyword = _response(hits).model_copy(
         update={"query": "抗日战争的谋划", "query_year_range": [1937, 1945]}
@@ -303,3 +290,106 @@ def test_focused_subperiod_query_keeps_relevance_order() -> None:
     result = fuse_search_responses(keyword, _response([]), top_k=3)
 
     assert [hit.chunk_id for hit in result.hits] == ["early-1", "early-2", "early-3"]
+
+
+def test_hybrid_search_degrades_to_keyword_when_vector_is_unavailable(
+    monkeypatch, work_path
+) -> None:
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_keyword_index",
+        lambda **kwargs: _response([_hit("keyword", 1, page=1)]),
+    )
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_vector_index",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("vector unavailable")),
+    )
+
+    result = search_hybrid_index(
+        keyword_index_path=work_path / "keyword.db",
+        vector_index_path=work_path / "vector",
+        model_cache_dir=work_path / "models",
+        aliases_path=work_path / "aliases.json",
+        query="测试问题",
+    )
+
+    assert result.retrieval_mode == "keyword_only"
+    assert result.degraded_components == ["vector"]
+    assert result.hits[0].keyword_rank == 1
+
+
+def test_hybrid_search_degrades_to_vector_when_keyword_is_unavailable(
+    monkeypatch, work_path
+) -> None:
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_keyword_index",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("keyword unavailable")),
+    )
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_vector_index",
+        lambda **kwargs: _response([_hit("vector", 1, page=1)]),
+    )
+
+    result = search_hybrid_index(
+        keyword_index_path=work_path / "keyword.db",
+        vector_index_path=work_path / "vector",
+        model_cache_dir=work_path / "models",
+        aliases_path=work_path / "aliases.json",
+        query="测试问题",
+    )
+
+    assert result.retrieval_mode == "vector_only"
+    assert result.degraded_components == ["keyword"]
+    assert result.hits[0].vector_rank == 1
+
+
+def test_hybrid_search_fails_only_when_both_branches_are_unavailable(
+    monkeypatch, work_path
+) -> None:
+    def unavailable(**kwargs):
+        raise RuntimeError("unavailable")
+
+    monkeypatch.setattr("history_agent.retrieval.hybrid.search_keyword_index", unavailable)
+    monkeypatch.setattr("history_agent.retrieval.hybrid.search_vector_index", unavailable)
+
+    with pytest.raises(RetrievalError):
+        search_hybrid_index(
+            keyword_index_path=work_path / "keyword.db",
+            vector_index_path=work_path / "vector",
+            model_cache_dir=work_path / "models",
+            aliases_path=work_path / "aliases.json",
+            query="测试问题",
+        )
+
+
+def test_planned_queries_run_independently_and_preserve_per_item_coverage(
+    monkeypatch, work_path
+) -> None:
+    seen_queries: list[str] = []
+
+    def keyword_search(**kwargs):
+        query = kwargs["query"]
+        seen_queries.append(query)
+        page = len(seen_queries)
+        return _response([_hit(query, 1, page=page)]).model_copy(update={"query": query})
+
+    monkeypatch.setattr("history_agent.retrieval.hybrid.search_keyword_index", keyword_search)
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_vector_index",
+        lambda **kwargs: _response([]).model_copy(update={"query": kwargs["query"]}),
+    )
+    plan = RetrievalPlan(query_intent="comparison", coverage="per_item")
+
+    result = search_hybrid_index(
+        keyword_index_path=work_path / "keyword.db",
+        vector_index_path=work_path / "vector",
+        model_cache_dir=work_path / "models",
+        aliases_path=work_path / "aliases.json",
+        query="原问题",
+        additional_queries=["子问题一", "子问题二"],
+        plan=plan,
+        top_k=3,
+    )
+
+    assert seen_queries == ["原问题", "子问题一", "子问题二"]
+    assert {hit.chunk_id for hit in result.hits} == {"原问题", "子问题一", "子问题二"}
+    assert result.retrieval_mode == "planned_hybrid_rrf"

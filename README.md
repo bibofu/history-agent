@@ -230,9 +230,9 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 首次构建向量索引会下载中文嵌入模型。运行数据保存在 `data/`：SQLite 数据库、逐页文本、OCR、chunks、年谱事件候选、检索索引、质量报告和任务运行记录都可以删除后重建，不提交 Git。
 
-项目已接入 DeepSeek V4。自由问法进入混合 RAG 前，默认先由 `deepseek-v4-flash` 以非思考 JSON 模式完成查询理解：规范化简称与别名，识别人物、事件、时间、意图、逐年/逐项/分阶段覆盖要求，并生成最多 4 条检索表达式。查询计划通过本地 Pydantic schema 后才会用于检索，而且最终检索串始终保留用户原问题，不能静默丢弃月份、地点、否定或来源限制；解析超时、返回非法 JSON 或不可用时自动退回原问题。形式严格的“人物 + 整年/年份区间 + 经历或交集”仍直接查询结构化研究库，不额外调用模型。
+项目已接入 DeepSeek V4。自由问法进入混合 RAG 前，默认先由 `deepseek-v4-flash` 以非思考 JSON 模式完成查询理解：规范化简称与别名，识别人物、事件、时间、意图、逐年/逐项/分阶段覆盖要求，并生成最多 8 条检索表达式。查询计划通过本地 Pydantic schema 后，由执行器把原问题和各条改写作为独立子查询运行，再以 RRF 合并；人物、年份范围和覆盖策略作为类型化条件同时传给关键词与向量分支，月份、地点、否定、来源等约束会保留在子查询中。解析超时、返回非法 JSON 或不可用时自动退回原问题。形式严格的“人物 + 整年/年份区间 + 经历或交集”仍直接查询结构化研究库，不额外调用模型。
 
-证据回答默认使用 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。查询理解器可分别通过 `HISTORY_AGENT_LLM_QUERY_PLANNING`、`HISTORY_AGENT_LLM_QUERY_PLANNER_MODEL` 和 `HISTORY_AGENT_LLM_QUERY_PLANNER_MAX_TOKENS` 配置。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
+证据回答默认使用 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。服务会检查引用编号、文献页码、事实引用覆盖，以及显式年份和事实短语与引文的一致性；明显挂错引用的段落会触发一次修复，仍不合格则移除或退回证据摘录。关键词或向量分支单独故障时会以另一分支继续服务并标记结果不完整。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。查询理解器可分别通过 `HISTORY_AGENT_LLM_QUERY_PLANNING`、`HISTORY_AGENT_LLM_QUERY_PLANNER_MODEL` 和 `HISTORY_AGENT_LLM_QUERY_PLANNER_MAX_TOKENS` 配置；`HISTORY_AGENT_REQUEST_TIMEOUT_SECONDS` 控制 planner 与回答共享的总时限，`HISTORY_AGENT_LLM_MAX_CONCURRENCY` 控制共享连接池的并发准入。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
 
 生成答案如果只因部分事实要点漏写证据编号而未通过校验，系统会把具体漏引要点反馈给 DeepSeek，自动修复一次引用；第二次仍不合格才降级为证据摘录。修复请求只允许使用原证据包，不得增加新事实，两次调用的 Token 用量会合并返回。伪造证据编号、文献名或 PDF 页码等错误不会触发自动修复。
 
@@ -496,7 +496,8 @@ review_status
 ```text
 POST /api/questions       基于本地资料问答
 POST /api/questions/stream 流式问答（SSE，status/delta/reset/done/error）
-GET  /api/health          查看双索引、生成模式和研究时间范围
+GET  /api/health          进程存活探针及生成配置摘要
+GET  /api/ready           实际探测数据库、关键词索引和向量索引可用性
 GET  /api/people/{person_id}/timeline
                            查询去重后的人物时间线和页码证据
 GET  /api/people/{person_id}/intersections/{other_person_id}

@@ -10,7 +10,12 @@ from pathlib import Path
 from history_agent.errors import IndexBuildError, RetrievalError
 from history_agent.processing.chunks import load_person_aliases
 from history_agent.processing.models import ChunkRecord
-from history_agent.retrieval.models import KeywordIndexSummary, SearchHit, SearchResponse
+from history_agent.retrieval.models import (
+    KeywordIndexSummary,
+    RetrievalPlan,
+    SearchHit,
+    SearchResponse,
+)
 
 INDEX_VERSION = "sqlite-fts5-cjk-bigram-v1"
 CJK_RUN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
@@ -124,8 +129,7 @@ def infer_query_intent(query: str) -> str:
     ):
         return "viewpoint"
     if (YEAR.search(query) or any(period in query for period in PERIOD_RANGES)) and any(
-        term in query
-        for term in ("经历", "做了什么", "活动", "任职", "担任", "职务", "主要做")
+        term in query for term in ("经历", "做了什么", "活动", "任职", "担任", "职务", "主要做")
     ):
         return "timeline"
     return "general"
@@ -248,9 +252,7 @@ def build_keyword_index(
             """,
             metadata_rows,
         )
-        connection.executemany(
-            "INSERT INTO chunk_fts (chunk_id, terms) VALUES (?, ?)", fts_rows
-        )
+        connection.executemany("INSERT INTO chunk_fts (chunk_id, terms) VALUES (?, ?)", fts_rows)
         connection.commit()
         integrity = connection.execute("PRAGMA integrity_check").fetchone()
         if integrity is None or integrity[0] != "ok":
@@ -294,19 +296,30 @@ def search_keyword_index(
     document_ids: list[str] | None = None,
     include_out_of_scope: bool = False,
     section_path_contains: str | None = None,
+    plan: RetrievalPlan | None = None,
 ) -> SearchResponse:
     if not index_path.is_file():
         raise RetrievalError(f"Keyword index does not exist: {index_path}")
     terms = tokenize_query(query)
-    query_intent = infer_query_intent(query)
-    query_years = sorted({int(match.group(1)) for match in YEAR.finditer(query)})
-    query_year_range = infer_year_range(query, query_years)
-    explicit_year_range = has_explicit_year_range(query)
+    query_intent = plan.query_intent if plan is not None else infer_query_intent(query)
+    query_years = (
+        plan.query_years
+        if plan is not None
+        else sorted({int(match.group(1)) for match in YEAR.finditer(query)})
+    )
+    query_year_range = (
+        plan.query_year_range if plan is not None else infer_year_range(query, query_years)
+    )
+    explicit_year_range = bool(plan and plan.query_year_range) or has_explicit_year_range(query)
     aliases = load_person_aliases(aliases_path)
-    query_people = sorted(
-        person
-        for person, names in aliases.items()
-        if person in query or any(alias in query for alias in names)
+    query_people = (
+        plan.query_people
+        if plan is not None
+        else sorted(
+            person
+            for person, names in aliases.items()
+            if person in query or any(alias in query for alias in names)
+        )
     )
     filter_people = hard_filter_people(query_people, query_intent)
     conditions = ["chunk_fts MATCH ?"]
@@ -317,9 +330,7 @@ def search_keyword_index(
         parameters.extend(document_ids)
     if section_path_contains:
         escaped_section = (
-            section_path_contains.replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
+            section_path_contains.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         )
         conditions.append("m.section_path_json LIKE ? ESCAPE '\\'")
         parameters.append(f"%{escaped_section}%")
@@ -344,9 +355,7 @@ def search_keyword_index(
     if not include_out_of_scope:
         conditions.append("m.scope_status != 'out_of_scope'")
     for person in filter_people:
-        conditions.append(
-            "EXISTS (SELECT 1 FROM json_each(m.people_json) WHERE value = ?)"
-        )
+        conditions.append("EXISTS (SELECT 1 FROM json_each(m.people_json) WHERE value = ?)")
         parameters.append(person)
     score_expression = "bm25(chunk_fts)"
     score_parameters: list[object] = []
@@ -365,7 +374,7 @@ def search_keyword_index(
         SELECT m.*, {score_expression} AS raw_score
         FROM chunk_fts
         JOIN chunk_metadata m ON m.chunk_id = chunk_fts.chunk_id
-        WHERE {' AND '.join(conditions)}
+        WHERE {" AND ".join(conditions)}
         ORDER BY raw_score
         LIMIT ?
     """

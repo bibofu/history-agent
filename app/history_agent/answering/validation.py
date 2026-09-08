@@ -50,6 +50,21 @@ SOURCE_PAGE_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 DOCUMENT_NORMALIZATION = re.compile(r"[^\u3400-\u4dbf\u4e00-\u9fffA-Za-z0-9]")
+ARABIC_YEAR = re.compile(r"(?<!\d)(?:18|19|20)\d{2}年")
+HAN_SEQUENCE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]{2,}")
+SEMANTIC_NORMALIZATIONS = (
+    ("参与", "参加"),
+    ("出席", "参加"),
+    ("举行", "召开"),
+    ("主张", "提出"),
+    ("认为", "指出"),
+    ("记载", "记录"),
+)
+SEMANTIC_ACTION = re.compile(
+    r"担任|任命|出任|兼任|调任|主持|参加|会见|访问|考察|领导|负责|指挥|"
+    r"汇报|讲话|发言|提出|指出|决定|通过|召开|成立|发动|抵达|到达|前往|"
+    r"离开|返回|逝世|撤职|免职|签署|发布|执行"
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +74,7 @@ class AnswerValidationResult:
     used_evidence_ids: tuple[str, ...] = ()
     uncited_claims: tuple[str, ...] = ()
     citation_mismatches: tuple[str, ...] = ()
+    unsupported_claims: tuple[str, ...] = ()
 
 
 @dataclass
@@ -157,8 +173,45 @@ def _document_matches(claimed: str | None, actual: str) -> bool:
     )
 
 
+def _semantic_text(value: str) -> str:
+    normalized = EVIDENCE_MARKER.sub("", value)
+    for source, target in SEMANTIC_NORMALIZATIONS:
+        normalized = normalized.replace(source, target)
+    return normalized
+
+
+def _han_bigrams(value: str) -> set[str]:
+    return {
+        sequence[index : index + 2]
+        for sequence in HAN_SEQUENCE.findall(_semantic_text(value))
+        for index in range(len(sequence) - 1)
+    }
+
+
+def _claim_supported(block: str, evidence: str) -> bool:
+    """Conservative local gate for obvious claim/citation mismatches.
+
+    This is deliberately not a general entailment model. It rejects facts whose
+    explicit year is absent from the cited excerpts, or whose Chinese fact phrase
+    has no meaningful lexical anchor in those excerpts.
+    """
+
+    claim = _claim_text(block)
+    claim_years = set(ARABIC_YEAR.findall(claim))
+    if claim_years and not claim_years.issubset(set(ARABIC_YEAR.findall(evidence))):
+        return False
+    normalized_claim = _semantic_text(claim)
+    normalized_evidence = _semantic_text(evidence)
+    claim_actions = set(SEMANTIC_ACTION.findall(normalized_claim))
+    if any(action not in normalized_evidence for action in claim_actions):
+        return False
+    claim_bigrams = _han_bigrams(claim)
+    evidence_bigrams = _han_bigrams(evidence)
+    return len(claim_bigrams & evidence_bigrams) >= 2
+
+
 def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerValidationResult:
-    """Check reference syntax, metadata and coverage, not semantic entailment."""
+    """Check reference syntax, metadata, coverage, and obvious semantic mismatch."""
 
     citation_by_id = {citation.evidence_id: citation for citation in citations}
     if len(citation_by_id) != len(citations):
@@ -187,10 +240,15 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
 
     uncited_claims: list[str] = []
     citation_mismatches: list[str] = []
+    unsupported_claims: list[str] = []
     for block in blocks:
         block_markers = EVIDENCE_MARKER.findall(block.text)
         if _is_core_fact_block(block.text) and not block_markers:
             uncited_claims.append(_claim_text(block.text))
+        elif _is_core_fact_block(block.text) and block_markers:
+            evidence = " ".join(citation_by_id[marker].quote for marker in block_markers)
+            if not _claim_supported(block.text, evidence):
+                unsupported_claims.append(_claim_text(block.text))
         for match in SOURCE_PAGE_REFERENCE.finditer(block.text):
             claimed_page = int(match.group("page"))
             claimed_document = match.group("document")
@@ -216,6 +274,13 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
             error_code="uncited_core_claim",
             used_evidence_ids=used_evidence_ids,
             uncited_claims=tuple(uncited_claims),
+        )
+    if unsupported_claims:
+        return AnswerValidationResult(
+            valid=False,
+            error_code="citation_entailment_mismatch",
+            used_evidence_ids=used_evidence_ids,
+            unsupported_claims=tuple(unsupported_claims),
         )
     return AnswerValidationResult(
         valid=True,

@@ -40,8 +40,9 @@ function renderAnswer(data) {
       <p class="quote">${escapeHtml(item.quote)}</p>
     </details>`).join("");
   const limits = data.limitations.length ? `<p class="limits">${data.limitations.map(escapeHtml).join(" · ")}</p>` : "";
-  const removedClaims = data.llm_error_code === "removed_uncited_claims";
-  const diagnostics = data.uncited_claims?.length ? `<details class="citation-diagnostics"><summary>${removedClaims ? "哪些草稿内容已移除" : "哪些语句缺少引用"}</summary><p class="meta">以下是未通过引用校验的草稿语句，不作为答案依据。</p><ul>${data.uncited_claims.map(claim => `<li>${escapeHtml(claim)}</li>`).join("")}</ul></details>` : "";
+  const rejectedClaims = [...(data.uncited_claims || []), ...(data.unsupported_claims || [])];
+  const removedClaims = ["removed_uncited_claims", "removed_unsupported_claims"].includes(data.llm_error_code);
+  const diagnostics = rejectedClaims.length ? `<details class="citation-diagnostics"><summary>${removedClaims ? "哪些草稿内容已移除" : "哪些语句未通过证据核查"}</summary><p class="meta">以下是未通过引用或证据一致性校验的草稿语句，不作为答案依据。</p><ul>${rejectedClaims.map(claim => `<li>${escapeHtml(claim)}</li>`).join("")}</ul></details>` : "";
   return `<p class="meta">${mode}${planner}</p><div class="markdown-body">${renderMarkdown(data.answer)}</div><div class="evidence">${evidence}</div>${limits}${diagnostics}`;
 }
 

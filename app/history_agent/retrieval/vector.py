@@ -21,6 +21,7 @@ from history_agent.retrieval.keyword import (
     load_chunks,
 )
 from history_agent.retrieval.models import (
+    RetrievalPlan,
     SearchHit,
     SearchResponse,
     VectorIndexSummary,
@@ -194,14 +195,10 @@ def _query_filter(
     must_not: list[Any] = []
     if document_ids:
         must.append(
-            models.FieldCondition(
-                key="document_id", match=models.MatchAny(any=document_ids)
-            )
+            models.FieldCondition(key="document_id", match=models.MatchAny(any=document_ids))
         )
     for person in query_people:
-        must.append(
-            models.FieldCondition(key="people", match=models.MatchValue(value=person))
-        )
+        must.append(models.FieldCondition(key="people", match=models.MatchValue(value=person)))
     if query_year_range:
         must.append(
             models.FieldCondition(
@@ -211,9 +208,7 @@ def _query_filter(
         )
     if not include_out_of_scope:
         must_not.append(
-            models.FieldCondition(
-                key="scope_status", match=models.MatchValue(value="out_of_scope")
-            )
+            models.FieldCondition(key="scope_status", match=models.MatchValue(value="out_of_scope"))
         )
     return models.Filter(must=must or None, must_not=must_not or None)
 
@@ -227,20 +222,31 @@ def search_vector_index(
     top_k: int = 10,
     document_ids: list[str] | None = None,
     include_out_of_scope: bool = False,
+    plan: RetrievalPlan | None = None,
 ) -> SearchResponse:
     if not index_path.is_dir():
         raise RetrievalError(f"Vector index does not exist: {index_path}")
     aliases = load_person_aliases(aliases_path)
-    query_people = sorted(
-        person
-        for person, names in aliases.items()
-        if person in query or any(alias in query for alias in names)
+    query_people = (
+        plan.query_people
+        if plan is not None
+        else sorted(
+            person
+            for person, names in aliases.items()
+            if person in query or any(alias in query for alias in names)
+        )
     )
-    query_intent = infer_query_intent(query)
+    query_intent = plan.query_intent if plan is not None else infer_query_intent(query)
     filter_people = hard_filter_people(query_people, query_intent)
-    query_years = sorted({int(match.group(1)) for match in YEAR.finditer(query)})
-    query_year_range = infer_year_range(query, query_years)
-    explicit_year_range = has_explicit_year_range(query)
+    query_years = (
+        plan.query_years
+        if plan is not None
+        else sorted({int(match.group(1)) for match in YEAR.finditer(query)})
+    )
+    query_year_range = (
+        plan.query_year_range if plan is not None else infer_year_range(query, query_years)
+    )
+    explicit_year_range = bool(plan and plan.query_year_range) or has_explicit_year_range(query)
     _, QdrantClient, models = _load_vector_dependencies()
     embedding_model = _embedding_model(model_cache_dir)
     query_vector = next(iter(embedding_model.query_embed(query)))
@@ -279,15 +285,9 @@ def search_vector_index(
             payload = point.payload or {}
             section_path = [str(item) for item in payload.get("section_path", [])]
             section_years = {
-                int(match.group(1))
-                for section in section_path
-                for match in YEAR.finditer(section)
+                int(match.group(1)) for section in section_path for match in YEAR.finditer(section)
             }
-            target = (
-                section_matches
-                if expected.intersection(section_years)
-                else other_matches
-            )
+            target = section_matches if expected.intersection(section_years) else other_matches
             target.append(point)
         points = [*section_matches, *other_matches]
     hits: list[SearchHit] = []

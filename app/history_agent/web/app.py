@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from importlib.resources import files
 from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from history_agent import __version__
 from history_agent.answering.models import AnswerResponse, QuestionRequest
+from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.service import answer_question
 from history_agent.answering.streaming import AnswerStreamEvent, stream_answer_question
 from history_agent.config import Settings, get_settings
@@ -29,15 +30,27 @@ from history_agent.research.timeline import (
     TimelineReviewStatus,
     get_person_timeline,
 )
+from history_agent.web.readiness import readiness_snapshot
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or get_settings()
     static_dir = files("history_agent.web").joinpath("static")
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        runtime = LLMRuntime(active_settings.llm_max_concurrency)
+        application.state.llm_runtime = runtime
+        try:
+            yield
+        finally:
+            await runtime.aclose()
+
     api = FastAPI(
         title="近现代史研究 Agent",
         version=__version__,
         description="Local evidence-grounded RAG for the 1921-1978 corpus.",
+        lifespan=lifespan,
     )
     api.mount("/assets", StaticFiles(directory=str(static_dir)), name="assets")
 
@@ -70,7 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "vector": active_settings.vector_index_path.is_dir(),
         }
         return {
-            "status": "ok" if all(indexes.values()) else "degraded",
+            "status": "ok",
             "version": __version__,
             "indexes": indexes,
             "llm_enabled": active_settings.llm_enabled,
@@ -85,10 +98,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         }
 
+    @api.get("/api/ready")
+    def ready() -> JSONResponse:
+        snapshot = readiness_snapshot(active_settings)
+        status_code = 200 if snapshot["status"] == "ready" else 503
+        return JSONResponse(snapshot, status_code=status_code)
+
     @api.post("/api/questions", response_model=AnswerResponse)
     def question(request: QuestionRequest) -> AnswerResponse:
         try:
-            return answer_question(active_settings, request)
+            runtime = getattr(api.state, "llm_runtime", None)
+            if runtime is None:
+                return answer_question(active_settings, request)
+            return answer_question(
+                active_settings,
+                request,
+                runtime,
+                RequestBudget.start(active_settings.request_timeout_seconds),
+            )
         except RetrievalError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -96,7 +123,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def question_stream(request: QuestionRequest) -> StreamingResponse:
         async def events() -> AsyncIterator[str]:
             try:
-                async with aclosing(stream_answer_question(active_settings, request)) as answers:
+                runtime = getattr(api.state, "llm_runtime", None)
+                answers = (
+                    stream_answer_question(active_settings, request)
+                    if runtime is None
+                    else stream_answer_question(
+                        active_settings,
+                        request,
+                        runtime,
+                        RequestBudget.start(active_settings.request_timeout_seconds),
+                    )
+                )
+                async with aclosing(answers) as answers:
                     async for event in answers:
                         yield event.encode()
             except RetrievalError:

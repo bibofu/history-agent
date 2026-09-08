@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -8,7 +9,7 @@ from history_agent.answering.models import QueryEntity, QueryPlan, QuestionReque
 from history_agent.answering.query_understanding import (
     QueryPlanningResult,
     plan_question,
-    retrieval_query,
+    query_execution,
 )
 from history_agent.answering.service import LLMResult, answer_question
 from history_agent.config import Settings
@@ -50,11 +51,7 @@ def test_query_planner_normalizes_free_form_question(monkeypatch: Any) -> None:
             request=httpx.Request("POST", url),
             json={
                 "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(_plan_payload(), ensure_ascii=False)
-                        }
-                    }
+                    {"message": {"content": json.dumps(_plan_payload(), ensure_ascii=False)}}
                 ],
                 "usage": {"prompt_tokens": 80, "completion_tokens": 40, "total_tokens": 120},
             },
@@ -62,9 +59,7 @@ def test_query_planner_normalizes_free_form_question(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(httpx, "post", fake_post)
     settings = Settings(_env_file=None, llm_api_key="sk-test")
-    result = plan_question(
-        settings, QuestionRequest(question="党的头一次全国大会讲了些什么？")
-    )
+    result = plan_question(settings, QuestionRequest(question="党的头一次全国大会讲了些什么？"))
 
     assert result.status == "used"
     assert result.plan is not None
@@ -99,7 +94,7 @@ def test_invalid_query_plan_falls_back_without_using_model_text(monkeypatch: Any
     assert result.error_code == "invalid_plan"
 
 
-def test_retrieval_query_keeps_original_constraints_and_adds_semantics() -> None:
+def test_query_execution_keeps_variants_independent_and_compiles_typed_filters() -> None:
     plan = QueryPlan(
         intent="timeline",
         normalized_question="梳理毛泽东1921年至1926年的活动",
@@ -111,13 +106,17 @@ def test_retrieval_query_keeps_original_constraints_and_adds_semantics() -> None
         constraints=["限定湖南地区"],
     )
     original = "逐年梳理润之1921—1926年在湖南的活动"
-    query = retrieval_query(original, plan)
+    execution = query_execution(original, plan, Path("config/person_aliases.json"))
 
-    assert query.startswith(original)
-    assert "毛泽东" in query
-    assert "经历 活动 时间线" in query
-    assert "1921—1926" in query
-    assert "湖南" in query
+    assert execution.primary_query == original
+    assert any("毛泽东" in query for query in execution.additional_queries)
+    assert all("经历 活动 时间线" in query for query in execution.additional_queries)
+    assert any("湖南" in query for query in execution.additional_queries)
+    assert execution.retrieval_plan is not None
+    assert execution.retrieval_plan.query_intent == "timeline"
+    assert execution.retrieval_plan.query_year_range == [1921, 1926]
+    assert execution.retrieval_plan.query_people == ["毛泽东"]
+    assert execution.retrieval_plan.coverage == "per_year"
 
 
 def test_query_planner_can_request_clarification(monkeypatch: Any) -> None:
@@ -157,10 +156,12 @@ def test_answer_question_uses_semantic_plan_for_hybrid_retrieval(monkeypatch: An
         model_name="deepseek-v4-flash",
         usage={"total_tokens": 100},
     )
-    captured: dict[str, str] = {}
+    captured: dict[str, Any] = {}
 
     def search(**kwargs: Any) -> SearchResponse:
         captured["query"] = kwargs["query"]
+        captured["additional_queries"] = kwargs["additional_queries"]
+        captured["plan"] = kwargs["plan"]
         return SearchResponse(
             query=kwargs["query"],
             query_intent="general",
@@ -185,8 +186,9 @@ def test_answer_question_uses_semantic_plan_for_hybrid_retrieval(monkeypatch: An
         Settings(_env_file=None, llm_api_key=None), QuestionRequest(question=original)
     )
 
-    assert captured["query"].startswith(original)
-    assert "中国共产党第一次全国代表大会" in captured["query"]
+    assert captured["query"] == original
+    assert any("中国共产党第一次全国代表大会" in query for query in captured["additional_queries"])
+    assert captured["plan"].query_intent == "event_overview"
     assert result.query_plan == plan
     assert result.query_planner_status == "used"
     assert result.query_planner_usage == {"total_tokens": 100}

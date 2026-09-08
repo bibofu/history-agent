@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from history_agent.answering.models import Citation, QuestionRequest
 from history_agent.answering.query_understanding import plan_question
+from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.service import (
     LLMResult,
     _chat_completions_url,
@@ -53,8 +54,33 @@ async def _sse_data(response: httpx.Response) -> AsyncIterator[str]:
         yield "\n".join(data)
 
 
+@asynccontextmanager
+async def _ephemeral_stream(
+    settings: Settings,
+    request_payload: dict[str, object],
+    timeout: float,
+) -> AsyncIterator[httpx.Response]:
+    assert settings.llm_api_key is not None
+    async with (
+        httpx.AsyncClient(timeout=timeout) as client,
+        client.stream(
+            "POST",
+            _chat_completions_url(settings.llm_base_url),
+            headers={
+                "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
+                "Content-Type": "application/json",
+            },
+            json={**request_payload, "stream": True, "stream_options": {"include_usage": True}},
+        ) as response,
+    ):
+        yield response
+
+
 async def _stream_completion(
-    settings: Settings, request_payload: dict[str, object]
+    settings: Settings,
+    request_payload: dict[str, object],
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
 ) -> AsyncGenerator[str | LLMResult, None]:
     assert settings.llm_api_key is not None
     parts: list[str] = []
@@ -62,18 +88,26 @@ async def _stream_completion(
     finish_reason: str | None = None
     finished = False
     try:
-        async with (
-            httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client,
-            client.stream(
+        timeout = (
+            budget.timeout(settings.llm_timeout_seconds)
+            if budget is not None
+            else settings.llm_timeout_seconds
+        )
+        stream = (
+            runtime.stream(
                 "POST",
                 _chat_completions_url(settings.llm_base_url),
+                timeout=timeout,
                 headers={
                     "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
                     "Content-Type": "application/json",
                 },
                 json={**request_payload, "stream": True, "stream_options": {"include_usage": True}},
-            ) as response,
-        ):
+            )
+            if runtime is not None
+            else _ephemeral_stream(settings, request_payload, timeout)
+        )
+        async with stream as response:
             response.raise_for_status()
             async for data in _sse_data(response):
                 if data == "[DONE]":
@@ -120,7 +154,11 @@ async def _stream_completion(
 
 
 async def _stream_llm_answer(
-    settings: Settings, request: QuestionRequest, citations: list[Citation]
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
 ) -> AsyncGenerator[AnswerStreamEvent | LLMResult, None]:
     payload = _llm_request_payload(settings=settings, request=request, citations=citations)
     usage: dict[str, int] | None = None
@@ -128,7 +166,7 @@ async def _stream_llm_answer(
     for attempt in range(2):
         result = LLMResult(answer=None, error_code="incomplete_stream")
         # Closing nested iterators releases the upstream HTTP connection on cancellation.
-        async with aclosing(_stream_completion(settings, payload)) as completion:
+        async with aclosing(_stream_completion(settings, payload, runtime, budget)) as completion:
             async for item in completion:
                 if isinstance(item, str):
                     # Keep the first draft visible while a repair completion runs in
@@ -150,15 +188,25 @@ async def _stream_llm_answer(
         yield AnswerStreamEvent("status", {"message": "正在核查引用…"})
         validation = validate_grounded_answer(result.answer, citations)
         if validation.valid:
-            preferred = _prefer_llm_result(
-                safe_first, LLMResult(answer=result.answer), usage
-            )
+            preferred = _prefer_llm_result(safe_first, LLMResult(answer=result.answer), usage)
             assert preferred is not None
             yield preferred
             return
-        if validation.error_code == "uncited_core_claim":
+        repairable = {"uncited_core_claim", "citation_entailment_mismatch"}
+        if validation.error_code in repairable:
+            rejected_claims = validation.uncited_claims or validation.unsupported_claims
             salvaged = _salvage_llm_result(
-                result.answer, citations, validation.uncited_claims, usage
+                result.answer,
+                citations,
+                rejected_claims,
+                usage,
+                error_code=(
+                    "removed_unsupported_claims"
+                    if validation.unsupported_claims
+                    else "removed_uncited_claims"
+                ),
+                uncited_claims=validation.uncited_claims,
+                unsupported_claims=validation.unsupported_claims,
             )
             if attempt:
                 preferred = _prefer_llm_result(safe_first, salvaged, usage)
@@ -167,7 +215,7 @@ async def _stream_llm_answer(
                     return
             else:
                 safe_first = salvaged
-        if attempt or validation.error_code != "uncited_core_claim":
+        if attempt or validation.error_code not in repairable:
             preferred = _prefer_llm_result(safe_first, None, usage)
             if preferred is not None:
                 yield preferred
@@ -177,17 +225,26 @@ async def _stream_llm_answer(
                 error_code=f"{prefix}{validation.error_code}",
                 usage=usage,
                 uncited_claims=validation.uncited_claims,
+                unsupported_claims=validation.unsupported_claims,
             )
             return
         payload = _repair_request_payload(
-            payload, result.answer, citations, validation.uncited_claims
+            payload,
+            result.answer,
+            citations,
+            validation.uncited_claims or validation.unsupported_claims,
+            semantic_mismatch=bool(validation.unsupported_claims),
         )
         yield AnswerStreamEvent("status", {"message": "正在后台补全引用…"})
 
 
 async def stream_answer_question(
-    settings: Settings, request: QuestionRequest
+    settings: Settings,
+    request: QuestionRequest,
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
 ) -> AsyncGenerator[AnswerStreamEvent, None]:
+    budget = budget or RequestBudget.start(settings.request_timeout_seconds)
     yield AnswerStreamEvent("status", {"message": "正在分析问题…"})
     structured = await run_in_threadpool(answer_structured_question, settings, request)
     if structured is not None:
@@ -195,7 +252,7 @@ async def stream_answer_question(
         return
     if settings.llm_query_planning and settings.llm_enabled:
         yield AnswerStreamEvent("status", {"message": "正在理解问题并规划检索…"})
-    planning = await run_in_threadpool(plan_question, settings, request)
+    planning = await run_in_threadpool(plan_question, settings, request, runtime, budget)
     if planning.plan is not None and planning.plan.needs_clarification:
         yield AnswerStreamEvent("done", _clarification_response(request, planning).model_dump())
         return
@@ -206,7 +263,9 @@ async def stream_answer_question(
         result = LLMResult(answer=None, error_code="no_evidence")
     elif settings.llm_enabled:
         yield AnswerStreamEvent("status", {"message": "正在生成，引用待核查…"})
-        async with aclosing(_stream_llm_answer(settings, request, context.citations)) as generation:
+        async with aclosing(
+            _stream_llm_answer(settings, request, context.citations, runtime, budget)
+        ) as generation:
             async for item in generation:
                 if isinstance(item, LLMResult):
                     result = item
