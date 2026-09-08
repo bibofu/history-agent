@@ -232,7 +232,7 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 项目已接入 DeepSeek V4。自由问法进入混合 RAG 前，默认先由 `deepseek-v4-flash` 以非思考 JSON 模式完成查询理解：规范化简称与别名，识别人物、事件、时间、意图、逐年/逐项/分阶段覆盖要求，并生成最多 8 条检索表达式。查询计划通过本地 Pydantic schema 后，由执行器把原问题和各条改写作为独立子查询运行，再以 RRF 合并；人物、年份范围和覆盖策略作为类型化条件同时传给关键词与向量分支，月份、地点、否定、来源等约束会保留在子查询中。解析超时、返回非法 JSON 或不可用时自动退回原问题。形式严格的“人物 + 整年/年份区间 + 经历或交集”仍直接查询结构化研究库，不额外调用模型。
 
-证据回答默认使用 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。服务会检查引用编号、文献页码、事实引用覆盖，以及显式年份和事实短语与引文的一致性；明显挂错引用的段落会触发一次修复，仍不合格则移除或退回证据摘录。关键词或向量分支单独故障时会以另一分支继续服务并标记结果不完整。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。查询理解器可分别通过 `HISTORY_AGENT_LLM_QUERY_PLANNING`、`HISTORY_AGENT_LLM_QUERY_PLANNER_MODEL` 和 `HISTORY_AGENT_LLM_QUERY_PLANNER_MAX_TOKENS` 配置；`HISTORY_AGENT_REQUEST_TIMEOUT_SECONDS` 控制 planner 与回答共享的总时限，`HISTORY_AGENT_LLM_MAX_CONCURRENCY` 控制共享连接池的并发准入。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
+证据回答默认使用 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。服务会检查引用编号、文献页码和事实引用覆盖。关键词或向量分支单独故障时会以另一分支继续服务并标记结果不完整。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。查询理解器可分别通过 `HISTORY_AGENT_LLM_QUERY_PLANNING`、`HISTORY_AGENT_LLM_QUERY_PLANNER_MODEL` 和 `HISTORY_AGENT_LLM_QUERY_PLANNER_MAX_TOKENS` 配置；`HISTORY_AGENT_REQUEST_TIMEOUT_SECONDS` 控制 planner 与回答共享的总时限，`HISTORY_AGENT_LLM_MAX_CONCURRENCY` 控制共享连接池的并发准入。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
 
 生成答案如果只因部分事实要点漏写证据编号而未通过校验，系统会把具体漏引要点反馈给 DeepSeek，自动修复一次引用；第二次仍不合格才降级为证据摘录。修复请求只允许使用原证据包，不得增加新事实，两次调用的 Token 用量会合并返回。伪造证据编号、文献名或 PDF 页码等错误不会触发自动修复。
 

@@ -74,7 +74,6 @@ class AnswerResponse(BaseModel):
     llm_usage: dict[str, int] | None = None
     llm_error_code: str | None = None
     uncited_claims: list[str] = Field(default_factory=list)
-    unsupported_claims: list[str] = Field(default_factory=list)
     query_plan: QueryPlan | None = None
     query_planner_status: Literal["used", "disabled", "fallback", "not_applicable"] = (
         "not_applicable"

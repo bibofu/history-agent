@@ -192,21 +192,9 @@ async def _stream_llm_answer(
             assert preferred is not None
             yield preferred
             return
-        repairable = {"uncited_core_claim", "citation_entailment_mismatch"}
-        if validation.error_code in repairable:
-            rejected_claims = validation.uncited_claims or validation.unsupported_claims
+        if validation.error_code == "uncited_core_claim":
             salvaged = _salvage_llm_result(
-                result.answer,
-                citations,
-                rejected_claims,
-                usage,
-                error_code=(
-                    "removed_unsupported_claims"
-                    if validation.unsupported_claims
-                    else "removed_uncited_claims"
-                ),
-                uncited_claims=validation.uncited_claims,
-                unsupported_claims=validation.unsupported_claims,
+                result.answer, citations, validation.uncited_claims, usage
             )
             if attempt:
                 preferred = _prefer_llm_result(safe_first, salvaged, usage)
@@ -215,7 +203,7 @@ async def _stream_llm_answer(
                     return
             else:
                 safe_first = salvaged
-        if attempt or validation.error_code not in repairable:
+        if attempt or validation.error_code != "uncited_core_claim":
             preferred = _prefer_llm_result(safe_first, None, usage)
             if preferred is not None:
                 yield preferred
@@ -225,15 +213,10 @@ async def _stream_llm_answer(
                 error_code=f"{prefix}{validation.error_code}",
                 usage=usage,
                 uncited_claims=validation.uncited_claims,
-                unsupported_claims=validation.unsupported_claims,
             )
             return
         payload = _repair_request_payload(
-            payload,
-            result.answer,
-            citations,
-            validation.uncited_claims or validation.unsupported_claims,
-            semantic_mismatch=bool(validation.unsupported_claims),
+            payload, result.answer, citations, validation.uncited_claims
         )
         yield AnswerStreamEvent("status", {"message": "正在后台补全引用…"})
 
