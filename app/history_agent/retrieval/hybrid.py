@@ -506,6 +506,15 @@ def _fuse_query_variants(
     degraded = sorted(
         {component for response in responses for component in response.degraded_components}
     )
+    coverage_gaps = [
+        response.query
+        for response in responses[1:]
+        if not response.hits
+        or (
+            "keyword" not in response.degraded_components
+            and not any(hit.keyword_rank is not None for hit in response.hits)
+        )
+    ]
     return SearchResponse(
         query=query,
         query_intent=plan.query_intent,
@@ -518,6 +527,7 @@ def _fuse_query_variants(
         hits=selected,
         retrieval_mode="planned_hybrid_rrf",
         degraded_components=degraded,
+        coverage_gaps=coverage_gaps,
     )
 
 

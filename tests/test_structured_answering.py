@@ -6,7 +6,10 @@ import pytest
 from fastapi.testclient import TestClient
 from history_agent.answering.models import ConversationMessage, QuestionRequest
 from history_agent.answering.service import LLMResult, answer_question
-from history_agent.answering.structured import answer_structured_question
+from history_agent.answering.structured import (
+    _structured_result_limit,
+    answer_structured_question,
+)
 from history_agent.config import Settings
 from history_agent.db import Database
 from history_agent.retrieval.keyword import PERIOD_RANGES, infer_year_range
@@ -105,6 +108,13 @@ def test_structured_timeline_summary_uses_llm_without_planner_or_rag(
     assert data["llm_status"] == "used"
     assert data["answer"].startswith("主要经历可归纳")
     assert received == [["结构化索引日期：1943-01-21", "结构化索引日期：1943-02-01"]]
+
+
+def test_long_structured_period_expands_evidence_budget() -> None:
+    request = QuestionRequest(question="周恩来在1949至1976年主要有哪些经历？", top_k=12)
+
+    assert _structured_result_limit(request, 1949, 1976) == 36
+    assert _structured_result_limit(request, 1956, 1956) == 12
 
 
 @pytest.mark.parametrize(

@@ -23,6 +23,7 @@ _PERIOD = re.compile(
 _INTERSECTION = re.compile(r"交集|共同(?:事件|活动|经历|参加|参与|出席)")
 _TIMELINE = re.compile(r"时间线|经历[？?。]*$|经历有哪些|有哪些活动|做了什么|参加[过了]哪些会议")
 _RAW_TIMELINE = re.compile(r"列出|时间线|逐条|原文|明细|记录|清单|参加[过了]哪些会议")
+MAX_STRUCTURED_SUMMARY_RECORDS = 36
 _ALLOWED = {
     "intersection": re.compile(
         r"(?:有哪些|有什么|有过哪些)?(?:交集|共同事件|共同活动|共同经历)"
@@ -81,6 +82,11 @@ def requires_structured_generation(response: AnswerResponse) -> bool:
     """Require LLM generation for every structured answer backed by evidence."""
 
     return bool(response.citations)
+
+
+def _structured_result_limit(request: QuestionRequest, start: int, end: int) -> int:
+    span = end - start + 1
+    return min(MAX_STRUCTURED_SUMMARY_RECORDS, max(request.top_k, span * 3))
 
 
 def answer_structured_question(
@@ -187,6 +193,7 @@ def answer_structured_question(
         citations: list[Citation] = []
         lines: list[str] = []
         event_types = ["meeting"] if "会议" in question else None
+        result_limit = _structured_result_limit(request, start, end)
         if intent == "intersection":
             intersections = get_person_intersections(
                 database,
@@ -195,7 +202,7 @@ def answer_structured_question(
                 start_year=start,
                 end_year=end,
                 event_types=event_types,
-                limit=request.top_k,
+                limit=result_limit,
             )
             total, shown = intersections.total, len(intersections.events)
             for item in intersections.events:
@@ -239,7 +246,7 @@ def answer_structured_question(
                 start_year=start,
                 end_year=end,
                 event_types=event_types,
-                limit=request.top_k,
+                limit=result_limit if synthesize else request.top_k,
                 sample_across_range=synthesize,
             )
             total, shown = timeline.total, len(timeline.events)

@@ -346,6 +346,34 @@ def test_valid_stream_salvage_does_not_retry(monkeypatch: pytest.MonkeyPatch) ->
     assert any("未引用段落已移除" in item for item in final["limitations"])
 
 
+def test_large_evidence_set_uses_hierarchical_generation_in_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    citations = [
+        _citation().model_copy(update={"evidence_id": f"E{index}"})
+        for index in range(1, 14)
+    ]
+    context = AnswerContext(_response([]), citations, "partial", None)
+    monkeypatch.setattr(
+        "history_agent.answering.streaming.answer_structured_question", lambda *args: None
+    )
+    monkeypatch.setattr(
+        "history_agent.answering.streaming._retrieve_context", lambda *args: context
+    )
+    monkeypatch.setattr(
+        "history_agent.answering.streaming._llm_answer",
+        lambda **kwargs: LLMResult(answer="分层综合答案。[E1][E13]"),
+    )
+
+    events = _events()
+
+    assert any(
+        event.event == "status" and "分组归纳" in event.data["message"] for event in events
+    )
+    assert events[-1].data["answer"] == "分层综合答案。[E1][E13]"
+    assert any("13 条证据" in item for item in events[-1].data["limitations"])
+
+
 @pytest.mark.parametrize("missing_fact", [False, True])
 def test_ceremony_overview_has_same_validation_and_diagnostics_in_both_apis(
     monkeypatch: pytest.MonkeyPatch,

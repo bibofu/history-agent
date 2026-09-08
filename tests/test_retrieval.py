@@ -397,6 +397,31 @@ def test_planned_queries_run_independently_and_preserve_per_item_coverage(
     assert result.retrieval_mode == "planned_hybrid_rrf"
 
 
+def test_planned_retrieval_reports_empty_coverage_groups(monkeypatch, work_path) -> None:
+    def keyword_search(**kwargs):
+        query = kwargs["query"]
+        hits = [] if "缺失阶段" in query else [_hit(query, 1, page=1)]
+        return _response(hits).model_copy(update={"query": query})
+
+    monkeypatch.setattr("history_agent.retrieval.hybrid.search_keyword_index", keyword_search)
+    monkeypatch.setattr(
+        "history_agent.retrieval.hybrid.search_vector_index",
+        lambda **kwargs: _response([]).model_copy(update={"query": kwargs["query"]}),
+    )
+    result = search_hybrid_index(
+        keyword_index_path=work_path / "keyword.db",
+        vector_index_path=work_path / "vector",
+        model_cache_dir=work_path / "models",
+        aliases_path=work_path / "aliases.json",
+        query="原问题",
+        additional_queries=["已有阶段", "缺失阶段"],
+        plan=RetrievalPlan(query_intent="timeline", coverage="balanced_period"),
+        top_k=6,
+    )
+
+    assert result.coverage_gaps == ["缺失阶段"]
+
+
 def test_keyword_and_vector_branches_run_concurrently(monkeypatch, work_path) -> None:
     rendezvous = Barrier(2)
 

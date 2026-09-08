@@ -23,6 +23,7 @@ INTENT_HINTS = {
     "viewpoint": "观点 论述 主张 策略",
     "observation": "记述 描述 印象",
 }
+MAX_COVERAGE_QUERIES = 8
 
 
 @dataclass(frozen=True)
@@ -189,6 +190,39 @@ def _known_people(plan: QueryPlan, aliases_path: Path) -> list[str]:
     return people
 
 
+def _coverage_queries(plan: QueryPlan, people: list[str]) -> list[str]:
+    """Build deterministic group queries when completeness matters."""
+
+    if plan.start_year is None or plan.end_year is None:
+        return []
+    entities = list(
+        dict.fromkeys(
+            [*people, *(entity.canonical for entity in plan.entities if entity.type != "person")]
+        )
+    )
+    subject = " ".join(entities) or plan.normalized_question
+    suffix = " ".join([*plan.constraints, INTENT_HINTS.get(plan.intent, "")]).strip()
+    if plan.coverage == "per_year":
+        years = list(range(plan.start_year, plan.end_year + 1))
+        if len(years) > MAX_COVERAGE_QUERIES:
+            years = [
+                years[round(index * (len(years) - 1) / (MAX_COVERAGE_QUERIES - 1))]
+                for index in range(MAX_COVERAGE_QUERIES)
+            ]
+        return [f"{subject} {year}年 {suffix}".strip() for year in years]
+    if plan.coverage == "balanced_period" and plan.start_year < plan.end_year:
+        span = plan.end_year - plan.start_year + 1
+        ranges = []
+        for index in range(3):
+            start = plan.start_year + span * index // 3
+            end = plan.start_year + span * (index + 1) // 3 - 1
+            ranges.append((start, max(start, end)))
+        return [
+            f"{subject} {start}年至{end}年 {suffix}".strip() for start, end in ranges
+        ]
+    return []
+
+
 def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -> QueryExecution:
     """Compile an LLM plan into independently executable, locally validated retrieval input."""
 
@@ -208,8 +242,9 @@ def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -
         parts = [f"{part} {constraint_hint}" for part in parts]
     if hint:
         parts = [f"{part} {hint}" for part in parts]
+    people = _known_people(plan, aliases_path)
     unique: list[str] = []
-    for part in parts:
+    for part in [*_coverage_queries(plan, people), *parts]:
         compact = " ".join(part.split()).strip()
         if compact and compact != question and compact not in unique:
             unique.append(compact)
@@ -221,10 +256,16 @@ def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -
         query_intent=plan.intent,
         query_years=years,
         query_year_range=year_range,
-        query_people=_known_people(plan, aliases_path),
+        query_people=people,
         coverage=plan.coverage,
     )
-    query_limit = 8 if plan.coverage == "per_item" else 2
+    query_limit = (
+        MAX_COVERAGE_QUERIES
+        if plan.coverage in {"per_item", "per_year"}
+        else 3
+        if plan.coverage == "balanced_period"
+        else 2
+    )
     return QueryExecution(question, tuple(unique[:query_limit]), retrieval_plan)
 
 

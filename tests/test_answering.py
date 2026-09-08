@@ -1,14 +1,18 @@
+import re
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from history_agent.answering import service as service_module
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
+from history_agent.answering.query_understanding import QueryExecution
 from history_agent.answering.service import (
     _extractive_answer,
     _llm_answer,
     _quote_for_hit,
+    _retrieval_limit,
     _unsupported_leading_entity,
 )
 from history_agent.answering.validation import (
@@ -16,7 +20,7 @@ from history_agent.answering.validation import (
     validate_grounded_answer,
 )
 from history_agent.config import Settings
-from history_agent.retrieval.models import SearchHit
+from history_agent.retrieval.models import RetrievalPlan, SearchHit
 from history_agent.web import app as web_module
 
 
@@ -82,6 +86,23 @@ def test_question_request_rejects_unbounded_history() -> None:
 
     assert request.top_k == 12
     assert request.history == []
+
+
+def test_complex_coverage_expands_internal_retrieval_budget() -> None:
+    request = QuestionRequest(question="梳理长期经历", top_k=12)
+    balanced = QueryExecution(
+        request.question,
+        ("前期", "中期", "后期"),
+        RetrievalPlan(query_intent="timeline", coverage="balanced_period"),
+    )
+    many_items = QueryExecution(
+        request.question,
+        tuple(f"项目{index}" for index in range(20)),
+        RetrievalPlan(query_intent="comparison", coverage="per_item"),
+    )
+
+    assert _retrieval_limit(request, balanced) == 24
+    assert _retrieval_limit(request, many_items) == 36
 
 
 def test_intersection_quote_keeps_the_complete_interaction_after_long_background() -> None:
@@ -369,6 +390,47 @@ def test_deepseek_removes_uncited_block_without_repair_round_trip(
     assert result.error_code == "removed_uncited_claims"
     assert result.uncited_claims == ("随后主持科学规划工作。",)
     assert calls == 1
+
+
+def test_many_evidence_chunks_use_parallel_map_and_final_reduce(monkeypatch: Any) -> None:
+    calls: list[tuple[str, int]] = []
+
+    def complete(
+        settings: Settings,
+        request_payload: dict[str, object],
+        runtime: object = None,
+        budget: object = None,
+    ) -> Any:
+        del settings, runtime, budget
+        content = str(request_payload["messages"][-1]["content"])
+        calls.append((content, int(request_payload["max_tokens"])))
+        markers = list(dict.fromkeys(re.findall(r"\[E\d+\]", content)))
+        if "分组证据经逐组引用校验" in content:
+            return service_module.LLMResult(
+                answer=f"最终综合结论。{''.join(markers)}", usage={"total_tokens": 1}
+            )
+        return service_module.LLMResult(
+            answer=f"本组局部结论。{''.join(markers)}", usage={"total_tokens": 1}
+        )
+
+    monkeypatch.setattr(service_module, "_request_deepseek_completion", complete)
+    citations = [
+        _citation().model_copy(
+            update={"evidence_id": f"E{index}", "quote": f"第{index}条可核验史料。"}
+        )
+        for index in range(1, 26)
+    ]
+    result = _llm_answer(
+        settings=Settings(_env_file=None, llm_api_key="sk-test"),
+        request=QuestionRequest(question="跨阶段梳理这些材料"),
+        citations=citations,
+    )
+
+    assert result.answer is not None and "[E25]" in result.answer
+    assert result.usage == {"total_tokens": 4}
+    assert len(calls) == 4
+    assert sum("这是覆盖检索的第" in content for content, _ in calls) == 3
+    assert sorted(max_tokens for _, max_tokens in calls) == [1200, 1200, 1200, 5000]
 
 
 def test_deepseek_prefers_valid_salvage_over_repair_round_trip(monkeypatch: Any) -> None:

@@ -88,3 +88,4 @@ class SearchResponse(BaseModel):
     hits: list[SearchHit]
     retrieval_mode: str = "keyword"
     degraded_components: list[str] = Field(default_factory=list)
+    coverage_gaps: list[str] = Field(default_factory=list)

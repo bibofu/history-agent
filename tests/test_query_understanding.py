@@ -117,6 +117,33 @@ def test_query_execution_keeps_variants_independent_and_compiles_typed_filters()
     assert execution.retrieval_plan.query_year_range == [1921, 1926]
     assert execution.retrieval_plan.query_people == ["毛泽东"]
     assert execution.retrieval_plan.coverage == "per_year"
+    assert all(
+        any(f"{year}年" in query for query in execution.additional_queries)
+        for year in range(1921, 1927)
+    )
+
+
+def test_balanced_period_builds_three_targeted_phase_queries() -> None:
+    payload = _plan_payload()
+    payload.update(
+        {
+            "normalized_question": "梳理毛泽东1921年至1949年的经历",
+            "entities": [{"type": "person", "text": "毛泽东", "canonical": "毛泽东"}],
+            "start_year": 1921,
+            "end_year": 1949,
+            "coverage": "balanced_period",
+        }
+    )
+
+    execution = query_execution(
+        "梳理毛泽东1921年至1949年的经历",
+        QueryPlan.model_validate(payload),
+        Path("config/person_aliases.json"),
+    )
+
+    assert len(execution.additional_queries) == 3
+    assert "1921年至1929年" in execution.additional_queries[0]
+    assert "1940年至1949年" in execution.additional_queries[-1]
 
 
 def test_query_execution_caps_ordinary_queries_but_keeps_per_item_expansion() -> None:

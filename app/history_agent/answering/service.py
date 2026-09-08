@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Literal, cast
@@ -9,6 +10,7 @@ import httpx
 
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.query_understanding import (
+    QueryExecution,
     QueryPlanningResult,
     plan_question,
     query_execution,
@@ -30,7 +32,9 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v12"
+PROMPT_VERSION = "grounded-answer-v13"
+LLM_EVIDENCE_BATCH_SIZE = 12
+MAX_COMPLEX_RETRIEVAL_CHUNKS = 36
 
 
 def _compact(text: str) -> str:
@@ -255,13 +259,16 @@ def _request_deepseek_completion(
 
 
 def _llm_request_payload(
-    *, settings: Settings, request: QuestionRequest, citations: list[Citation]
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    evidence_override: str | None = None,
+    max_tokens: int | None = None,
 ) -> dict[str, object]:
-    evidence = "\n\n".join(
-        (
-            f"[{item.evidence_id}] 《{item.document}》PDF第{item.pdf_page}页"
-            f"；章节：{' > '.join(item.section) or '未识别'}\n{item.quote}"
-        )
+    evidence = evidence_override or "\n\n".join(
+        f"[{item.evidence_id}] 《{item.document}》PDF第{item.pdf_page}页"
+        f"；章节：{' > '.join(item.section) or '未识别'}\n{item.quote}"
         for item in citations
     )
     system = (
@@ -304,7 +311,7 @@ def _llm_request_payload(
         "model": settings.llm_model,
         "messages": messages,
         "stream": False,
-        "max_tokens": settings.llm_max_tokens,
+        "max_tokens": max_tokens or settings.llm_max_tokens,
         "thinking": {"type": "enabled" if settings.llm_thinking else "disabled"},
     }
     if settings.llm_thinking:
@@ -338,17 +345,14 @@ def _repair_request_payload(
     }
 
 
-def _llm_answer(
+def _validated_llm_answer(
     *,
     settings: Settings,
-    request: QuestionRequest,
+    request_payload: dict[str, object],
     citations: list[Citation],
     runtime: LLMRuntime | None = None,
     budget: RequestBudget | None = None,
 ) -> LLMResult:
-    if not settings.llm_enabled:
-        return LLMResult(answer=None, error_code="not_configured")
-    request_payload = _llm_request_payload(settings=settings, request=request, citations=citations)
     first = _request_deepseek_completion(settings, request_payload, runtime, budget)
     if first.answer is None:
         return first
@@ -406,6 +410,128 @@ def _llm_answer(
         error_code=f"citation_repair_{repaired_validation.error_code}",
         usage=combined_usage,
         uncited_claims=repaired_validation.uncited_claims,
+    )
+
+
+def _llm_answer_direct(
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
+    max_tokens: int | None = None,
+) -> LLMResult:
+    payload = _llm_request_payload(
+        settings=settings,
+        request=request,
+        citations=citations,
+        max_tokens=max_tokens,
+    )
+    return _validated_llm_answer(
+        settings=settings,
+        request_payload=payload,
+        citations=citations,
+        runtime=runtime,
+        budget=budget,
+    )
+
+
+def _hierarchical_llm_answer(
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    runtime: LLMRuntime | None,
+    budget: RequestBudget | None,
+) -> LLMResult:
+    batches = [
+        citations[index : index + LLM_EVIDENCE_BATCH_SIZE]
+        for index in range(0, len(citations), LLM_EVIDENCE_BATCH_SIZE)
+    ]
+
+    def summarize(item: tuple[int, list[Citation]]) -> tuple[str, LLMResult]:
+        index, batch = item
+        instruction = (
+            f"{request.question}\n\n这是覆盖检索的第 {index + 1}/{len(batches)} 组证据。"
+            "请只提炼本组能支持的局部结论，保留每项原始证据编号，控制在600字以内；"
+            "不要因为这是局部证据就下完整性结论。"
+        )
+        partial = _llm_answer_direct(
+            settings=settings,
+            request=request.model_copy(update={"question": instruction, "history": []}),
+            citations=batch,
+            runtime=runtime,
+            budget=budget,
+            max_tokens=min(settings.llm_max_tokens, 1200),
+        )
+        if partial.answer:
+            return partial.answer, partial
+        fallback = "\n".join(
+            f"[{citation.evidence_id}] {citation.quote}" for citation in batch
+        )
+        return fallback, partial
+
+    workers = min(len(batches), 3)
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="evidence-map") as executor:
+        mapped = list(executor.map(summarize, enumerate(batches)))
+    summaries = "\n\n".join(
+        f"第 {index + 1} 组已核查摘要：\n{summary}"
+        for index, (summary, _) in enumerate(mapped)
+    )
+    final_payload = _llm_request_payload(
+        settings=settings,
+        request=request,
+        citations=citations,
+        evidence_override=(
+            "以下是分组证据经逐组引用校验后的摘要。请合并重复内容，检查各分组覆盖，"
+            "形成完整回答；只能使用摘要中出现的原始证据编号。\n\n" + summaries
+        ),
+    )
+    final = _validated_llm_answer(
+        settings=settings,
+        request_payload=final_payload,
+        citations=citations,
+        runtime=runtime,
+        budget=budget,
+    )
+    usage = _merge_usage(*(result.usage for _, result in mapped), final.usage)
+    map_failed = any(result.answer is None for _, result in mapped)
+    error_code = final.error_code
+    if final.answer and map_failed and error_code is None:
+        error_code = "hierarchical_partial_map_fallback"
+    return LLMResult(
+        answer=final.answer,
+        error_code=error_code,
+        usage=usage,
+        uncited_claims=final.uncited_claims,
+    )
+
+
+def _llm_answer(
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
+) -> LLMResult:
+    if not settings.llm_enabled:
+        return LLMResult(answer=None, error_code="not_configured")
+    if len(citations) <= LLM_EVIDENCE_BATCH_SIZE:
+        return _llm_answer_direct(
+            settings=settings,
+            request=request,
+            citations=citations,
+            runtime=runtime,
+            budget=budget,
+        )
+    return _hierarchical_llm_answer(
+        settings=settings,
+        request=request,
+        citations=citations,
+        runtime=runtime,
+        budget=budget,
     )
 
 
@@ -469,6 +595,17 @@ class AnswerContext:
     unsupported_entity: str | None
 
 
+def _retrieval_limit(request: QuestionRequest, execution: QueryExecution) -> int:
+    plan = execution.retrieval_plan
+    if plan is None or plan.coverage == "relevance":
+        return request.top_k
+    if plan.coverage == "balanced_period":
+        desired = max(request.top_k, 24)
+    else:
+        desired = max(request.top_k, len(execution.additional_queries) * 3)
+    return min(MAX_COMPLEX_RETRIEVAL_CHUNKS, desired)
+
+
 def _retrieve_context(
     settings: Settings,
     request: QuestionRequest,
@@ -479,13 +616,14 @@ def _retrieve_context(
         planning.plan if planning is not None else None,
         settings.person_aliases_path,
     )
+    retrieval_limit = _retrieval_limit(request, execution)
     retrieval = search_hybrid_index(
         keyword_index_path=settings.keyword_index_path,
         vector_index_path=settings.vector_index_path,
         model_cache_dir=settings.model_cache_dir / "fastembed",
         aliases_path=settings.person_aliases_path,
         query=execution.primary_query,
-        top_k=request.top_k,
+        top_k=retrieval_limit,
         plan=execution.retrieval_plan,
         additional_queries=list(execution.additional_queries),
     )
@@ -502,6 +640,7 @@ def _retrieve_context(
             "supported"
             if retrieval.query_intent != "intersection"
             and not retrieval.degraded_components
+            and not retrieval.coverage_gaps
             and any(
                 hit.keyword_rank is not None and hit.vector_rank is not None
                 for hit in retrieval.hits[:5]
@@ -548,12 +687,26 @@ def _finish_answer(
         limitations.append(
             "生成草稿中的未引用段落已移除，其余内容已通过引用核查；可展开“哪些草稿内容已移除”查看。"
         )
+    elif llm_result.error_code == "hierarchical_partial_map_fallback":
+        limitations.append(
+            "部分证据分组未能生成局部摘要，最终综合时已改用该组原文摘录。"
+        )
     if citations:
         if retrieval.degraded_components:
             limitations.append(
                 "检索已降级："
                 + "、".join(retrieval.degraded_components)
                 + " 分支暂不可用，当前结果可能不完整。"
+            )
+        if retrieval.coverage_gaps:
+            limitations.append(
+                f"覆盖计划中有 {len(retrieval.coverage_gaps)} 个检索分组未找到候选证据，"
+                "对应部分已作为资料缺口保留。"
+            )
+        if len(citations) > LLM_EVIDENCE_BATCH_SIZE:
+            limitations.append(
+                f"本题使用 {len(citations)} 条证据执行了分组摘要和最终综合，"
+                "以避免单次 Top-K 截断跨阶段材料。"
             )
         limitations.append("答案仅代表当前已入库文献的检索结果，不等同于完整历史结论。")
         if retrieval.query_intent == "intersection":
@@ -616,6 +769,12 @@ def _finish_structured_answer(
         )
     elif llm_result.error_code == "removed_uncited_claims":
         limitations.append("生成草稿中的未引用段落已移除，其余内容已通过引用核查。")
+    elif llm_result.error_code == "hierarchical_partial_map_fallback":
+        limitations.append("部分证据分组未生成局部摘要，最终综合时已改用该组原文摘录。")
+    if len(structured.citations) > LLM_EVIDENCE_BATCH_SIZE:
+        limitations.append(
+            f"本题使用 {len(structured.citations)} 条结构化证据执行了分组摘要和最终综合。"
+        )
     return structured.model_copy(
         update={
             "answer": llm_result.answer or structured.answer,

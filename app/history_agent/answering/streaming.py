@@ -15,12 +15,14 @@ from history_agent.answering.models import Citation, QuestionRequest
 from history_agent.answering.query_understanding import plan_question
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.service import (
+    LLM_EVIDENCE_BATCH_SIZE,
     LLMResult,
     _chat_completions_url,
     _clarification_response,
     _deepseek_error_code,
     _finish_answer,
     _finish_structured_answer,
+    _llm_answer,
     _llm_request_payload,
     _merge_usage,
     _prefer_llm_result,
@@ -242,7 +244,19 @@ async def stream_answer_question(
     if structured is not None:
         if requires_structured_generation(structured):
             result = LLMResult(answer=None, error_code="not_configured")
-            if settings.llm_enabled:
+            if settings.llm_enabled and len(structured.citations) > LLM_EVIDENCE_BATCH_SIZE:
+                yield AnswerStreamEvent("status", {"message": "正在分组归纳结构化史料…"})
+                result = await run_in_threadpool(
+                    _llm_answer,
+                    settings=settings,
+                    request=request,
+                    citations=structured.citations,
+                    runtime=runtime,
+                    budget=budget,
+                )
+                if result.answer:
+                    yield AnswerStreamEvent("delta", {"text": result.answer})
+            elif settings.llm_enabled:
                 yield AnswerStreamEvent("status", {"message": "正在归纳结构化史料…"})
                 async with aclosing(
                     _stream_llm_answer(
@@ -270,6 +284,18 @@ async def stream_answer_question(
     result = LLMResult(answer=None, error_code="not_configured")
     if not context.citations:
         result = LLMResult(answer=None, error_code="no_evidence")
+    elif settings.llm_enabled and len(context.citations) > LLM_EVIDENCE_BATCH_SIZE:
+        yield AnswerStreamEvent("status", {"message": "正在分组归纳跨阶段证据…"})
+        result = await run_in_threadpool(
+            _llm_answer,
+            settings=settings,
+            request=request,
+            citations=context.citations,
+            runtime=runtime,
+            budget=budget,
+        )
+        if result.answer:
+            yield AnswerStreamEvent("delta", {"text": result.answer})
     elif settings.llm_enabled:
         yield AnswerStreamEvent("status", {"message": "正在生成，引用待核查…"})
         async with aclosing(
