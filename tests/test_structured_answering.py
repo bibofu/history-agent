@@ -37,7 +37,7 @@ def _settings(work_path: Path) -> Settings:
     ],
     ids=[f"route-{index}" for index in range(5)],
 )
-def test_structured_api_bypasses_rag_and_llm(
+def test_structured_api_bypasses_rag_but_generates_when_evidence_exists(
     work_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     question: str,
@@ -47,25 +47,32 @@ def test_structured_api_bypasses_rag_and_llm(
     settings = _settings(work_path)
 
     def unexpected(**kwargs: object) -> None:
-        pytest.fail("structured route must not invoke RAG or LLM")
+        pytest.fail("structured route must not invoke planner or hybrid retrieval")
+
+    def generate(**kwargs: object) -> LLMResult:
+        citations = kwargs["citations"]
+        assert isinstance(citations, list) and citations
+        return LLMResult(answer="LLM 整理后的结构化回答。[E1]")
 
     monkeypatch.setattr("history_agent.answering.service.search_hybrid_index", unexpected)
-    monkeypatch.setattr("history_agent.answering.service._llm_answer", unexpected)
+    monkeypatch.setattr("history_agent.answering.service._llm_answer", generate)
     monkeypatch.setattr("history_agent.answering.service.plan_question", unexpected)
+    settings = settings.model_copy(update={"llm_api_key": SecretStr("test-key")})
     response = TestClient(create_app(settings)).post(
         "/api/questions", json={"question": question, "top_k": 1}
     )
     assert response.status_code == 200
     data = response.json()
     assert data["retrieval_mode"] == f"structured_{intent}"
-    assert data["llm_status"] == "not_applicable"
     assert bool(data["citations"]) == has_evidence
     assert data["evidence_status"] != "supported"
     if has_evidence:
+        assert data["llm_status"] == "used"
+        assert data["generator_mode"] == "llm"
         assert "[E1]" in data["answer"]
         assert data["citations"][0]["pdf_page"] > 0
-        assert "前 1 条" in data["answer"]
     else:
+        assert data["llm_status"] == "not_applicable"
         assert "不代表" in data["answer"]
 
 

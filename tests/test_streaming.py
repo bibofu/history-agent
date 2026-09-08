@@ -283,6 +283,39 @@ def test_structured_summary_streams_through_llm(monkeypatch: pytest.MonkeyPatch)
     assert events[-1].data["answer"] == "可归纳为外事和会议工作。[E1]"
 
 
+def test_structured_record_list_also_streams_through_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    structured = AnswerResponse(
+        question="请列出1956年周恩来的时间线",
+        answer="结构化记录摘录。[E1]",
+        evidence_status="partial",
+        generator_mode="extractive",
+        llm_status="not_applicable",
+        retrieval_mode="structured_timeline",
+        query_intent="timeline",
+        citations=[_citation()],
+    )
+    body = ChunkStream([_chunk("整理后的记录。[E1]", finish="stop"), b"data: [DONE]\n\n"])
+    _provider(monkeypatch, [body])
+    monkeypatch.setattr(
+        "history_agent.answering.streaming.answer_structured_question",
+        lambda *args: structured,
+    )
+
+    async def collect() -> list[Any]:
+        return [
+            event
+            async for event in stream_answer_question(
+                _settings(), QuestionRequest(question="请列出1956年周恩来的时间线")
+            )
+        ]
+
+    events = asyncio.run(collect())
+    assert events[-1].data["llm_status"] == "used"
+    assert events[-1].data["answer"] == "整理后的记录。[E1]"
+
+
 def test_cancelling_answer_closes_nested_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     body = ChunkStream([_chunk("参加有关"), _chunk("会议。[E1]", finish="stop")])
     _provider(monkeypatch, [body])

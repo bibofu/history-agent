@@ -77,15 +77,10 @@ def _citation(
     )
 
 
-def requires_structured_synthesis(request: QuestionRequest, response: AnswerResponse) -> bool:
-    """Return whether an exact structured result should be organized by the LLM."""
+def requires_structured_generation(response: AnswerResponse) -> bool:
+    """Require LLM generation for every structured answer backed by evidence."""
 
-    question = re.sub(r"\s+", "", request.question)
-    return (
-        response.query_intent == "timeline"
-        and bool(response.citations)
-        and _RAW_TIMELINE.search(question) is None
-    )
+    return bool(response.citations)
 
 
 def answer_structured_question(

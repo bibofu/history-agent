@@ -16,7 +16,7 @@ from history_agent.answering.query_understanding import (
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.structured import (
     answer_structured_question,
-    requires_structured_synthesis,
+    requires_structured_generation,
 )
 from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
@@ -278,9 +278,10 @@ def _llm_request_payload(
         "检索年份范围只是召回线索，不能把同年其他活动或后来的回忆当作当时的交集。"
         "若证据覆盖所问时期的多个阶段，须按阶段组织回答，不能只总结前半段；"
         "对于跨年人物活动梳理，若证据覆盖多个年份，须按年份组织，不能只回答起止年份；"
-        "对于结构化年谱记录，不要机械复述每条材料；应合并同类活动，按阶段或主题概括"
-        "主要经历，同时保留每个事实对应的证据编号。结构化索引日期只用于组织顺序，"
-        "不得把仅仅提到人物的记录自动断言为其亲自参与；"
+        "对于结构化年谱记录，若用户询问主要经历、概括或总结，应合并同类活动，按阶段"
+        "或主题归纳；若用户明确要求列出时间线、逐条记录、原文或明细，则保持记录粒度和"
+        "先后顺序，但仍整理成通顺回答。结构化索引日期只用于组织顺序，不得把仅仅提到"
+        "人物的记录自动断言为其亲自参与；"
         "对于连续列举多次会议的问题，须逐次组织回答，不能只介绍范围端点；"
         "某阶段没有直接材料时明确说明。"
         "片段不足以证明互动或时间归属时明确说明，不要补写。"
@@ -667,7 +668,7 @@ def answer_question(
     budget = budget or RequestBudget.start(settings.request_timeout_seconds)
     structured = answer_structured_question(settings, request)
     if structured is not None:
-        if requires_structured_synthesis(request, structured):
+        if requires_structured_generation(structured):
             llm_result = _llm_answer(
                 settings=settings,
                 request=request,

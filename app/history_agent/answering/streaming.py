@@ -30,7 +30,7 @@ from history_agent.answering.service import (
 )
 from history_agent.answering.structured import (
     answer_structured_question,
-    requires_structured_synthesis,
+    requires_structured_generation,
 )
 from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
@@ -240,7 +240,7 @@ async def stream_answer_question(
     yield AnswerStreamEvent("status", {"message": "正在分析问题…"})
     structured = await run_in_threadpool(answer_structured_question, settings, request)
     if structured is not None:
-        if requires_structured_synthesis(request, structured):
+        if requires_structured_generation(structured):
             result = LLMResult(answer=None, error_code="not_configured")
             if settings.llm_enabled:
                 yield AnswerStreamEvent("status", {"message": "正在归纳结构化史料…"})
