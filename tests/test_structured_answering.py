@@ -5,13 +5,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from history_agent.answering.models import ConversationMessage, QuestionRequest
-from history_agent.answering.service import answer_question
+from history_agent.answering.service import LLMResult, answer_question
 from history_agent.answering.structured import answer_structured_question
 from history_agent.config import Settings
 from history_agent.db import Database
 from history_agent.retrieval.keyword import PERIOD_RANGES, infer_year_range
 from history_agent.retrieval.models import SearchHit, SearchResponse
 from history_agent.web.app import create_app
+from pydantic import SecretStr
 from test_timeline import _prepare_timeline
 
 
@@ -28,14 +29,13 @@ def _settings(work_path: Path) -> Settings:
 @pytest.mark.parametrize(
     "question,intent,has_evidence",
     [
-        ("周恩来在1943年有哪些经历？", "timeline", True),
         ("请列出1943年周恩来的时间线", "timeline", True),
         ("周恩来在1942年至1943年参加过哪些会议", "timeline", True),
         ("周恩来与林彪在1943年有哪些共同事件？", "intersection", True),
         ("周恩来和毛泽东在1943年有哪些交集", "intersection", False),
         ("林彪和周恩来在1942年有哪些交集", "intersection", False),
     ],
-    ids=[f"route-{index}" for index in range(6)],
+    ids=[f"route-{index}" for index in range(5)],
 )
 def test_structured_api_bypasses_rag_and_llm(
     work_path: Path,
@@ -67,6 +67,37 @@ def test_structured_api_bypasses_rag_and_llm(
         assert "前 1 条" in data["answer"]
     else:
         assert "不代表" in data["answer"]
+
+
+def test_structured_timeline_summary_uses_llm_without_planner_or_rag(
+    work_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(work_path).model_copy(update={"llm_api_key": SecretStr("test-key")})
+    received: list[list[str]] = []
+
+    def unexpected(**kwargs: object) -> None:
+        pytest.fail("exact structured summaries must not invoke planner or hybrid retrieval")
+
+    def generate(**kwargs: object) -> LLMResult:
+        citations = kwargs["citations"]
+        assert isinstance(citations, list)
+        received.append([citation.section[0] for citation in citations])
+        return LLMResult(answer="主要经历可归纳为通信联络和会议工作。[E1][E2]")
+
+    monkeypatch.setattr("history_agent.answering.service.search_hybrid_index", unexpected)
+    monkeypatch.setattr("history_agent.answering.service.plan_question", unexpected)
+    monkeypatch.setattr("history_agent.answering.service._llm_answer", generate)
+    response = TestClient(create_app(settings)).post(
+        "/api/questions", json={"question": "周恩来在1943年主要有哪些经历？", "top_k": 2}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["retrieval_mode"] == "structured_timeline"
+    assert data["generator_mode"] == "llm"
+    assert data["llm_status"] == "used"
+    assert data["answer"].startswith("主要经历可归纳")
+    assert received == [["结构化索引日期：1943-01-21", "结构化索引日期：1943-02-01"]]
 
 
 @pytest.mark.parametrize(

@@ -132,6 +132,55 @@ def _validate_filters(
         )
 
 
+def _evenly_spaced_indexes(length: int, count: int) -> list[int]:
+    if count >= length:
+        return list(range(length))
+    if count == 1:
+        return [length // 2]
+    return [round(index * (length - 1) / (count - 1)) for index in range(count)]
+
+
+def _representative_rows(rows: list[sqlite3.Row], limit: int) -> list[sqlite3.Row]:
+    """Choose strong records across the requested period instead of its first days."""
+
+    if len(rows) <= limit:
+        return rows
+    buckets: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        value = str(row["start_value"] or "")
+        bucket = value[:7] if len(value) >= 7 else value[:4] or "unknown"
+        buckets.setdefault(bucket, []).append(row)
+
+    bucket_items = list(buckets.values())
+    selected_buckets = (
+        bucket_items
+        if len(bucket_items) <= limit
+        else [bucket_items[index] for index in _evenly_spaced_indexes(len(bucket_items), limit)]
+    )
+    review_rank = {"confirmed": 2, "unreviewed": 1, "needs_review": 0}
+
+    def quality(row: sqlite3.Row) -> tuple[int, int, float, int]:
+        return (
+            review_rank.get(str(row["review_status"]), 0),
+            1 if row["record_kind"] == "canonical" else 0,
+            float(row["confidence"]),
+            len(str(row["description"])),
+        )
+
+    selected = [max(bucket, key=quality) for bucket in selected_buckets]
+    selected_ids = {(str(row["record_kind"]), str(row["record_id"])) for row in selected}
+    if len(selected) < limit:
+        remaining = [
+            row
+            for row in rows
+            if (str(row["record_kind"]), str(row["record_id"])) not in selected_ids
+        ]
+        needed = min(limit - len(selected), len(remaining))
+        indexes = _evenly_spaced_indexes(len(remaining), needed)
+        selected.extend(remaining[index] for index in indexes)
+    return sorted(selected, key=lambda row: (str(row["start_value"]), str(row["record_id"])))
+
+
 def _event_filters(
     alias: str,
     *,
@@ -394,6 +443,7 @@ def get_person_timeline(
     limit: int = 50,
     offset: int = 0,
     other_person_id: str | None = None,
+    sample_across_range: bool = False,
 ) -> PersonTimelineResponse:
     event_type_filter = sorted(set(event_types or []))
     status_filter = cast(
@@ -429,7 +479,11 @@ def get_person_timeline(
             review_statuses=status_filter,
             other_person_id=other_person_id,
         )
-        selected = all_rows[offset : offset + limit]
+        selected = (
+            _representative_rows(all_rows, limit)
+            if sample_across_range and offset == 0
+            else all_rows[offset : offset + limit]
+        )
         canonical_ids = _selected_ids(selected, "canonical")
         source_ids = _selected_ids(selected, "source")
         source_event_ids = _load_source_event_ids(

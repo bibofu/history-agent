@@ -14,7 +14,10 @@ from history_agent.answering.query_understanding import (
     query_execution,
 )
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
-from history_agent.answering.structured import answer_structured_question
+from history_agent.answering.structured import (
+    answer_structured_question,
+    requires_structured_synthesis,
+)
 from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.retrieval.hybrid import search_hybrid_index
@@ -275,6 +278,9 @@ def _llm_request_payload(
         "检索年份范围只是召回线索，不能把同年其他活动或后来的回忆当作当时的交集。"
         "若证据覆盖所问时期的多个阶段，须按阶段组织回答，不能只总结前半段；"
         "对于跨年人物活动梳理，若证据覆盖多个年份，须按年份组织，不能只回答起止年份；"
+        "对于结构化年谱记录，不要机械复述每条材料；应合并同类活动，按阶段或主题概括"
+        "主要经历，同时保留每个事实对应的证据编号。结构化索引日期只用于组织顺序，"
+        "不得把仅仅提到人物的记录自动断言为其亲自参与；"
         "对于连续列举多次会议的问题，须逐次组织回答，不能只介绍范围端点；"
         "某阶段没有直接材料时明确说明。"
         "片段不足以证明互动或时间归属时明确说明，不要补写。"
@@ -593,6 +599,42 @@ def _finish_answer(
     )
 
 
+def _finish_structured_answer(
+    settings: Settings,
+    structured: AnswerResponse,
+    llm_result: LLMResult,
+) -> AnswerResponse:
+    limitations = list(structured.limitations)
+    if not settings.llm_enabled:
+        limitations.append(
+            "当前未配置生成模型，返回的是结构化记录摘录；配置兼容接口后可生成综合回答。"
+        )
+    elif llm_result.answer is None:
+        limitations.append(
+            f"DeepSeek 生成未通过（{llm_result.error_code}），已安全降级为结构化记录摘录。"
+        )
+    elif llm_result.error_code == "removed_uncited_claims":
+        limitations.append("生成草稿中的未引用段落已移除，其余内容已通过引用核查。")
+    return structured.model_copy(
+        update={
+            "answer": llm_result.answer or structured.answer,
+            "generator_mode": "llm" if llm_result.answer else "extractive",
+            "llm_status": (
+                "disabled"
+                if not settings.llm_enabled
+                else "used"
+                if llm_result.answer
+                else "fallback"
+            ),
+            "model_name": settings.llm_model if settings.llm_enabled else None,
+            "llm_usage": llm_result.usage,
+            "llm_error_code": llm_result.error_code if settings.llm_enabled else None,
+            "uncited_claims": list(llm_result.uncited_claims),
+            "limitations": limitations,
+        }
+    )
+
+
 def _clarification_response(
     request: QuestionRequest, planning: QueryPlanningResult
 ) -> AnswerResponse:
@@ -625,6 +667,15 @@ def answer_question(
     budget = budget or RequestBudget.start(settings.request_timeout_seconds)
     structured = answer_structured_question(settings, request)
     if structured is not None:
+        if requires_structured_synthesis(request, structured):
+            llm_result = _llm_answer(
+                settings=settings,
+                request=request,
+                citations=structured.citations,
+                runtime=runtime,
+                budget=budget,
+            )
+            return _finish_structured_answer(settings, structured, llm_result)
         return structured
     planning = plan_question(settings, request, runtime, budget)
     if planning.plan is not None and planning.plan.needs_clarification:

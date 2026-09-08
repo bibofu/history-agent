@@ -22,6 +22,7 @@ _PERIOD = re.compile(
 )
 _INTERSECTION = re.compile(r"交集|共同(?:事件|活动|经历|参加|参与|出席)")
 _TIMELINE = re.compile(r"时间线|经历[？?。]*$|经历有哪些|有哪些活动|做了什么|参加[过了]哪些会议")
+_RAW_TIMELINE = re.compile(r"列出|时间线|逐条|原文|明细|记录|清单|参加[过了]哪些会议")
 _ALLOWED = {
     "intersection": re.compile(
         r"(?:有哪些|有什么|有过哪些)?(?:交集|共同事件|共同活动|共同经历)"
@@ -54,7 +55,13 @@ def _response(
     )
 
 
-def _citation(evidence: TimelineEvidence, number: int, quote: str) -> Citation:
+def _citation(
+    evidence: TimelineEvidence,
+    number: int,
+    quote: str,
+    *,
+    section: list[str] | None = None,
+) -> Citation:
     return Citation(
         evidence_id=f"E{number}",
         document_id=evidence.document_id,
@@ -62,11 +69,22 @@ def _citation(evidence: TimelineEvidence, number: int, quote: str) -> Citation:
         volume=evidence.volume,
         pdf_page=evidence.pdf_page_start,
         pdf_page_end=evidence.pdf_page_end,
-        section=[],
+        section=section or [],
         quote=quote,
         source_type=evidence.source_type,
         verification_status=evidence.verification_status,
         extraction_methods=evidence.extraction_methods,
+    )
+
+
+def requires_structured_synthesis(request: QuestionRequest, response: AnswerResponse) -> bool:
+    """Return whether an exact structured result should be organized by the LLM."""
+
+    question = re.sub(r"\s+", "", request.question)
+    return (
+        response.query_intent == "timeline"
+        and bool(response.citations)
+        and _RAW_TIMELINE.search(question) is None
     )
 
 
@@ -219,6 +237,7 @@ def answer_structured_question(
             )
             empty = "当前规则未找到可展示的共同动作候选；这不代表两人没有交集，复杂句式仍可能漏检。"
         else:
+            synthesize = _RAW_TIMELINE.search(question) is None
             timeline = get_person_timeline(
                 database,
                 person_id=person_ids[0],
@@ -226,12 +245,18 @@ def answer_structured_question(
                 end_year=end,
                 event_types=event_types,
                 limit=request.top_k,
+                sample_across_range=synthesize,
             )
             total, shown = timeline.total, len(timeline.events)
             for event in timeline.events:
                 evidence = event.evidence[0]
                 quote = evidence.quote[:420] + ("……" if len(evidence.quote) > 420 else "")
-                citation = _citation(evidence, len(citations) + 1, quote)
+                citation = _citation(
+                    evidence,
+                    len(citations) + 1,
+                    quote,
+                    section=[f"结构化索引日期：{event.start.value or '不明确'}"],
+                )
                 citations.append(citation)
                 lines.append(
                     f"- 记录日期 {event.start.value or '不明确'}（{event.start.certainty}）；"
@@ -239,11 +264,20 @@ def answer_structured_question(
                 )
             limitations = [
                 "时间线包含年谱主体与原文提及记录，不保证本人参与了每条事件。",
-                "按时间展示而非重要性排序；日期为索引字段，须结合原文精度和来源差异核对。",
+                (
+                    "记录按月份/时段抽样并优先采用较高复核状态，不等同于重要性排名；"
+                    "日期为索引字段，须结合原文精度和来源差异核对。"
+                    if synthesize
+                    else "按时间展示而非重要性排序；日期为索引字段，须结合原文精度和来源差异核对。"
+                ),
             ]
             lead = (
                 f"找到 {total} 条与{timeline.canonical_name}相关的事件记录，"
-                f"按时间展示前 {shown} 条，不是完整经历结论。"
+                + (
+                    f"从所问时段抽取 {shown} 条代表性记录供综合，不是完整经历结论。"
+                    if synthesize
+                    else f"按时间展示前 {shown} 条，不是完整经历结论。"
+                )
             )
             empty = "当前结构化研究库未找到符合条件的记录，不能据此断言该时期没有活动。"
         return _response(

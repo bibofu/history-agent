@@ -20,6 +20,7 @@ from history_agent.answering.service import (
     _clarification_response,
     _deepseek_error_code,
     _finish_answer,
+    _finish_structured_answer,
     _llm_request_payload,
     _merge_usage,
     _prefer_llm_result,
@@ -27,7 +28,10 @@ from history_agent.answering.service import (
     _retrieve_context,
     _salvage_llm_result,
 )
-from history_agent.answering.structured import answer_structured_question
+from history_agent.answering.structured import (
+    answer_structured_question,
+    requires_structured_synthesis,
+)
 from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
 
@@ -236,6 +240,23 @@ async def stream_answer_question(
     yield AnswerStreamEvent("status", {"message": "正在分析问题…"})
     structured = await run_in_threadpool(answer_structured_question, settings, request)
     if structured is not None:
+        if requires_structured_synthesis(request, structured):
+            result = LLMResult(answer=None, error_code="not_configured")
+            if settings.llm_enabled:
+                yield AnswerStreamEvent("status", {"message": "正在归纳结构化史料…"})
+                async with aclosing(
+                    _stream_llm_answer(
+                        settings, request, structured.citations, runtime, budget
+                    )
+                ) as generation:
+                    async for item in generation:
+                        if isinstance(item, LLMResult):
+                            result = item
+                        else:
+                            yield item
+            final = _finish_structured_answer(settings, structured, result)
+            yield AnswerStreamEvent("done", final.model_dump())
+            return
         yield AnswerStreamEvent("done", structured.model_dump())
         return
     if settings.llm_query_planning and settings.llm_enabled:

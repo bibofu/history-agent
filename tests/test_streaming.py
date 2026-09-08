@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from history_agent.answering.models import QueryPlan, QuestionRequest
+from history_agent.answering.models import AnswerResponse, QueryPlan, QuestionRequest
 from history_agent.answering.query_understanding import QueryPlanningResult
 from history_agent.answering.service import AnswerContext, LLMResult, answer_question
 from history_agent.answering.streaming import _stream_completion, stream_answer_question
@@ -250,6 +250,37 @@ def test_structured_stream_finishes_without_model() -> None:
     response = client.post("/api/questions/stream", json={"question": "毛泽东有哪些经历"})
     assert "event: done\n" in response.text
     assert '"llm_status": "not_applicable"' in response.text
+
+
+def test_structured_summary_streams_through_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    structured = AnswerResponse(
+        question="周恩来在1956年主要有哪些经历？",
+        answer="结构化记录摘录。[E1]",
+        evidence_status="partial",
+        generator_mode="extractive",
+        llm_status="not_applicable",
+        retrieval_mode="structured_timeline",
+        query_intent="timeline",
+        citations=[_citation()],
+    )
+    body = ChunkStream(
+        [_chunk("可归纳为外事和会议工作。[E1]", finish="stop"), b"data: [DONE]\n\n"]
+    )
+    _provider(monkeypatch, [body])
+    monkeypatch.setattr(
+        "history_agent.answering.streaming.answer_structured_question",
+        lambda *args: structured,
+    )
+
+    events = _events()
+
+    assert any(
+        event.event == "status" and "归纳结构化史料" in event.data["message"]
+        for event in events
+    )
+    assert events[-1].data["retrieval_mode"] == "structured_timeline"
+    assert events[-1].data["llm_status"] == "used"
+    assert events[-1].data["answer"] == "可归纳为外事和会议工作。[E1]"
 
 
 def test_cancelling_answer_closes_nested_provider(monkeypatch: pytest.MonkeyPatch) -> None:

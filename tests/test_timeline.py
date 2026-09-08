@@ -230,6 +230,33 @@ def test_timeline_combines_canonical_and_unmerged_events(work_path: Path) -> Non
     }
 
 
+def test_timeline_can_sample_across_the_requested_period(work_path: Path) -> None:
+    database, _ = _prepare_timeline(work_path)
+    _save_event(
+        database,
+        event_id="event_january_followup",
+        document_id="zhou_enlai_chronology_1949_1976",
+        date_value="1943-01-25",
+        description="周恩来处理一项一月下旬的工作。",
+        event_type="activity",
+        review_status="confirmed",
+        page=22,
+        include_lin=False,
+    )
+
+    timeline = get_person_timeline(
+        database,
+        person_id="zhou_enlai",
+        start_year=1943,
+        end_year=1943,
+        limit=2,
+        sample_across_range=True,
+    )
+
+    assert len(timeline.events) == 2
+    assert {event.start.value[:7] for event in timeline.events} == {"1943-01", "1943-02"}
+
+
 def test_rejected_canonical_merge_restores_source_events(work_path: Path) -> None:
     database, canonical_id = _prepare_timeline(work_path)
     review_event_merge(
