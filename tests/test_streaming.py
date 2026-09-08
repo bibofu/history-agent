@@ -10,7 +10,12 @@ import pytest
 from fastapi.testclient import TestClient
 from history_agent.answering.models import AnswerResponse, QueryPlan, QuestionRequest
 from history_agent.answering.query_understanding import QueryPlanningResult
-from history_agent.answering.service import AnswerContext, LLMResult, answer_question
+from history_agent.answering.service import (
+    AnswerContext,
+    HierarchicalPreparation,
+    LLMResult,
+    answer_question,
+)
 from history_agent.answering.streaming import _stream_completion, stream_answer_question
 from history_agent.config import Settings
 from history_agent.errors import RetrievalError
@@ -361,16 +366,33 @@ def test_large_evidence_set_uses_hierarchical_generation_in_stream(
         "history_agent.answering.streaming._retrieve_context", lambda *args: context
     )
     monkeypatch.setattr(
-        "history_agent.answering.streaming._llm_answer",
-        lambda **kwargs: LLMResult(answer="分层综合答案。[E1][E13]"),
+        "history_agent.answering.streaming._prepare_hierarchical_answer",
+        lambda **kwargs: HierarchicalPreparation(
+            request_payload={"messages": []},
+            usage={"total_tokens": 5},
+            map_failed=False,
+        ),
     )
+    body = ChunkStream(
+        [
+            _chunk("分层", usage=20),
+            _chunk("综合答案。[E1][E13]", finish="stop"),
+            b"data: [DONE]\n\n",
+        ]
+    )
+    _provider(monkeypatch, [body])
 
     events = _events()
 
     assert any(
         event.event == "status" and "分组归纳" in event.data["message"] for event in events
     )
+    assert [event.data["text"] for event in events if event.event == "delta"] == [
+        "分层",
+        "综合答案。[E1][E13]",
+    ]
     assert events[-1].data["answer"] == "分层综合答案。[E1][E13]"
+    assert events[-1].data["llm_usage"] == {"total_tokens": 25}
     assert any("13 条证据" in item for item in events[-1].data["limitations"])
 
 

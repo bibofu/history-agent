@@ -22,10 +22,10 @@ from history_agent.answering.service import (
     _deepseek_error_code,
     _finish_answer,
     _finish_structured_answer,
-    _llm_answer,
     _llm_request_payload,
     _merge_usage,
     _prefer_llm_result,
+    _prepare_hierarchical_answer,
     _repair_request_payload,
     _retrieve_context,
     _salvage_llm_result,
@@ -165,9 +165,14 @@ async def _stream_llm_answer(
     citations: list[Citation],
     runtime: LLMRuntime | None = None,
     budget: RequestBudget | None = None,
+    *,
+    request_payload: dict[str, object] | None = None,
+    initial_usage: dict[str, int] | None = None,
 ) -> AsyncGenerator[AnswerStreamEvent | LLMResult, None]:
-    payload = _llm_request_payload(settings=settings, request=request, citations=citations)
-    usage: dict[str, int] | None = None
+    payload = request_payload or _llm_request_payload(
+        settings=settings, request=request, citations=citations
+    )
+    usage = initial_usage
     safe_first: LLMResult | None = None
     for attempt in range(2):
         result = LLMResult(answer=None, error_code="incomplete_stream")
@@ -232,6 +237,49 @@ async def _stream_llm_answer(
         yield AnswerStreamEvent("status", {"message": "正在后台补全引用…"})
 
 
+async def _stream_hierarchical_llm_answer(
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    runtime: LLMRuntime | None,
+    budget: RequestBudget,
+) -> AsyncGenerator[AnswerStreamEvent | LLMResult, None]:
+    preparation = await run_in_threadpool(
+        _prepare_hierarchical_answer,
+        settings=settings,
+        request=request,
+        citations=citations,
+        runtime=runtime,
+        budget=budget,
+    )
+    async with aclosing(
+        _stream_llm_answer(
+            settings,
+            request,
+            citations,
+            runtime,
+            budget,
+            request_payload=preparation.request_payload,
+            initial_usage=preparation.usage,
+        )
+    ) as generation:
+        async for item in generation:
+            if (
+                isinstance(item, LLMResult)
+                and item.answer
+                and preparation.map_failed
+                and item.error_code is None
+            ):
+                yield LLMResult(
+                    answer=item.answer,
+                    error_code="hierarchical_partial_map_fallback",
+                    usage=item.usage,
+                    uncited_claims=item.uncited_claims,
+                )
+            else:
+                yield item
+
+
 async def stream_answer_question(
     settings: Settings,
     request: QuestionRequest,
@@ -246,16 +294,16 @@ async def stream_answer_question(
             result = LLMResult(answer=None, error_code="not_configured")
             if settings.llm_enabled and len(structured.citations) > LLM_EVIDENCE_BATCH_SIZE:
                 yield AnswerStreamEvent("status", {"message": "正在分组归纳结构化史料…"})
-                result = await run_in_threadpool(
-                    _llm_answer,
-                    settings=settings,
-                    request=request,
-                    citations=structured.citations,
-                    runtime=runtime,
-                    budget=budget,
-                )
-                if result.answer:
-                    yield AnswerStreamEvent("delta", {"text": result.answer})
+                async with aclosing(
+                    _stream_hierarchical_llm_answer(
+                        settings, request, structured.citations, runtime, budget
+                    )
+                ) as generation:
+                    async for item in generation:
+                        if isinstance(item, LLMResult):
+                            result = item
+                        else:
+                            yield item
             elif settings.llm_enabled:
                 yield AnswerStreamEvent("status", {"message": "正在归纳结构化史料…"})
                 async with aclosing(
@@ -286,16 +334,16 @@ async def stream_answer_question(
         result = LLMResult(answer=None, error_code="no_evidence")
     elif settings.llm_enabled and len(context.citations) > LLM_EVIDENCE_BATCH_SIZE:
         yield AnswerStreamEvent("status", {"message": "正在分组归纳跨阶段证据…"})
-        result = await run_in_threadpool(
-            _llm_answer,
-            settings=settings,
-            request=request,
-            citations=context.citations,
-            runtime=runtime,
-            budget=budget,
-        )
-        if result.answer:
-            yield AnswerStreamEvent("delta", {"text": result.answer})
+        async with aclosing(
+            _stream_hierarchical_llm_answer(
+                settings, request, context.citations, runtime, budget
+            )
+        ) as generation:
+            async for item in generation:
+                if isinstance(item, LLMResult):
+                    result = item
+                else:
+                    yield item
     elif settings.llm_enabled:
         yield AnswerStreamEvent("status", {"message": "正在生成，引用待核查…"})
         async with aclosing(

@@ -437,14 +437,21 @@ def _llm_answer_direct(
     )
 
 
-def _hierarchical_llm_answer(
+@dataclass(frozen=True)
+class HierarchicalPreparation:
+    request_payload: dict[str, object]
+    usage: dict[str, int] | None
+    map_failed: bool
+
+
+def _prepare_hierarchical_answer(
     *,
     settings: Settings,
     request: QuestionRequest,
     citations: list[Citation],
     runtime: LLMRuntime | None,
     budget: RequestBudget | None,
-) -> LLMResult:
+) -> HierarchicalPreparation:
     batches = [
         citations[index : index + LLM_EVIDENCE_BATCH_SIZE]
         for index in range(0, len(citations), LLM_EVIDENCE_BATCH_SIZE)
@@ -479,7 +486,7 @@ def _hierarchical_llm_answer(
         f"第 {index + 1} 组已核查摘要：\n{summary}"
         for index, (summary, _) in enumerate(mapped)
     )
-    final_payload = _llm_request_payload(
+    request_payload = _llm_request_payload(
         settings=settings,
         request=request,
         citations=citations,
@@ -488,17 +495,38 @@ def _hierarchical_llm_answer(
             "形成完整回答；只能使用摘要中出现的原始证据编号。\n\n" + summaries
         ),
     )
-    final = _validated_llm_answer(
+    return HierarchicalPreparation(
+        request_payload=request_payload,
+        usage=_merge_usage(*(result.usage for _, result in mapped)),
+        map_failed=any(result.answer is None for _, result in mapped),
+    )
+
+
+def _hierarchical_llm_answer(
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    citations: list[Citation],
+    runtime: LLMRuntime | None,
+    budget: RequestBudget | None,
+) -> LLMResult:
+    preparation = _prepare_hierarchical_answer(
         settings=settings,
-        request_payload=final_payload,
+        request=request,
         citations=citations,
         runtime=runtime,
         budget=budget,
     )
-    usage = _merge_usage(*(result.usage for _, result in mapped), final.usage)
-    map_failed = any(result.answer is None for _, result in mapped)
+    final = _validated_llm_answer(
+        settings=settings,
+        request_payload=preparation.request_payload,
+        citations=citations,
+        runtime=runtime,
+        budget=budget,
+    )
+    usage = _merge_usage(preparation.usage, final.usage)
     error_code = final.error_code
-    if final.answer and map_failed and error_code is None:
+    if final.answer and preparation.map_failed and error_code is None:
         error_code = "hierarchical_partial_map_fallback"
     return LLMResult(
         answer=final.answer,
