@@ -2,16 +2,17 @@
 
 本文描述仓库当前实际运行的 RAG 链路，包括 PDF 抽取、清洗与分片、关键词和向量索引、查询理解、双路召回、融合与重排、Top-K、证据构造、DeepSeek 生成、流式输出和引用校验。
 
-实现快照日期为 2026-09-08。当前已构建索引的统计来自 2026-09-05 的 `data/reports/*_latest.json` 报告。
+实现快照日期为 2026-09-09。当前已构建索引的统计来自 2026-09-05 的 `data/reports/*_latest.json` 报告。
 
 ## 1. 总体架构
 
-项目有两条问答路径：
+项目有三条问答路径：
 
-1. 形式严格的“人物 + 整年/年份区间 + 经历或交集”问题，优先查询结构化研究数据库。
-2. 普通历史问题、观点问题、历史时期问题，以及不限定年份的两人交集问题，先由可降级的 LLM 查询理解器生成结构化计划，再进入本文描述的混合 RAG。
+1. 明确的 `《篇名》+ 全文/完整原文` 请求，按本地篇目结构直接读取并拼接整篇 chunks。
+2. 形式严格的“人物 + 整年/年份区间 + 经历或交集”问题，优先查询结构化研究数据库。
+3. 普通历史问题、观点问题、历史时期问题，以及不限定年份的两人交集问题，先由可降级的 LLM 查询理解器生成结构化计划，再进入本文描述的混合 RAG。
 
-已识别的时期问题和不限定年份的交集问题虽然会先经过结构化路由检查，但检查通过后会主动转回混合 RAG。结构化路径不使用向量索引，也不调用 DeepSeek，因此不能把所有聊天回答都理解为 RAG 输出。
+已识别的时期问题和不限定年份的交集问题虽然会先经过结构化路由检查，但检查通过后会主动转回混合 RAG。篇目全文与结构化路径不使用向量索引，也不调用 DeepSeek，因此不能把所有聊天回答都理解为 RAG 输出。
 
 ```mermaid
 flowchart LR
@@ -25,7 +26,9 @@ flowchart LR
     G --> H[SQLite FTS5 / BM25]
     G --> I[FastEmbed / Qdrant]
 
-    Q[用户问题] --> R{结构化路由}
+    Q[用户问题] --> O{篇目全文路由}
+    O -->|《篇名》加全文标记| N[按结构页码顺序拼接 chunks]
+    O -->|其他问题| R{结构化路由}
     R -->|严格年份时间线或交集| S[结构化研究库]
     R -->|普通 RAG 问题| P[DeepSeek JSON 查询理解]
     P --> J[Pydantic 校验 / 原问题保留]
@@ -41,6 +44,18 @@ flowchart LR
     X --> Y[Markdown / 引用校验]
     Y --> Z[最终答案或证据摘录]
 ```
+
+### 1.1 篇目全文路由
+
+只有问题同时包含书名号篇名和“全文”“完整原文”等明确标记时才进入全文路由。系统先在
+`data/processed/structure/*.json` 中精确匹配篇名，再只读取对应文档的 chunk 文件，并按
+章节页码、`section_path` 和 `chunk_index` 恢复正文。若存在同名篇目，优先选择问题中明确
+提到作者的选集来源；仍无法消歧时要求用户补充作者或文献名，不用零散相似片段冒充全文。
+
+全文响应使用 `retrieval_mode=full_text_section` 和 `generator_mode=extractive`，保留篇目起止
+PDF 页码及实际拼接的 chunk 数，不调用查询规划、混合召回或生成模型。正文不会受普通问答
+的 Top-K、420 字引文和 5000-token 生成上限影响；网页只在后续对话历史里截断超长答案，
+当前轮展示的全文不截断。
 
 离线数据流的核心产物如下：
 
@@ -659,6 +674,7 @@ uv run history-agent eval answers --top-k 10
 | LLM 查询理解与安全降级 | `app/history_agent/answering/query_understanding.py` |
 | 向量索引与召回 | `app/history_agent/retrieval/vector.py` |
 | RRF、按页去重、时间覆盖 | `app/history_agent/retrieval/hybrid.py` |
+| 篇目全文读取与拼接 | `app/history_agent/answering/full_text.py` |
 | 证据构造与同步生成 | `app/history_agent/answering/service.py` |
 | 流式生成与修复 | `app/history_agent/answering/streaming.py` |
 | 引用校验与删段 | `app/history_agent/answering/validation.py` |

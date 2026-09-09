@@ -11,6 +11,7 @@ from typing import Any, Literal
 import httpx
 from starlette.concurrency import run_in_threadpool
 
+from history_agent.answering.full_text import answer_full_text_question
 from history_agent.answering.models import Citation, QuestionRequest
 from history_agent.answering.query_understanding import plan_question
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
@@ -288,6 +289,10 @@ async def stream_answer_question(
 ) -> AsyncGenerator[AnswerStreamEvent, None]:
     budget = budget or RequestBudget.start(settings.request_timeout_seconds)
     yield AnswerStreamEvent("status", {"message": "正在分析问题…"})
+    full_text = await run_in_threadpool(answer_full_text_question, settings, request)
+    if full_text is not None:
+        yield AnswerStreamEvent("done", full_text.model_dump())
+        return
     structured = await run_in_threadpool(answer_structured_question, settings, request)
     if structured is not None:
         if requires_structured_generation(structured):

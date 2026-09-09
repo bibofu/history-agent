@@ -57,6 +57,8 @@ const server = createServer(async (req, res) => {
     } else if (data.question.includes("修复")) {
       later(() => send(res, "status", {message: "正在后台补全引用…"}), 350);
       later(() => { done = true; send(res, "done", final("修复后的事实。[E1]")); res.end(); }, 950);
+    } else if (data.question.includes("长文")) {
+      later(() => { done = true; send(res, "done", final("长".repeat(12000))); res.end(); }, 350);
     } else {
       later(() => send(res, "delta", {text: "\n\n第二段也已到达。"}), 450);
       later(() => { done = true; send(res, "done", final()); res.end(); }, 950);
@@ -153,10 +155,18 @@ try {
   await current.getByText(/测试服务错误/).waitFor();
   assert.equal(requests.at(-1).history.at(-1).content, "本地证据摘录。[E1]");
   assert(!JSON.stringify(requests.at(-1).history).includes("未引用的草稿"));
+  await ask("长文测试");
+  await page.waitForFunction(() => document.querySelector(".message.assistant:last-child .markdown-body")?.textContent.length >= 12000);
+  assert.equal((await current.locator(".markdown-body").textContent()).length, 12001);
+  await ask("错误（验证全文历史）");
+  await current.getByText(/测试服务错误/).waitFor();
+  const longHistory = requests.at(-1).history.at(-1).content;
+  assert(longHistory.length <= 10000);
+  assert.match(longHistory, /上一轮长文本已在对话历史中截断/);
   assert(cancelled.includes("停止测试") && cancelled.includes("清空测试"));
   assert.equal(await page.getByText("旧回答不应回来").count(), 0);
   assert.deepEqual(errors, []);
-  console.log("PASS: incremental Markdown, headings/lists/tables/code/quotes, sanitization, mobile layout, citations, selective removal, fallback diagnostics, abort, clear, repair, disconnect, history isolation.");
+  console.log("PASS: incremental Markdown, headings/lists/tables/code/quotes, sanitization, mobile layout, citations, selective removal, fallback diagnostics, abort, clear, repair, disconnect, history isolation, long-answer display.");
 } finally {
   for (const timer of timers) clearTimeout(timer);
   await browser?.close();

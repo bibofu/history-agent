@@ -120,7 +120,10 @@ async function ask(question) {
         cancelAnimationFrame(run.frame);
         run.frame = null;
         run.bubble.innerHTML = renderAnswer(data);
-        history.push({role: "user", content: question}, {role: "assistant", content: data.answer});
+        const historyAnswer = data.answer.length <= 10000
+          ? data.answer
+          : `${data.answer.slice(0, 9800)}\n\n[上一轮长文本已在对话历史中截断]`;
+        history.push({role: "user", content: question}, {role: "assistant", content: historyAnswer});
         completed = true;
         return false;
       }

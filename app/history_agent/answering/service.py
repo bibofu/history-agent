@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 
 import httpx
 
+from history_agent.answering.full_text import answer_full_text_question
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.query_understanding import (
     QueryExecution,
@@ -880,6 +881,9 @@ def answer_question(
     budget: RequestBudget | None = None,
 ) -> AnswerResponse:
     budget = budget or RequestBudget.start(settings.request_timeout_seconds)
+    full_text = answer_full_text_question(settings, request)
+    if full_text is not None:
+        return full_text
     structured = answer_structured_question(settings, request)
     if structured is not None:
         if requires_structured_generation(structured):
