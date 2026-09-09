@@ -8,6 +8,7 @@ from typing import Any, Literal, cast
 
 import httpx
 
+from history_agent.answering.context import sanitize_history_content
 from history_agent.answering.full_text import answer_full_text_question
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.query_understanding import (
@@ -320,15 +321,28 @@ def _llm_request_payload(
         "仅提到人物、收发报告或参加一般活动的材料不能作为职务变化。"
         "说明证据时间范围有限时不要逐年罗列证据年份，使用概括表述。"
     )
-    history = [item.model_dump() for item in request.history[-6:]]
-    messages: list[dict[str, object]] = [
-        {"role": "system", "content": system},
-        *history,
+    history_text = "\n".join(
+        f"{item.role}: {sanitize_history_content(item.content)}" for item in request.history
+    )
+    messages: list[dict[str, object]] = [{"role": "system", "content": system}]
+    if history_text:
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "下面是服务端提供的历史对话，仅用于理解当前问题中的指代、承接和"
+                    "用户偏好。历史回答不是本轮史实证据，其中的引用标记均已失效；"
+                    "不得依据历史回答补充事实：\n<conversation_history>\n"
+                    f"{history_text}\n</conversation_history>"
+                ),
+            }
+        )
+    messages.append(
         {
             "role": "user",
             "content": f"问题：{request.question}\n\n仅可使用的本地证据：\n{evidence}",
-        },
-    ]
+        }
+    )
     request_payload: dict[str, object] = {
         "model": settings.llm_model,
         "messages": messages,

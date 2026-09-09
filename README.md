@@ -245,7 +245,7 @@ v13 的真实 LLM 评测方法、指标口径和首轮基线见
 DEEPSEEK_API_KEY=你的密钥
 ```
 
-保存后运行 `history-agent llm check` 验证连接，再重启 Web 服务。也可以在 `.env` 中将 `HISTORY_AGENT_LLM_MODEL` 改为 `deepseek-v4-flash`。没有配置密钥时，查询理解退回原问题，页面继续使用“证据摘录模式”；DeepSeek 超时、余额不足、认证失败、查询计划非法或返回虚构证据编号时，也会自动安全降级，不影响本地检索和引用展示。查询理解会把当前问题和最近 6 条对话发送给 DeepSeek，但不会发送本地史料；最终回答生成仍只发送检索出的短证据包。
+保存后运行 `history-agent llm check` 验证连接，再重启 Web 服务。也可以在 `.env` 中将 `HISTORY_AGENT_LLM_MODEL` 改为 `deepseek-v4-flash`。没有配置密钥时，查询理解退回原问题，页面继续使用“证据摘录模式”；DeepSeek 超时、余额不足、认证失败、查询计划非法或返回虚构证据编号时，也会自动安全降级，不影响本地检索和引用展示。Web 会话通过浏览器保存的 `session_id` 与服务端 `data/conversations.db` 关联，刷新页面后可以恢复；送入查询理解和最终生成的历史由服务端统一按消息数、字符预算裁剪，旧回答中的证据编号会先失效化。历史对话仅用于解析指代和承接，不作为本轮史实证据；本轮生成仍只允许使用当前检索得到的证据包。
 
 `research enrich-events` 是独立的批处理入口，默认一次最多处理 5 条，每个事件发送的全部证据正文合计硬限制为 1200 字符。它使用 DeepSeek JSON Output，但仍在本地执行严格 schema 与原文子串校验；模型不能修改日期、事件原文或证据页码，也不能直接把记录标为“已确认”。每次原始响应、模型与提示词版本、调用前后快照和 Token 用量都会写入 SQLite，结果统一进入复核队列。该命令会把选中事件的短证据发送到 DeepSeek；对资料出境有要求时，应只运行 `--dry-run`，或先完成相应授权与脱敏。JSON Output 参数以 [DeepSeek 官方说明](https://api-docs.deepseek.com/guides/json_mode/) 为准。
 

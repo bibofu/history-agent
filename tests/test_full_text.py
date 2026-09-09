@@ -79,8 +79,8 @@ def _write_section(root: Path) -> Settings:
     return settings
 
 
-def test_explicit_quoted_title_returns_complete_local_section(tmp_path: Path) -> None:
-    settings = _write_section(tmp_path)
+def test_explicit_quoted_title_returns_complete_local_section(work_path: Path) -> None:
+    settings = _write_section(work_path)
 
     result = answer_full_text_question(
         settings, QuestionRequest(question="毛泽东《矛盾论》的全文")
@@ -97,8 +97,8 @@ def test_explicit_quoted_title_returns_complete_local_section(tmp_path: Path) ->
     assert result.retrieved_evidence_count == 3
 
 
-def test_full_text_route_bypasses_rag_and_llm(tmp_path: Path) -> None:
-    settings = _write_section(tmp_path)
+def test_full_text_route_bypasses_rag_and_llm(work_path: Path) -> None:
+    settings = _write_section(work_path)
 
     result = answer_question(settings, QuestionRequest(question="请输出《矛盾论》完整原文"))
 
@@ -107,8 +107,8 @@ def test_full_text_route_bypasses_rag_and_llm(tmp_path: Path) -> None:
     assert result.answer.endswith("[E1]")
 
 
-def test_streaming_full_text_route_returns_complete_answer(tmp_path: Path) -> None:
-    settings = _write_section(tmp_path)
+def test_streaming_full_text_route_returns_complete_answer(work_path: Path) -> None:
+    settings = _write_section(work_path)
 
     async def collect() -> list[AnswerStreamEvent]:
         return [
@@ -125,9 +125,9 @@ def test_streaming_full_text_route_returns_complete_answer(tmp_path: Path) -> No
     assert "第一页正文" in events[-1].data["answer"]
 
 
-def test_ordinary_title_question_does_not_trigger_full_text_route(tmp_path: Path) -> None:
+def test_ordinary_title_question_does_not_trigger_full_text_route(work_path: Path) -> None:
     result = answer_full_text_question(
-        _settings(tmp_path), QuestionRequest(question="《矛盾论》如何分析主要矛盾？")
+        _settings(work_path), QuestionRequest(question="《矛盾论》如何分析主要矛盾？")
     )
 
     assert result is None

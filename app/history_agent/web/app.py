@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from importlib.resources import files
@@ -10,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from history_agent import __version__
+from history_agent.answering.context import ConversationStore, build_prompt_context
 from history_agent.answering.models import AnswerResponse, QuestionRequest
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.service import answer_question
@@ -32,10 +35,36 @@ from history_agent.research.timeline import (
 )
 from history_agent.web.readiness import readiness_snapshot
 
+LOGGER = logging.getLogger(__name__)
+SESSION_ID = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     active_settings = settings or get_settings()
     static_dir = files("history_agent.web").joinpath("static")
+    conversations = ConversationStore(active_settings.conversation_database_path)
+
+    def with_server_context(request: QuestionRequest) -> QuestionRequest:
+        if request.session_id is None:
+            return request
+        try:
+            persisted = conversations.messages(request.session_id)
+        except Exception:
+            LOGGER.exception("conversation history could not be loaded")
+            persisted = []
+        history = build_prompt_context(
+            persisted,
+            max_messages=active_settings.context_max_messages,
+            max_chars=active_settings.context_max_chars,
+        )
+        return request.model_copy(update={"history": history})
+
+    def save_exchange(session_id: str, question: str, answer: str) -> None:
+        try:
+            conversations.append_exchange(session_id, question, answer)
+        except Exception:
+            # Context persistence is auxiliary and must never discard a completed answer.
+            LOGGER.exception("conversation exchange could not be persisted")
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -107,15 +136,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @api.post("/api/questions", response_model=AnswerResponse)
     def question(request: QuestionRequest) -> AnswerResponse:
         try:
+            contextual_request = with_server_context(request)
             runtime = getattr(api.state, "llm_runtime", None)
             if runtime is None:
-                return answer_question(active_settings, request)
-            return answer_question(
-                active_settings,
-                request,
-                runtime,
-                RequestBudget.start(active_settings.request_timeout_seconds),
-            )
+                response = answer_question(active_settings, contextual_request)
+            else:
+                response = answer_question(
+                    active_settings,
+                    contextual_request,
+                    runtime,
+                    RequestBudget.start(active_settings.request_timeout_seconds),
+                )
+            if request.session_id is not None:
+                save_exchange(request.session_id, request.question, response.answer)
+            return response
         except RetrievalError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -123,19 +157,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def question_stream(request: QuestionRequest) -> StreamingResponse:
         async def events() -> AsyncIterator[str]:
             try:
+                contextual_request = with_server_context(request)
                 runtime = getattr(api.state, "llm_runtime", None)
                 answers = (
-                    stream_answer_question(active_settings, request)
+                    stream_answer_question(active_settings, contextual_request)
                     if runtime is None
                     else stream_answer_question(
                         active_settings,
-                        request,
+                        contextual_request,
                         runtime,
                         RequestBudget.start(active_settings.request_timeout_seconds),
                     )
                 )
                 async with aclosing(answers) as answers:
                     async for event in answers:
+                        if event.event == "done" and request.session_id is not None:
+                            save_exchange(
+                                request.session_id,
+                                request.question,
+                                str(event.data["answer"]),
+                            )
                         yield event.encode()
             except RetrievalError:
                 yield AnswerStreamEvent(
@@ -151,6 +192,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
         )
+
+    @api.get("/api/sessions/{session_id}")
+    def conversation(session_id: str) -> dict[str, object]:
+        if SESSION_ID.fullmatch(session_id) is None:
+            raise HTTPException(status_code=422, detail="invalid session_id")
+        return {
+            "session_id": session_id,
+            "messages": [item.model_dump() for item in conversations.messages(session_id)],
+        }
+
+    @api.delete("/api/sessions/{session_id}")
+    def clear_conversation(session_id: str) -> dict[str, object]:
+        if SESSION_ID.fullmatch(session_id) is None:
+            raise HTTPException(status_code=422, detail="invalid session_id")
+        conversations.clear(session_id)
+        return {"session_id": session_id, "cleared": True}
 
     @api.get("/api/people/{person_id}/timeline", response_model=PersonTimelineResponse)
     def person_timeline(

@@ -8,9 +8,27 @@ const send = document.querySelector("#send");
 const statusText = document.querySelector("#status");
 const statusDot = document.querySelector("#status-dot");
 const clear = document.querySelector("#clear");
-const history = [];
 const suggestions = document.querySelectorAll(".suggestions button");
 let active = null;
+const sessionStorageKey = "history-agent-session-v1";
+
+function createSessionId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function loadSessionId() {
+  try {
+    const existing = localStorage.getItem(sessionStorageKey);
+    if (existing) return existing;
+    const created = createSessionId();
+    localStorage.setItem(sessionStorageKey, created);
+    return created;
+  } catch {
+    return createSessionId();
+  }
+}
+
+let sessionId = loadSessionId();
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
@@ -93,7 +111,7 @@ async function ask(question) {
     const response = await fetch("/api/questions/stream", {
       method: "POST",
       headers: {"Content-Type": "application/json", "Accept": "text/event-stream"},
-      body: JSON.stringify({question, top_k: 12, history: history.slice(-8)}),
+      body: JSON.stringify({question, top_k: 12, session_id: sessionId}),
       signal: run.controller.signal
     });
     if (!response.ok) {
@@ -120,10 +138,6 @@ async function ask(question) {
         cancelAnimationFrame(run.frame);
         run.frame = null;
         run.bubble.innerHTML = renderAnswer(data);
-        const historyAnswer = data.answer.length <= 10000
-          ? data.answer
-          : `${data.answer.slice(0, 9800)}\n\n[上一轮长文本已在对话历史中截断]`;
-        history.push({role: "user", content: question}, {role: "assistant", content: historyAnswer});
         completed = true;
         return false;
       }
@@ -173,12 +187,47 @@ input.addEventListener("input", () => {
   input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
 });
 suggestions.forEach(button => button.addEventListener("click", () => ask(button.textContent)));
-clear.addEventListener("click", () => {
+clear.addEventListener("click", async () => {
   stopGeneration();
-  history.length = 0;
+  const previousSessionId = sessionId;
+  sessionId = createSessionId();
+  try {
+    localStorage.setItem(sessionStorageKey, sessionId);
+  } catch {
+    // The fresh in-memory id still prevents cleared context from being reused this page load.
+  }
   messages.querySelectorAll(".message:not(.welcome)").forEach(node => node.remove());
   input.focus();
+  try {
+    await fetch(`/api/sessions/${encodeURIComponent(previousSessionId)}`, {method: "DELETE"});
+  } catch {
+    // A failed cleanup cannot reconnect the page to the old session id.
+  }
 });
+
+async function restoreConversation() {
+  const restoringSession = sessionId;
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(restoringSession)}`);
+    if (!response.ok) return;
+    const data = await response.json();
+    if (sessionId !== restoringSession) return;
+    for (const item of data.messages || []) {
+      if (item.role === "user") {
+        addMessage("user", `<p>${escapeHtml(item.content)}</p>`);
+      } else if (item.role === "assistant") {
+        addMessage(
+          "assistant",
+          `<p class="meta">已恢复的回答</p><div class="markdown-body">${renderMarkdown(item.content)}</div>`
+        );
+      }
+    }
+  } catch {
+    // Conversation recovery is best effort; question answering remains available.
+  }
+}
+
+restoreConversation();
 
 fetch("/api/health").then(result => result.json()).then(data => {
   const ready = data.status === "ok";

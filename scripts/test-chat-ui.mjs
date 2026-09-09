@@ -65,6 +65,11 @@ const server = createServer(async (req, res) => {
     }
     return;
   }
+  if (req.url?.startsWith("/api/sessions/")) {
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify(req.method === "DELETE" ? {cleared: true} : {messages: []}));
+    return;
+  }
   const requestPath = new URL(req.url, "http://127.0.0.1").pathname;
   const path = requestPath === "/" ? "index.html" : requestPath.split("/").pop();
   try {
@@ -98,6 +103,8 @@ try {
   await current.getByText("第二段也已到达。").waitFor();
   await page.getByRole("heading", {name: "研究结论"}).waitFor();
   assert.equal(requests.at(-1).top_k, 12);
+  assert.match(requests.at(-1).session_id, /^[A-Za-z0-9_-]{16,64}$/);
+  assert.equal("history" in requests.at(-1), false);
   assert.equal(await current.locator("strong").textContent(), "重要事实");
   assert.equal(await current.locator("li").count(), 2);
   assert.equal(await current.locator("table tbody td").count(), 2);
@@ -119,6 +126,7 @@ try {
   await current.getByText("已停止，回答未完成核查。").waitFor();
   await ask("清空测试");
   await current.locator("h2").waitFor();
+  const clearedSession = requests.at(-1).session_id;
   await page.getByRole("button", {name: "清空会话"}).click();
   assert.equal(await page.locator(".message:not(.welcome)").count(), 0);
   await ask("修复测试");
@@ -127,14 +135,14 @@ try {
   assert.equal(await current.locator("strong").textContent(), "第一段");
   await current.getByText("修复后的事实。[E1]", {exact: true}).waitFor();
   await page.getByRole("button", {name: "发送", exact: true}).waitFor();
-  assert.deepEqual(requests.at(-1).history, []);
+  assert.notEqual(requests.at(-1).session_id, clearedSession);
+  assert.equal("history" in requests.at(-1), false);
   await ask("中断测试");
   await current.getByText(/连接中断/).waitFor();
   assert.equal(await current.locator("h2").count(), 0);
   await ask("错误测试");
   await current.getByText(/测试服务错误/).waitFor();
-  assert.equal(requests.at(-1).history.length, 2);
-  assert.equal(requests.at(-1).history[1].content, "修复后的事实。[E1]");
+  assert.equal("history" in requests.at(-1), false);
   await ask("移除测试");
   const removedDiagnostic = current.locator(".citation-diagnostics");
   await removedDiagnostic.getByText("哪些草稿内容已移除", {exact: true}).waitFor();
@@ -153,16 +161,13 @@ try {
   await page.screenshot({path: fileURLToPath(new URL("../data/reports/citation-diagnostics-mobile.png", import.meta.url)), fullPage: true});
   await ask("后续错误测试");
   await current.getByText(/测试服务错误/).waitFor();
-  assert.equal(requests.at(-1).history.at(-1).content, "本地证据摘录。[E1]");
-  assert(!JSON.stringify(requests.at(-1).history).includes("未引用的草稿"));
+  assert.equal("history" in requests.at(-1), false);
   await ask("长文测试");
   await page.waitForFunction(() => document.querySelector(".message.assistant:last-child .markdown-body")?.textContent.length >= 12000);
   assert.equal((await current.locator(".markdown-body").textContent()).length, 12001);
   await ask("错误（验证全文历史）");
   await current.getByText(/测试服务错误/).waitFor();
-  const longHistory = requests.at(-1).history.at(-1).content;
-  assert(longHistory.length <= 10000);
-  assert.match(longHistory, /上一轮长文本已在对话历史中截断/);
+  assert.equal("history" in requests.at(-1), false);
   assert(cancelled.includes("停止测试") && cancelled.includes("清空测试"));
   assert.equal(await page.getByText("旧回答不应回来").count(), 0);
   assert.deepEqual(errors, []);

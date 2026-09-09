@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     llm_query_planner_model: Literal["deepseek-v4-pro", "deepseek-v4-flash"] = "deepseek-v4-flash"
     llm_query_planner_max_tokens: int = Field(default=700, ge=256, le=2000)
     llm_query_planner_timeout_seconds: float = Field(default=20.0, ge=5.0, le=120.0)
+    context_max_messages: int = Field(default=12, ge=4, le=50)
+    context_max_chars: int = Field(default=12_000, ge=1000, le=100_000)
 
     @model_validator(mode="after")
     def resolve_paths_and_validate_dates(self) -> Settings:
@@ -120,6 +122,10 @@ class Settings(BaseSettings):
     def model_cache_dir(self) -> Path:
         return self.data_dir / "models"
 
+    @property
+    def conversation_database_path(self) -> Path:
+        return self.data_dir / "conversations.db"
+
     def ensure_runtime_dirs(self) -> None:
         for path in (
             self.data_dir,
@@ -167,6 +173,8 @@ class Settings(BaseSettings):
             "llm_query_planner_model": self.llm_query_planner_model,
             "llm_query_planner_max_tokens": self.llm_query_planner_max_tokens,
             "llm_query_planner_timeout_seconds": self.llm_query_planner_timeout_seconds,
+            "context_max_messages": self.context_max_messages,
+            "context_max_chars": self.context_max_chars,
         }
 
 

@@ -10,6 +10,7 @@ from typing import Literal
 import httpx
 from pydantic import ValidationError
 
+from history_agent.answering.context import sanitize_history_content
 from history_agent.answering.models import QueryEntity, QueryPlan, QuestionRequest
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.time_ranges import parse_relative_year_range
@@ -91,7 +92,9 @@ def _messages(settings: Settings, request: QuestionRequest) -> list[dict[str, st
         f"研究时间边界是{settings.research_start.year}—{settings.research_end.year}年。"
         f"输出字段示意：{json.dumps(schema, ensure_ascii=False)}"
     )
-    history = "\n".join(f"{item.role}: {item.content}" for item in request.history[-6:])
+    history = "\n".join(
+        f"{item.role}: {sanitize_history_content(item.content)}" for item in request.history
+    )
     content = f"当前问题：{request.question}"
     if history:
         content = f"最近对话：\n{history}\n\n{content}"
