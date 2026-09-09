@@ -6,6 +6,10 @@ import re
 import sqlite3
 
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
+from history_agent.answering.time_ranges import (
+    RELATIVE_YEAR_PATTERN,
+    parse_relative_year_range,
+)
 from history_agent.config import Settings
 from history_agent.db import Database
 from history_agent.errors import ResearchDataError
@@ -118,17 +122,32 @@ def answer_structured_question(
     clarify = (
         "请明确人物和年份，例如“毛泽东在1949年有哪些经历”或"
         "“毛泽东与周恩来在1949年有哪些交集”。也可使用“长征期间”等已识别的时期名称"
-        "检索原文。当前结构化查询支持整年或年份区间，"
+        "检索原文。当前查询支持整年、年份区间或“某年之前/之后”，"
         "不会忽略地点、月份等附加条件，也不会自动继承上一轮人物。"
     )
-    years = list(_YEAR.finditer(question))
+    relative_years = list(RELATIVE_YEAR_PATTERN.finditer(question))
+    years = list(_YEAR.finditer(RELATIVE_YEAR_PATTERN.sub("", question)))
     periods = list(_PERIOD.finditer(question))
-    period_query = not years and len(periods) == 1
-    unbounded_intersection = intent == "intersection" and not years and not periods
+    relative_query = len(relative_years) == 1 and not years and not periods
+    period_query = not years and not relative_years and len(periods) == 1
+    unbounded_intersection = (
+        intent == "intersection" and not years and not relative_years and not periods
+    )
+    lower, upper = settings.research_start.year, settings.research_end.year
     start: int | None
     end: int | None
     if period_query:
         start, end = PERIOD_RANGES[periods[0]["period"]]
+    elif relative_query:
+        relative = parse_relative_year_range(question, lower, upper)
+        assert relative is not None
+        start, end = relative.start, relative.end
+        if start > end:
+            return _response(
+                request,
+                intent,
+                f"时间条件“{relative.raw}”与研究范围 {lower}—{upper} 年没有重叠。",
+            )
     elif len(years) == 1:
         start = int(years[0]["start"])
         end = int(years[0]["end"] or start)
@@ -136,7 +155,6 @@ def answer_structured_question(
         start = end = None
     else:
         return _response(request, intent, clarify)
-    lower, upper = settings.research_start.year, settings.research_end.year
     if start is not None and end is not None and not lower <= start <= end <= upper:
         return _response(
             request, intent, f"研究范围为 {lower}—{upper} 年，请提供范围内且起止顺序正确的年份。"
@@ -165,7 +183,9 @@ def answer_structured_question(
             return _response(request, intent, clarify)
         # Removing only recognized names/year/function words prevents silently dropping
         # constraints (e.g. an unknown third person, a month, place, or negation).
-        time_pattern = _PERIOD if period_query else _YEAR
+        time_pattern = (
+            _PERIOD if period_query else RELATIVE_YEAR_PATTERN if relative_query else _YEAR
+        )
         remainder = name_pattern.sub("", time_pattern.sub("", question))
         remainder = re.sub(r"^(?:(?:请问|请|帮我|查询|列出|梳理|一下|看看))+", "", remainder)
         remainder = re.sub(r"[和与及、在于的]", "", remainder)
@@ -184,11 +204,11 @@ def answer_structured_question(
             return _response(
                 request, intent, "交集查询需要两位不同人物；两个称呼可能是同一人的别名。"
             )
-        if period_query or unbounded_intersection:
-            # Named periods and well-formed two-person questions ask for synthesis of
-            # source passages. Select that route BEFORE looking up joint-action candidates,
-            # and only after validating people/constraints. Never use retrieval as an
-            # outcome-dependent fallback for a failed structured lookup.
+        if period_query or relative_query or unbounded_intersection:
+            # Named periods, open year bounds, and well-formed unbounded intersections ask
+            # for synthesis of source passages. Select that route BEFORE looking up
+            # joint-action candidates, and only after validating people/constraints. Never
+            # use retrieval as an outcome-dependent fallback for a failed structured lookup.
             return None
         assert start is not None and end is not None
         citations: list[Citation] = []

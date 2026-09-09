@@ -203,6 +203,17 @@ def test_chat_uses_actual_proof_and_full_page_range(work_path: Path) -> None:
     assert "林彪、周恩来致电毛泽东" in result.citations[0].quote
 
 
+def test_intersection_before_year_routes_to_source_synthesis(
+    work_path: Path,
+) -> None:
+    result = answer_structured_question(
+        _settings(work_path),
+        QuestionRequest(question="周恩来和林彪在1949年之前的交集"),
+    )
+
+    assert result is None
+
+
 @pytest.mark.parametrize("period", list(PERIOD_RANGES), ids=lambda name: str(PERIOD_RANGES[name]))
 def test_known_periods_select_source_synthesis(work_path: Path, period: str) -> None:
     settings = _settings(work_path)

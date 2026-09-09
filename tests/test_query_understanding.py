@@ -12,6 +12,7 @@ from history_agent.answering.query_understanding import (
     query_execution,
 )
 from history_agent.answering.service import LLMResult, answer_question
+from history_agent.answering.time_ranges import parse_relative_year_range
 from history_agent.config import Settings
 from history_agent.retrieval.models import SearchResponse
 
@@ -144,6 +145,36 @@ def test_balanced_period_builds_three_targeted_phase_queries() -> None:
     assert len(execution.additional_queries) == 3
     assert "1921年至1929年" in execution.additional_queries[0]
     assert "1940年至1949年" in execution.additional_queries[-1]
+
+
+def test_before_year_intersection_gets_deterministic_bounded_plan() -> None:
+    settings = Settings(_env_file=None, llm_api_key=None)
+    question = "周恩来和邓小平在1949年之前的交集"
+
+    result = plan_question(settings, QuestionRequest(question=question))
+    execution = query_execution(question, result.plan, settings.person_aliases_path)
+
+    assert result.status == "not_applicable"
+    assert result.plan is not None
+    assert result.plan.intent == "intersection"
+    assert result.plan.start_year == 1921
+    assert result.plan.end_year == 1948
+    assert result.plan.coverage == "balanced_period"
+    assert [entity.canonical for entity in result.plan.entities] == ["周恩来", "邓小平"]
+    assert execution.retrieval_plan is not None
+    assert execution.retrieval_plan.query_year_range == [1921, 1948]
+    assert execution.retrieval_plan.query_people == ["周恩来", "邓小平"]
+    assert len(execution.additional_queries) == 3
+
+
+def test_relative_year_boundaries_respect_inclusive_marker_and_spaces() -> None:
+    before = parse_relative_year_range("1949 年 之前", 1921, 1978)
+    inclusive = parse_relative_year_range("1949年及以前", 1921, 1978)
+    after = parse_relative_year_range("1949年之后", 1921, 1978)
+
+    assert before is not None and (before.start, before.end) == (1921, 1948)
+    assert inclusive is not None and (inclusive.start, inclusive.end) == (1921, 1949)
+    assert after is not None and (after.start, after.end) == (1950, 1978)
 
 
 def test_long_timeline_does_not_treat_phase_rewrites_as_per_item() -> None:

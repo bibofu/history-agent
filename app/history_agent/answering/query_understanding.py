@@ -10,8 +10,9 @@ from typing import Literal
 import httpx
 from pydantic import ValidationError
 
-from history_agent.answering.models import QueryPlan, QuestionRequest
+from history_agent.answering.models import QueryEntity, QueryPlan, QuestionRequest
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
+from history_agent.answering.time_ranges import parse_relative_year_range
 from history_agent.config import Settings
 from history_agent.processing.chunks import load_person_aliases
 from history_agent.retrieval.models import RetrievalPlan
@@ -128,12 +129,52 @@ def _normalize_coverage(plan: QueryPlan) -> QueryPlan:
     return plan
 
 
+def _relative_intersection_plan(
+    settings: Settings, request: QuestionRequest
+) -> QueryPlan | None:
+    if not any(marker in request.question for marker in ("交集", "共同")):
+        return None
+    relative = parse_relative_year_range(
+        request.question, settings.research_start.year, settings.research_end.year
+    )
+    if relative is None or relative.start > relative.end:
+        return None
+    try:
+        aliases = load_person_aliases(settings.person_aliases_path)
+    except Exception:
+        return None
+    entities: list[QueryEntity] = []
+    for canonical, forms in aliases.items():
+        matched = next(
+            (form for form in [canonical, *forms] if form in request.question),
+            None,
+        )
+        if matched is not None:
+            entities.append(QueryEntity(type="person", text=matched, canonical=canonical))
+    if len(entities) != 2:
+        return None
+    normalized = request.question.replace(
+        relative.raw, f"{relative.start}年至{relative.end}年"
+    )
+    return QueryPlan(
+        intent="intersection",
+        normalized_question=normalized,
+        entities=entities,
+        start_year=relative.start,
+        end_year=relative.end,
+        coverage="balanced_period",
+    )
+
+
 def plan_question(
     settings: Settings,
     request: QuestionRequest,
     runtime: LLMRuntime | None = None,
     budget: RequestBudget | None = None,
 ) -> QueryPlanningResult:
+    relative_plan = _relative_intersection_plan(settings, request)
+    if relative_plan is not None:
+        return QueryPlanningResult(relative_plan, "not_applicable")
     if not settings.llm_query_planning or not settings.llm_enabled:
         return QueryPlanningResult(None, "disabled")
     assert settings.llm_api_key is not None

@@ -767,7 +767,7 @@ def _finish_answer(
         if retrieval.query_year_range and not retrieval.query_years:
             start_year, end_year = retrieval.query_year_range
             limitations.append(
-                f"时期名称按 {start_year}—{end_year} 年范围召回资料；"
+                f"时间条件按 {start_year}—{end_year} 年范围召回资料；"
                 "这不是精确起止日期，具体活动的时期归属须结合原文核对。"
             )
     if planning is not None and planning.status == "fallback":
