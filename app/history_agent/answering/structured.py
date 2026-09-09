@@ -52,6 +52,7 @@ def _response(
         retrieval_mode=f"structured_{intent}",
         query_intent=intent,
         citations=citations or [],
+        retrieved_evidence_count=len(citations or []),
         limitations=limitations or [],
     )
 

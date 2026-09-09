@@ -146,6 +146,31 @@ def test_balanced_period_builds_three_targeted_phase_queries() -> None:
     assert "1940年至1949年" in execution.additional_queries[-1]
 
 
+def test_long_timeline_does_not_treat_phase_rewrites_as_per_item() -> None:
+    payload = _plan_payload()
+    payload.update(
+        {
+            "intent": "timeline",
+            "normalized_question": "习仲勋在1921年至1949年党内职务的变化",
+            "search_queries": ["习仲勋 土地革命时期 职务"],
+            "entities": [{"type": "person", "text": "习仲勋", "canonical": "习仲勋"}],
+            "start_year": 1921,
+            "end_year": 1949,
+            "coverage": "per_item",
+        }
+    )
+
+    execution = query_execution(
+        "习仲勋在1921—1949年党内职务的变化",
+        QueryPlan.model_validate(payload),
+        Path("config/person_aliases.json"),
+    )
+
+    assert execution.retrieval_plan is not None
+    assert execution.retrieval_plan.coverage == "balanced_period"
+    assert len(execution.additional_queries) == 3
+
+
 def test_query_execution_caps_ordinary_queries_but_keeps_per_item_expansion() -> None:
     payload = _plan_payload()
     payload["search_queries"] = [f"检索表达式{index}" for index in range(1, 6)]

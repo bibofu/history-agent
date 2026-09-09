@@ -9,7 +9,10 @@ from history_agent.answering import service as service_module
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.query_understanding import QueryExecution
 from history_agent.answering.service import (
+    AnswerContext,
+    LLMResult,
     _extractive_answer,
+    _finish_answer,
     _llm_answer,
     _quote_for_hit,
     _retrieval_limit,
@@ -55,6 +58,35 @@ def test_extractive_answer_skips_bare_ellipsis_sentence() -> None:
     assert "要做系统" in answer
 
 
+def test_final_response_only_exposes_citations_used_by_answer() -> None:
+    citations = [
+        _citation().model_copy(update={"evidence_id": f"E{index}"})
+        for index in range(1, 4)
+    ]
+    retrieval = service_module.SearchResponse(
+        query="习仲勋在1921—1949年党内职务的变化",
+        query_intent="timeline",
+        query_terms=["习仲"],
+        query_years=[],
+        query_year_range=[1921, 1949],
+        query_people=["习仲勋"],
+        document_filters=[],
+        include_out_of_scope=False,
+        hits=[],
+    )
+    context = AnswerContext(retrieval, citations, "partial", None)
+
+    result = _finish_answer(
+        Settings(_env_file=None, llm_api_key="sk-test"),
+        QuestionRequest(question=retrieval.query),
+        context,
+        LLMResult("1945年，习仲勋任西北中央局书记。[E2]"),
+    )
+
+    assert [citation.evidence_id for citation in result.citations] == ["E2"]
+    assert result.retrieved_evidence_count == 3
+
+
 def test_quote_window_preserves_nearby_supporting_facts() -> None:
     hit = SearchHit(
         rank=1,
@@ -79,6 +111,32 @@ def test_quote_window_preserves_nearby_supporting_facts() -> None:
 
     assert "军事和政治战略家" in quote
     assert len(quote) <= 422
+
+
+def test_short_timeline_quote_starts_with_the_persons_relevant_sentence() -> None:
+    hit = SearchHit(
+        rank=1,
+        chunk_id="career",
+        document_id="history",
+        title="党史",
+        filename="history.pdf",
+        source_type="official_history",
+        verification_status="verified",
+        pdf_page_start=1,
+        pdf_page_end=1,
+        section_path=[],
+        text="会议先讨论土地政策。随后通过其他决议。中共中央决定由习仲勋任西北局书记。",
+        year_mentions=[1945],
+        people=[],
+        extraction_methods=["text_layer"],
+        score=1.0,
+        matched_terms=[],
+    )
+
+    quote = _quote_for_hit(hit, ["职务"], query_people=["习仲勋"])
+
+    assert quote.startswith("……中共中央决定由习仲勋任西北局书记")
+    assert "土地政策" not in quote
 
 
 def test_question_request_rejects_unbounded_history() -> None:

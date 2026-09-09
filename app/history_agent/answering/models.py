@@ -84,4 +84,5 @@ class AnswerResponse(BaseModel):
     retrieval_mode: str
     query_intent: str
     citations: list[Citation]
+    retrieved_evidence_count: int = Field(default=0, ge=0)
     limitations: list[str] = Field(default_factory=list)

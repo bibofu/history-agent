@@ -114,6 +114,20 @@ def _validated_plan(content: str) -> QueryPlan:
     return plan
 
 
+def _normalize_coverage(plan: QueryPlan) -> QueryPlan:
+    if (
+        plan.intent == "timeline"
+        and plan.coverage == "per_item"
+        and plan.start_year is not None
+        and plan.end_year is not None
+        and plan.end_year - plan.start_year >= 4
+    ):
+        # ``per_item`` is for an explicitly enumerated series such as party
+        # congresses. A long career range needs temporal coverage instead.
+        return plan.model_copy(update={"coverage": "balanced_period"})
+    return plan
+
+
 def plan_question(
     settings: Settings,
     request: QuestionRequest,
@@ -157,7 +171,7 @@ def plan_question(
                 settings.llm_query_planner_model,
                 error_code="max_tokens_exhausted",
             )
-        plan = _validated_plan(str(choice["message"]["content"]))
+        plan = _normalize_coverage(_validated_plan(str(choice["message"]["content"])))
         raw_usage = payload.get("usage", {})
         usage = {
             key: int(raw_usage[key])
@@ -228,6 +242,7 @@ def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -
 
     if plan is None:
         return QueryExecution(question, (), None)
+    plan = _normalize_coverage(plan)
     hint = INTENT_HINTS.get(plan.intent)
     # Retrieval-oriented rewrites are more valuable than the prose-normalized
     # question because the original question is always executed separately.

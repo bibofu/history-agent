@@ -49,12 +49,25 @@ def _quote_for_hit(
     query_people: list[str] | None = None,
 ) -> str:
     text = _compact(hit.text)
+    people = set(query_people or [])
+    if len(people) == 1:
+        position = text.find(next(iter(people)))
+        if position > 0:
+            window_start = max(0, position - 110)
+            boundary = max(text.rfind(mark, window_start, position) for mark in "。！？；")
+            start = boundary + 1 if boundary >= window_start else window_start
+            if start:
+                text = "……" + text[start:]
     if len(text) <= limit:
         return text
-    positions = [text.find(term) for term in query_terms if len(term) >= 2]
+    person_positions = [
+        match.start()
+        for person in people
+        for match in re.finditer(re.escape(person), text)
+    ]
+    positions = person_positions or [text.find(term) for term in query_terms if len(term) >= 2]
     positions = [position for position in positions if position >= 0]
     center = min(positions) if positions else 0
-    people = set(query_people or [])
     if len(people) == 2:
         mentions = sorted(
             (match.start(), match.end(), person)
@@ -116,9 +129,7 @@ def _citations(response: Any) -> list[Citation]:
             quote=_quote_for_hit(
                 hit,
                 response.query_terms,
-                query_people=response.query_people
-                if response.query_intent == "intersection"
-                else [],
+                query_people=response.query_people,
             ),
             source_type=hit.source_type,
             verification_status=hit.verification_status,
@@ -126,6 +137,13 @@ def _citations(response: Any) -> list[Citation]:
         )
         for index, hit in enumerate(response.hits, start=1)
     ]
+
+
+def _citations_used_by_answer(answer: str, citations: list[Citation]) -> list[Citation]:
+    """Expose only evidence the authoritative answer actually cites."""
+
+    used_ids = set(validate_grounded_answer(answer, citations).used_evidence_ids)
+    return [citation for citation in citations if citation.evidence_id in used_ids]
 
 
 def _extractive_answer(intent: str, citations: list[Citation]) -> str:
@@ -296,6 +314,9 @@ def _llm_request_payload(
         "标题只写主题，含事实的标题也必须给出引用；表格每一行的事实须在该行标注引用。"
         "单纯说明资料不足以确认某事不需要引用，但不能在其中夹带未引用的历史事实。"
         "不要逐条解释为何排除无关证据；资料限制只简要说明还缺少哪些材料。"
+        "只引用能直接回答当前问题的证据，不要为了覆盖证据包而引用弱相关片段。"
+        "若问题询问职务变化，只纳入明确记载任职、改任、免职或组织成员身份的材料；"
+        "仅提到人物、收发报告或参加一般活动的材料不能作为职务变化。"
         "说明证据时间范围有限时不要逐年罗列证据年份，使用概括表述。"
     )
     history = [item.model_dump() for item in request.history[-6:]]
@@ -685,12 +706,13 @@ def _finish_answer(
     llm_result: LLMResult,
     planning: QueryPlanningResult | None = None,
 ) -> AnswerResponse:
-    retrieval, citations = context.retrieval, context.citations
+    retrieval, retrieved_citations = context.retrieval, context.citations
     unsupported_entity = context.unsupported_entity
     generator_mode: Literal["extractive", "llm"] = "llm" if llm_result.answer else "extractive"
-    answer = llm_result.answer or _extractive_answer(retrieval.query_intent, citations)
+    answer = llm_result.answer or _extractive_answer(retrieval.query_intent, retrieved_citations)
+    citations = _citations_used_by_answer(answer, retrieved_citations)
     limitations = []
-    if not citations:
+    if not retrieved_citations:
         reason = (
             f"检索片段中没有出现问题人物“{unsupported_entity}”。"
             if unsupported_entity
@@ -719,7 +741,7 @@ def _finish_answer(
         limitations.append(
             "部分证据分组未能生成局部摘要，最终综合时已改用该组原文摘录。"
         )
-    if citations:
+    if retrieved_citations:
         if retrieval.degraded_components:
             limitations.append(
                 "检索已降级："
@@ -731,9 +753,9 @@ def _finish_answer(
                 f"覆盖计划中有 {len(retrieval.coverage_gaps)} 个检索分组未找到候选证据，"
                 "对应部分已作为资料缺口保留。"
             )
-        if len(citations) > LLM_EVIDENCE_BATCH_SIZE:
+        if len(retrieved_citations) > LLM_EVIDENCE_BATCH_SIZE:
             limitations.append(
-                f"本题使用 {len(citations)} 条证据执行了分组摘要和最终综合，"
+                f"本题使用 {len(retrieved_citations)} 条证据候选执行了分组摘要和最终综合，"
                 "以避免单次 Top-K 截断跨阶段材料。"
             )
         limitations.append("答案仅代表当前已入库文献的检索结果，不等同于完整历史结论。")
@@ -777,6 +799,7 @@ def _finish_answer(
         retrieval_mode=retrieval.retrieval_mode,
         query_intent=retrieval.query_intent,
         citations=citations,
+        retrieved_evidence_count=len(retrieved_citations),
         limitations=limitations,
     )
 
@@ -803,9 +826,11 @@ def _finish_structured_answer(
         limitations.append(
             f"本题使用 {len(structured.citations)} 条结构化证据执行了分组摘要和最终综合。"
         )
+    answer = llm_result.answer or structured.answer
+    citations = _citations_used_by_answer(answer, structured.citations)
     return structured.model_copy(
         update={
-            "answer": llm_result.answer or structured.answer,
+            "answer": answer,
             "generator_mode": "llm" if llm_result.answer else "extractive",
             "llm_status": (
                 "disabled"
@@ -818,6 +843,8 @@ def _finish_structured_answer(
             "llm_usage": llm_result.usage,
             "llm_error_code": llm_result.error_code if settings.llm_enabled else None,
             "uncited_claims": list(llm_result.uncited_claims),
+            "citations": citations,
+            "retrieved_evidence_count": len(structured.citations),
             "limitations": limitations,
         }
     )

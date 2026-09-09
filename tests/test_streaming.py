@@ -393,6 +393,8 @@ def test_large_evidence_set_uses_hierarchical_generation_in_stream(
     ]
     assert events[-1].data["answer"] == "分层综合答案。[E1][E13]"
     assert events[-1].data["llm_usage"] == {"total_tokens": 25}
+    assert [item["evidence_id"] for item in events[-1].data["citations"]] == ["E1", "E13"]
+    assert events[-1].data["retrieved_evidence_count"] == 13
     assert any("13 条证据" in item for item in events[-1].data["limitations"])
 
 

@@ -17,6 +17,24 @@ MIN_TEMPORAL_COVERAGE_YEARS = 5
 TEMPORAL_FOCUS_MARKERS = ("初期", "前期", "早期", "中期", "后期", "晚期", "末期")
 OBSERVATION_QUERY_MARKERS = ("怎样记述", "如何记述", "怎样描述", "如何描述")
 OBSERVATION_EXPANSION = "外貌 性格 生活 印象"
+CAREER_QUERY_MARKERS = ("党内职务", "职务变化", "职务变动", "任职", "担任", "出任")
+CAREER_ROLE_MARKER = re.compile(
+    r"(?:第一书记|副书记|书记|候补委员|常务委员|常委|委员|副主席|主席|"
+    r"秘书长|副部长|部长|负责人|政治委员|政委|党代表|中央局|党委|"
+    r"党支部|特委|前委)"
+)
+PARTY_ROLE_MARKER = re.compile(
+    r"(?:第一书记|副书记|书记|候补委员|常务委员|常委|(?<!政治)委员|副主席|主席|"
+    r"秘书长|副部长|部长|负责人|党代表|中央局|党委|党支部|特委|前委)"
+)
+CAREER_CHANGE_MARKER = re.compile(
+    r"(?:担任|出任|当选|选举|任命|改任|调任|兼任|升任|增补|组成|"
+    r"进入|成为|任职|免去|免职|撤销|辞去|代理)"
+)
+CAREER_LEADING_PERSON = re.compile(
+    r"^(?:(?:请问|请|梳理|介绍|概括|总结))?"
+    r"(?P<person>[\u3400-\u4dbf\u4e00-\u9fff·]{2,8}?)(?=在|\s|(?:18|19|20)\d{2})"
+)
 CPC_CONGRESS_ORDINALS = (
     "一",
     "二",
@@ -75,6 +93,52 @@ def expand_query(query: str) -> str:
     for ordinal in cpc_congress_ordinals(query):
         expansions.append(f"中国共产党第{ordinal}次全国代表大会")
     return f"{query} {' '.join(expansions)}" if expansions else query
+
+
+def _career_relevant_hits(
+    hits: list[SearchHit], *, query: str, query_people: list[str]
+) -> list[SearchHit]:
+    """Keep only passages that directly connect the requested person to a role."""
+
+    if not any(marker in query for marker in CAREER_QUERY_MARKERS):
+        return hits
+    if not query_people:
+        match = CAREER_LEADING_PERSON.search(query.strip())
+        query_people = [match.group("person")] if match is not None else []
+    if not query_people:
+        return hits
+    role_marker = PARTY_ROLE_MARKER if "党内" in query else CAREER_ROLE_MARKER
+    selected: list[SearchHit] = []
+    for hit in hits:
+        title_anchor = any(person in hit.title for person in query_people)
+        clauses = re.split(r"(?<=[，,。！？；;])|\n+", hit.text)
+        for clause in clauses:
+            direct = any(
+                re.search(
+                    rf"{re.escape(person)}.{{0,10}}"
+                    rf"(?:担任|出任|当选为|选为|任命为|改任|调任|兼任|升任|"
+                    rf"增补为|成为|任职为|代理|为|任).{{0,12}}{role_marker.pattern}",
+                    clause,
+                )
+                or re.search(
+                    rf"{role_marker.pattern}.{{0,6}}{re.escape(person)}",
+                    clause,
+                )
+                or re.search(
+                    rf"{re.escape(person)}.{{0,60}}组成.{{0,20}}{role_marker.pattern}",
+                    clause,
+                )
+                for person in query_people
+            )
+            title_context = (
+                title_anchor
+                and role_marker.search(clause) is not None
+                and CAREER_CHANGE_MARKER.search(clause) is not None
+            )
+            if direct or title_context:
+                selected.append(hit)
+                break
+    return selected
 
 
 def _source_bonus(intent: str, source_type: str, title: str, query_people: list[str]) -> float:
@@ -278,6 +342,11 @@ def fuse_search_responses(
             hit.chunk_id,
         ),
     )
+    query_people = keyword.query_people
+    if not query_people and any(marker in keyword.query for marker in CAREER_QUERY_MARKERS):
+        match = CAREER_LEADING_PERSON.search(keyword.query.strip())
+        query_people = [match.group("person")] if match is not None else []
+    ranked = _career_relevant_hits(ranked, query=keyword.query, query_people=query_people)
     # A page may yield several adjacent chunks. One result per physical page gives
     # the answer layer a broader, less repetitive evidence set.
     preferred_ids = {hit.chunk_id for hit in _best_congress_hits(ranked, keyword.query)}
@@ -310,7 +379,7 @@ def fuse_search_responses(
         query_terms=keyword.query_terms,
         query_years=keyword.query_years,
         query_year_range=keyword.query_year_range,
-        query_people=keyword.query_people,
+        query_people=query_people,
         document_filters=keyword.document_filters,
         include_out_of_scope=keyword.include_out_of_scope,
         hits=selected,
@@ -333,6 +402,11 @@ def _single_branch_response(
             "vector_rank": hit.rank if branch == "vector" else None,
         }
         hits.append(hit.model_copy(update=updates))
+    query_people = response.query_people
+    if not query_people and any(marker in response.query for marker in CAREER_QUERY_MARKERS):
+        match = CAREER_LEADING_PERSON.search(response.query.strip())
+        query_people = [match.group("person")] if match is not None else []
+    hits = _career_relevant_hits(hits, query=response.query, query_people=query_people)
     selected = _select_with_temporal_coverage(
         hits,
         query=response.query,
@@ -345,6 +419,7 @@ def _single_branch_response(
     return response.model_copy(
         update={
             "hits": selected,
+            "query_people": query_people,
             "retrieval_mode": f"{branch}_only",
             "degraded_components": [failed],
         }
@@ -473,6 +548,11 @@ def _fuse_query_variants(
         by_chunk.values(),
         key=lambda hit: (-scores[hit.chunk_id], hit.pdf_page_start, hit.chunk_id),
     )
+    query_people = responses[0].query_people or plan.query_people
+    if not query_people and any(marker in query for marker in CAREER_QUERY_MARKERS):
+        person_match = CAREER_LEADING_PERSON.search(query.strip())
+        query_people = [person_match.group("person")] if person_match is not None else []
+    ranked = _career_relevant_hits(ranked, query=query, query_people=query_people)
     unique_pages: list[SearchHit] = []
     pages: set[tuple[str, int]] = set()
     for hit in ranked:
@@ -521,7 +601,7 @@ def _fuse_query_variants(
         query_terms=list(dict.fromkeys(term for item in responses for term in item.query_terms)),
         query_years=plan.query_years,
         query_year_range=plan.query_year_range,
-        query_people=plan.query_people,
+        query_people=query_people,
         document_filters=responses[0].document_filters,
         include_out_of_scope=responses[0].include_out_of_scope,
         hits=selected,

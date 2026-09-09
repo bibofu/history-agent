@@ -3,6 +3,7 @@ from threading import Barrier
 import pytest
 from history_agent.errors import RetrievalError
 from history_agent.retrieval.hybrid import (
+    _career_relevant_hits,
     _primary_year,
     cpc_congress_ordinals,
     expand_query,
@@ -88,6 +89,82 @@ def test_observation_query_expansion_is_restrained() -> None:
 
     assert expanded.endswith("外貌 性格 生活 印象")
     assert expand_query("周恩来在1956年有哪些经历？") == "周恩来在1956年有哪些经历？"
+
+
+def test_career_query_removes_person_mentions_without_a_role_change() -> None:
+    relevant = _hit("role", 3, page=3).model_copy(
+        update={"text": "1945年10月，中共中央决定由习仲勋任西北中央局书记。"}
+    )
+    report = _hit("report", 1, page=1).model_copy(
+        update={"text": "毛泽东转发习仲勋关于西北土地改革工作的报告。"}
+    )
+    unrelated = _hit("unrelated", 2, page=2).model_copy(
+        update={"text": "东北抗日联军各军的军长和政治委员名单如下。"}
+    )
+
+    selected = _career_relevant_hits(
+        [report, unrelated, relevant],
+        query="习仲勋在1921—1949年党内职务的变化",
+        query_people=[],
+    )
+
+    assert [hit.chunk_id for hit in selected] == ["role"]
+
+
+def test_career_query_does_not_join_distant_person_and_role_mentions() -> None:
+    hit = _hit("distant", 1, page=1).model_copy(
+        update={
+            "text": "习仲勋提交了工作报告。" + "其他工作。" * 30 + "周恩来担任南方局书记。"
+        }
+    )
+
+    assert _career_relevant_hits(
+        [hit],
+        query="习仲勋在1921—1949年党内职务的变化",
+        query_people=["习仲勋"],
+    ) == []
+
+
+def test_party_career_query_excludes_military_appointments() -> None:
+    hit = _hit("military-role", 1, page=1).model_copy(
+        update={"text": "1947年，习仲勋任西北野战军副政治委员。"}
+    )
+
+    assert _career_relevant_hits(
+        [hit],
+        query="习仲勋在1921—1949年党内职务的变化",
+        query_people=["习仲勋"],
+    ) == []
+
+
+def test_career_filter_runs_before_final_top_k_cutoff() -> None:
+    weak = [
+        _hit(f"weak-{index}", index, page=index).model_copy(
+            update={"text": f"第{index}条材料提到习仲勋提交工作报告。"}
+        )
+        for index in range(1, 4)
+    ]
+    role = _hit("role", 4, page=4).model_copy(
+        update={"text": "西北局以习仲勋为书记。"}
+    )
+    keyword = _response([*weak, role], intent="timeline").model_copy(
+        update={
+            "query": "习仲勋在1921—1949年党内职务的变化",
+            "query_people": ["习仲勋"],
+            "query_year_range": [1921, 1949],
+        }
+    )
+    vector = _response([], intent="timeline").model_copy(
+        update={
+            "query": keyword.query,
+            "query_people": ["习仲勋"],
+            "query_year_range": [1921, 1949],
+        }
+    )
+
+    result = fuse_search_responses(keyword, vector, top_k=2, coverage="balanced_period")
+
+    assert [hit.chunk_id for hit in result.hits] == ["role"]
 
 
 def test_cpc_congress_short_name_expands_to_formal_name() -> None:
