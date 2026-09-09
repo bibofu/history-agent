@@ -12,7 +12,7 @@ from history_agent.evaluation.comprehensive import (
 )
 
 
-def test_repository_comprehensive_set_has_100_evidenced_questions() -> None:
+def test_repository_comprehensive_set_has_105_evidenced_questions() -> None:
     project_root = Path.cwd()
 
     result = audit_comprehensive_question_set(
@@ -21,18 +21,18 @@ def test_repository_comprehensive_set_has_100_evidenced_questions() -> None:
     )
 
     assert result["passed"] is True
-    assert result["question_count"] == 100
-    assert result["evidence_questions"] == 100
+    assert result["question_count"] == 105
+    assert result["evidence_questions"] == 105
     assert result["source_counts"] == {
-        "answer": 42,
+        "answer": 47,
         "intersection": 40,
         "structured": 18,
     }
     assert result["category_counts"] == {
-        "timeline": 22,
-        "intersection": 45,
+        "timeline": 23,
+        "intersection": 47,
         "viewpoint": 8,
-        "event": 9,
+        "event": 11,
         "organization": 9,
         "conflict": 4,
         "refusal": 3,

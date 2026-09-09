@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "supported_direct_action",
+      "question": "周恩来在1956年1月做了什么？",
+      "answer": "1956年1月，周恩来参加了关于知识分子问题的会议。[E1]",
+      "citations": [{
+        "evidence_id": "E1",
+        "document_id": "calibration",
+        "document": "评测校准摘录",
+        "pdf_page": 1,
+        "section": ["1956年"],
+        "quote": "1956年1月，周恩来参加关于知识分子问题的会议。",
+        "source_type": "calibration",
+        "verification_status": "reviewed",
+        "extraction_methods": ["manual"]
+      }],
+      "expected_verdict": "pass",
+      "tags": ["positive", "direct_action"]
+    },
+    {
+      "case_id": "wrong_person_attribution",
+      "question": "谁在会上作报告？",
+      "answer": "周恩来在会上作了关于外交工作的报告。[E1]",
+      "citations": [{
+        "evidence_id": "E1",
+        "document_id": "calibration",
+        "document": "评测校准摘录",
+        "pdf_page": 2,
+        "section": ["会议"],
+        "quote": "会议由周恩来主持，陈毅作关于外交工作的报告。",
+        "source_type": "calibration",
+        "verification_status": "reviewed",
+        "extraction_methods": ["manual"]
+      }],
+      "expected_verdict": "fail",
+      "tags": ["negative", "wrong_subject"]
+    },
+    {
+      "case_id": "cooccurrence_is_not_collaboration",
+      "question": "毛泽东和林彪是否共同指挥这次行动？",
+      "answer": "毛泽东和林彪共同指挥了这次行动。[E1]",
+      "citations": [{
+        "evidence_id": "E1",
+        "document_id": "calibration",
+        "document": "评测校准摘录",
+        "pdf_page": 3,
+        "section": ["工作安排"],
+        "quote": "林彪因病不能前来。有关事项由毛泽东交周恩来负责解决。",
+        "source_type": "calibration",
+        "verification_status": "reviewed",
+        "extraction_methods": ["manual"]
+      }],
+      "expected_verdict": "fail",
+      "semantic_criteria": ["不得把姓名出现在同一段落推断为共同指挥。"],
+      "tags": ["negative", "intersection", "cooccurrence"]
+    },
+    {
+      "case_id": "wrong_year_attribution",
+      "question": "这项工作在哪一年完成？",
+      "answer": "这项工作在1956年完成。[E1]",
+      "citations": [{
+        "evidence_id": "E1",
+        "document_id": "calibration",
+        "document": "评测校准摘录",
+        "pdf_page": 4,
+        "section": ["1956年"],
+        "quote": "1956年开始拟订规划，至1957年完成初稿。",
+        "source_type": "calibration",
+        "verification_status": "reviewed",
+        "extraction_methods": ["manual"]
+      }],
+      "expected_verdict": "fail",
+      "tags": ["negative", "time"]
+    },
+    {
+      "case_id": "supported_cautious_limit",
+      "question": "两人是否在会上直接交谈？",
+      "answer": "现有引文只说明两人都列席会议，无法据此确认他们曾直接交谈。[E1]",
+      "citations": [{
+        "evidence_id": "E1",
+        "document_id": "calibration",
+        "document": "评测校准摘录",
+        "pdf_page": 5,
+        "section": ["会议名单"],
+        "quote": "出席者包括甲、乙、丙；列席者包括毛泽东、周恩来。",
+        "source_type": "calibration",
+        "verification_status": "reviewed",
+        "extraction_methods": ["manual"]
+      }],
+      "expected_verdict": "pass",
+      "semantic_criteria": ["审慎说明引文无法证明互动应判为通过。"],
+      "tags": ["positive", "qualified_answer"]
+    },
+    {
+      "case_id": "unsupported_causal_strengthening",
+      "question": "会议为何改变方针？",
+      "answer": "由于周恩来的发言，会议因此决定改变原有方针。[E1]",
+      "citations": [{
+        "evidence_id": "E1",
+        "document_id": "calibration",
+        "document": "评测校准摘录",
+        "pdf_page": 6,
+        "section": ["会议"],
+        "quote": "周恩来在会上发言。会议随后讨论并决定改变原有方针。",
+        "source_type": "calibration",
+        "verification_status": "reviewed",
+        "extraction_methods": ["manual"]
+      }],
+      "expected_verdict": "fail",
+      "semantic_criteria": ["引文只表达发言、讨论、决定的时间先后，没有明确说明周恩来的发言导致会议改变方针。"],
+      "tags": ["negative", "causality"]
+    }
+  ]
+}

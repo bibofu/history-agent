@@ -120,7 +120,7 @@ def test_answer_evaluation_scores_grounding_and_refusal(
         run_id="test-run",
     )
 
-    assert payload["metrics"] == {
+    expected_metrics = {
         "gold_page_hit_rate": 1.0,
         "citation_page_accuracy": 1.0,
         "grounding_pass_rate": 1.0,
@@ -128,6 +128,11 @@ def test_answer_evaluation_scores_grounding_and_refusal(
         "refusal_accuracy": 1.0,
         "answerability_accuracy": 1.0,
     }
+    assert {
+        key: payload["metrics"][key] for key in expected_metrics
+    } == expected_metrics
+    assert payload["latency"]["all"]["count"] == 2
+    assert payload["metrics"]["semantic_judge_coverage"] == 0.0
     assert all(result["success"] for result in payload["results"])
     assert (settings.reports_dir / "answer_eval_latest.json").is_file()
     assert (settings.reports_dir / "mvp_eval_latest.md").is_file()

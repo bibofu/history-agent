@@ -198,17 +198,17 @@ uv sync --extra ocr --extra vector --extra app --group dev
 .\.venv\Scripts\history-agent.exe search-vector "毛泽东关于调查研究的观点" --top-k 5
 .\.venv\Scripts\history-agent.exe search-hybrid "毛泽东和周恩来在长征期间的交集" --top-k 8
 
-# 运行 39 道可回答题的目标文献/年份检索基线（另含 3 道拒答题）
+# 运行 44 道可回答题的目标文献/年份检索基线（另含 3 道拒答题）
 .\.venv\Scripts\history-agent.exe eval retrieval --top-k 10
 
-# 运行 42 题页码、引用、事实覆盖与拒答的回答验收
+# 运行 47 题页码、引用、事实覆盖与拒答的回答验收
 # 默认使用确定性的证据摘录模式，不消耗 DeepSeek Token
 .\.venv\Scripts\history-agent.exe eval answers --top-k 10
 
-# 审计 M8.1 的 100 题综合评估集，并回归 18 个结构化查询
+# 审计 M8.1 的 105 题综合评估集，并回归 18 个结构化查询
 .\.venv\Scripts\history-agent.exe eval comprehensive --verify-structured
 
-# 如需同时评估 DeepSeek 生成结果
+# 运行 v13 真实 DeepSeek 链路，并启用逐回答语义引文评判、错误校准集和延迟统计
 .\.venv\Scripts\history-agent.exe eval answers --top-k 10 --with-llm
 
 # 检查 DeepSeek V4 配置与连通性
@@ -221,6 +221,9 @@ uv sync --extra ocr --extra vector --extra app --group dev
 # 执行静态检查、类型检查和测试
 & .\scripts\check.ps1
 ```
+
+v13 的真实 LLM 评测方法、指标口径和首轮基线见
+[`evals/V13_LLM_EVALUATION.md`](evals/V13_LLM_EVALUATION.md)。
 
 如果扫描发现某份已登记 PDF 的 SHA-256 发生变化，程序会保留旧版本，不会直接接受新内容。确认差异后运行：
 

@@ -6,6 +6,8 @@ import re
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import mean
+from time import perf_counter
 from typing import Any
 
 from history_agent import __version__
@@ -14,6 +16,10 @@ from history_agent.answering.service import PROMPT_VERSION, answer_question
 from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.evaluation.retrieval import RetrievalQuestion, load_question_set
+from history_agent.evaluation.semantic import (
+    evaluate_semantic_cases,
+    judge_citation_semantics,
+)
 from history_agent.extraction.report import load_page_records
 from history_agent.processing.chunks import effective_pages
 
@@ -25,6 +31,8 @@ CATEGORY_MINIMUMS = {
     "event": 5,
     "organization": 3,
     "refusal": 3,
+    "complex": 3,
+    "intersection_negative": 2,
 }
 
 
@@ -70,14 +78,42 @@ def _gold_pages(item: RetrievalQuestion) -> set[tuple[str, int]]:
 
 
 def _fact_coverage(item: RetrievalQuestion, response: AnswerResponse) -> tuple[int, int]:
-    evidence_text = _normalize_text(
-        " ".join(citation.quote for citation in response.citations)
-    )
+    answer_text = _normalize_text(response.answer)
     covered = sum(
-        any(_normalize_text(term) in evidence_text for term in alternatives)
+        any(_normalize_text(term) in answer_text for term in alternatives)
         for alternatives in item.required_fact_terms
     )
     return covered, len(item.required_fact_terms)
+
+
+def _percentile(values: list[int], percentile: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    rank = (len(ordered) - 1) * percentile
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = rank - lower
+    return round(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction)
+
+
+def _latency_summary(values: list[int]) -> dict[str, int]:
+    return {
+        "count": len(values),
+        "mean_ms": round(mean(values)) if values else 0,
+        "p50_ms": _percentile(values, 0.50),
+        "p95_ms": _percentile(values, 0.95),
+        "max_ms": max(values, default=0),
+    }
+
+
+def _sum_usage(results: list[dict[str, Any]], field: str) -> dict[str, int]:
+    usages = [result.get(field) for result in results]
+    keys = {key for usage in usages if isinstance(usage, dict) for key in usage}
+    return {
+        key: sum(int(usage.get(key, 0)) for usage in usages if isinstance(usage, dict))
+        for key in sorted(keys)
+    }
 
 
 def _citation_check(
@@ -88,7 +124,10 @@ def _citation_check(
     return {
         "evidence_id": citation.evidence_id,
         "document_id": citation.document_id,
+        "document": citation.document,
         "pdf_page": citation.pdf_page,
+        "section": citation.section,
+        "quote": citation.quote,
         "quote_matches_page": matched,
     }
 
@@ -125,9 +164,16 @@ def _render_markdown(payload: dict[str, Any]) -> str:
         f"- 关键页命中率：{metrics['gold_page_hit_rate']:.2%}",
         f"- 引用页文本一致率：{metrics['citation_page_accuracy']:.2%}",
         f"- 核心事实引用校验通过率：{metrics['grounding_pass_rate']:.2%}",
+        f"- 引用语义支持率：{metrics['semantic_grounding_pass_rate']:.2%}",
+        f"- 语义评测覆盖率：{metrics['semantic_judge_coverage']:.2%}",
+        f"- 语义错误校准集准确率：{metrics['semantic_calibration_accuracy']:.2%}",
         f"- 必要事实覆盖率：{metrics['required_fact_coverage']:.2%}",
         f"- 拒答正确率：{metrics['refusal_accuracy']:.2%}",
         f"- 综合可回答性准确率：{metrics['answerability_accuracy']:.2%}",
+        f"- 有证据回答的 LLM 生成率：{metrics['llm_generation_rate']:.2%}",
+        f"- 端到端延迟 P50 / P95：{metrics['latency_p50_ms']} / {metrics['latency_p95_ms']} ms",
+        f"- 复杂问题延迟 P50 / P95：{metrics['complex_latency_p50_ms']} / "
+        f"{metrics['complex_latency_p95_ms']} ms",
         "",
         "## 验收闸门",
         "",
@@ -153,6 +199,8 @@ def evaluate_answers(
     top_k: int,
     run_id: str,
     use_llm: bool = False,
+    semantic_judge: bool = False,
+    semantic_case_set_path: Path | None = None,
 ) -> dict[str, Any]:
     question_set = load_question_set(question_set_path)
     page_texts = _load_effective_page_texts(settings)
@@ -171,13 +219,25 @@ def evaluate_answers(
     refusal_total = 0
     answerability_correct = 0
     category_counts: Counter[str] = Counter()
+    semantic_judged = 0
+    semantic_passes = 0
+    latencies: list[int] = []
+    complex_latencies: list[int] = []
+    standard_latencies: list[int] = []
 
     for item in question_set.questions:
         category_counts.update(item.tags)
+        started = perf_counter()
         response = answer_question(
             active_settings,
             QuestionRequest(question=item.question, top_k=top_k),
         )
+        latency_ms = round((perf_counter() - started) * 1000)
+        latencies.append(latency_ms)
+        if "complex" in item.tags:
+            complex_latencies.append(latency_ms)
+        else:
+            standard_latencies.append(latency_ms)
         returned_pages = {
             (citation.document_id, citation.pdf_page) for citation in response.citations
         }
@@ -198,6 +258,19 @@ def evaluate_answers(
                 response.answer, response.citations
             ).valid
             grounding_passes += int(grounding_valid)
+
+        semantic_result: dict[str, Any] | None = None
+        if semantic_judge and response.citations:
+            semantic_result = judge_citation_semantics(
+                active_settings,
+                question=item.question,
+                answer=response.answer,
+                citations=response.citations,
+                semantic_criteria=item.semantic_criteria,
+            )
+            if semantic_result["verdict"] is not None:
+                semantic_judged += 1
+                semantic_passes += int(semantic_result["verdict"] == "pass")
 
         covered, required = _fact_coverage(item, response)
         fact_covered += covered
@@ -221,6 +294,10 @@ def evaluate_answers(
             failure_reasons.append("引用摘录与对应 PDF 页文本不一致")
         if not grounding_valid:
             failure_reasons.append("核心事实引用校验未通过")
+        if semantic_result is not None and semantic_result["verdict"] == "fail":
+            failure_reasons.append("回答中的事实主张未被所标引文语义支持")
+        if semantic_result is not None and semantic_result["verdict"] is None:
+            failure_reasons.append("引用语义评测未完成")
         if covered < required:
             failure_reasons.append(f"必要事实仅覆盖 {covered}/{required}")
         if forbidden_found:
@@ -235,11 +312,19 @@ def evaluate_answers(
                 "evidence_status": response.evidence_status,
                 "generator_mode": response.generator_mode,
                 "llm_status": response.llm_status,
+                "llm_error_code": response.llm_error_code,
+                "llm_usage": response.llm_usage,
+                "query_planner_status": response.query_planner_status,
+                "query_planner_usage": response.query_planner_usage,
                 "gold_page_hit": gold_hit,
                 "required_facts_covered": covered,
                 "required_facts_total": required,
                 "forbidden_terms_found": forbidden_found,
+                "answer": response.answer,
+                "citation_count": len(response.citations),
                 "citations": current_checks,
+                "semantic_judgment": semantic_result,
+                "latency_ms": latency_ms,
             }
         )
 
@@ -248,6 +333,15 @@ def evaluate_answers(
         int(bool(check["quote_matches_page"])) for check in citation_checks
     )
     citation_total = len(citation_checks)
+    evidence_backed = sum(result["citation_count"] > 0 for result in results)
+    llm_generated = sum(result["generator_mode"] == "llm" for result in results)
+    semantic_expected = evidence_backed if semantic_judge else 0
+    semantic_calibration = None
+    if semantic_judge and semantic_case_set_path is not None:
+        semantic_calibration = evaluate_semantic_cases(active_settings, semantic_case_set_path)
+    latency = _latency_summary(latencies)
+    complex_latency = _latency_summary(complex_latencies)
+    standard_latency = _latency_summary(standard_latencies)
     metrics = {
         "gold_page_hit_rate": gold_hits / gold_questions if gold_questions else 0.0,
         "citation_page_accuracy": (
@@ -256,9 +350,25 @@ def evaluate_answers(
         "grounding_pass_rate": (
             grounding_passes / grounding_questions if grounding_questions else 0.0
         ),
+        "semantic_grounding_pass_rate": (
+            semantic_passes / semantic_judged if semantic_judged else 0.0
+        ),
+        "semantic_judge_coverage": (
+            semantic_judged / semantic_expected if semantic_expected else 0.0
+        ),
+        "semantic_calibration_accuracy": (
+            float(semantic_calibration["accuracy"]) if semantic_calibration is not None else 0.0
+        ),
         "required_fact_coverage": fact_covered / fact_total if fact_total else 0.0,
         "refusal_accuracy": refusal_correct / refusal_total if refusal_total else 0.0,
         "answerability_accuracy": answerability_correct / total_questions,
+        "llm_generation_rate": llm_generated / evidence_backed if evidence_backed else 0.0,
+        "latency_mean_ms": latency["mean_ms"],
+        "latency_p50_ms": latency["p50_ms"],
+        "latency_p95_ms": latency["p95_ms"],
+        "latency_max_ms": latency["max_ms"],
+        "complex_latency_p50_ms": complex_latency["p50_ms"],
+        "complex_latency_p95_ms": complex_latency["p95_ms"],
     }
     gates = {
         "至少 30 个固定问题": total_questions >= 30,
@@ -274,6 +384,17 @@ def evaluate_answers(
         "必要事实覆盖率不低于 80%": metrics["required_fact_coverage"] >= 0.8,
         "拒答正确率为 100%": metrics["refusal_accuracy"] == 1.0,
     }
+    if semantic_judge:
+        gates.update(
+            {
+                "所有 LLM 回答均完成引用语义评测": metrics["semantic_judge_coverage"] == 1.0,
+                "LLM 回答引用语义支持率不低于 95%": metrics["semantic_grounding_pass_rate"] >= 0.95,
+                "语义错误校准集准确率为 100%": metrics["semantic_calibration_accuracy"] == 1.0,
+                "所有有证据回答均由 LLM 生成": metrics["llm_generation_rate"] == 1.0,
+                "所有问答均在请求时间预算内完成": latency["max_ms"]
+                <= round(settings.request_timeout_seconds * 1000),
+            }
+        )
     question_bytes = question_set_path.read_bytes()
     payload: dict[str, Any] = {
         "run_id": run_id,
@@ -283,11 +404,32 @@ def evaluate_answers(
         "question_set": str(question_set_path),
         "question_set_sha256": hashlib.sha256(question_bytes).hexdigest(),
         "answer_mode": "llm" if use_llm else "extractive",
+        "semantic_judge_enabled": semantic_judge,
+        "semantic_judge_model": (settings.llm_model if semantic_judge else None),
         "top_k": top_k,
         "questions": total_questions,
         "category_counts": dict(sorted(category_counts.items())),
         "index_versions": _index_versions(settings),
         "metrics": {key: round(value, 6) for key, value in metrics.items()},
+        "latency": {
+            "all": latency,
+            "complex": complex_latency,
+            "standard": standard_latency,
+            "request_timeout_ms": round(settings.request_timeout_seconds * 1000),
+        },
+        "usage": {
+            "answer_generation": _sum_usage(results, "llm_usage"),
+            "query_planner": _sum_usage(results, "query_planner_usage"),
+            "semantic_judge": _sum_usage(
+                [
+                    {"usage": result["semantic_judgment"]["usage"]}
+                    for result in results
+                    if result["semantic_judgment"] is not None
+                ],
+                "usage",
+            ),
+        },
+        "semantic_calibration": semantic_calibration,
         "gates": gates,
         "passed": all(gates.values()),
         "results": results,

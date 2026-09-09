@@ -600,7 +600,8 @@ def research_timeline(
     for item in timeline.events:
         date_text = item.start.value or item.start.original_text or "date unknown"
         sources = ", ".join(
-            f"{evidence.document_title} PDF {evidence.pdf_page_start}" for evidence in item.evidence
+            f"{evidence.document_title} PDF {evidence.pdf_page_start}"
+            for evidence in item.evidence
         )
         typer.echo(
             f"{date_text} [{item.verification_level}/{item.record_kind}] {item.name} | {sources}"
@@ -676,8 +677,7 @@ def research_relationships(
     )
     for item in result.relationships:
         sources = ", ".join(
-            f"{evidence.document_title} PDF {evidence.pdf_page_start}"
-            for evidence in item.evidence
+            f"{evidence.document_title} PDF {evidence.pdf_page_start}" for evidence in item.evidence
         )
         typer.echo(
             f"{item.start.value} [{item.verification_level}] "
@@ -1370,9 +1370,21 @@ def eval_answers(
         "--with-llm",
         help="Evaluate DeepSeek output; default uses deterministic extractive answers.",
     ),
+    semantic_judge: bool = typer.Option(
+        True,
+        "--semantic-judge/--no-semantic-judge",
+        help="When --with-llm is set, judge claim-to-citation entailment.",
+    ),
+    semantic_case_set: Annotated[
+        str,
+        typer.Option(
+            "--semantic-case-set",
+            help="Adversarial semantic-citation calibration set relative to project root.",
+        ),
+    ] = "evals/semantic_citation_cases.json",
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
-    """Evaluate answerability, page citations, grounding, and required facts."""
+    """Evaluate the real answer chain, semantic grounding, quality, and latency."""
 
     settings = get_settings()
     settings.ensure_runtime_dirs()
@@ -1385,6 +1397,10 @@ def eval_answers(
             top_k=top_k,
             run_id=tracker.run_id,
             use_llm=with_llm,
+            semantic_judge=with_llm and semantic_judge,
+            semantic_case_set_path=(
+                settings.project_root / semantic_case_set if with_llm and semantic_judge else None
+            ),
         )
         tracker.finish(payload)
     except Exception as exc:
@@ -1399,7 +1415,14 @@ def eval_answers(
     typer.echo(f"questions: {payload['questions']}; passed: {payload['passed']}")
     typer.echo(f"gold page hit rate: {float(metrics['gold_page_hit_rate']):.2%}")
     typer.echo(f"citation page accuracy: {float(metrics['citation_page_accuracy']):.2%}")
+    if with_llm and semantic_judge:
+        typer.echo(
+            f"semantic grounding pass rate: {float(metrics['semantic_grounding_pass_rate']):.2%}"
+        )
     typer.echo(f"refusal accuracy: {float(metrics['refusal_accuracy']):.2%}")
+    typer.echo(
+        f"latency p50/p95: {int(metrics['latency_p50_ms'])}/{int(metrics['latency_p95_ms'])} ms"
+    )
     typer.echo(str(settings.reports_dir / "mvp_eval_latest.md"))
 
 

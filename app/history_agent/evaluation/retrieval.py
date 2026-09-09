@@ -25,6 +25,7 @@ class RetrievalQuestion(BaseModel):
     expected_evidence: list[GoldEvidence] = Field(default_factory=list)
     required_fact_terms: list[list[str]] = Field(default_factory=list)
     forbidden_answer_terms: list[str] = Field(default_factory=list)
+    semantic_criteria: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
