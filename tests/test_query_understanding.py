@@ -5,7 +5,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from history_agent.answering.models import QueryEntity, QueryPlan, QuestionRequest
+from history_agent.answering.models import (
+    ConversationMessage,
+    QueryEntity,
+    QueryPlan,
+    QuestionRequest,
+)
 from history_agent.answering.query_understanding import (
     QueryPlanningResult,
     plan_question,
@@ -71,9 +76,140 @@ def test_query_planner_normalizes_free_form_question(monkeypatch: Any) -> None:
     body = captured["json"]
     assert body["model"] == "deepseek-v4-flash"
     assert body["response_format"] == {"type": "json_object"}
+    assert body["temperature"] == 0
     assert body["thinking"] == {"type": "disabled"}
     assert "不回答历史问题" in body["messages"][0]["content"]
     assert captured["timeout"] == 20
+
+
+def test_standalone_event_isolated_from_history_and_unsafe_plan_fields(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+    payload = {
+        "intent": "event_overview",
+        "normalized_question": "介绍林彪1930年至1949年的淮海战役经历",
+        "search_queries": ["林彪 淮海战役 1930年至1949年"],
+        "entities": [
+            {"type": "event", "text": "淮海战役", "canonical": "淮海战役"},
+            {"type": "person", "text": "林彪", "canonical": "林彪"},
+        ],
+        "start_year": 1930,
+        "end_year": 1949,
+        "coverage": "balanced_period",
+        "constraints": ["限定1930年至1949年"],
+        "needs_clarification": False,
+        "clarification_question": None,
+    }
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    request = QuestionRequest(
+        question="详细介绍淮海战役",
+        history=[
+            ConversationMessage(role="user", content="林彪在1930-1949年相继担任的职务"),
+            ConversationMessage(role="assistant", content="林彪的有关职务……"),
+        ],
+    )
+    result = plan_question(Settings(_env_file=None, llm_api_key="sk-test"), request)
+
+    user_prompt = captured["json"]["messages"][-1]["content"]
+    assert "conversation_history" not in user_prompt
+    assert "林彪在1930-1949年" not in user_prompt
+    assert result.plan is not None
+    assert result.plan.normalized_question == "详细介绍淮海战役"
+    assert result.plan.start_year is None
+    assert result.plan.end_year is None
+    assert result.plan.coverage == "relevance"
+    assert [entity.canonical for entity in result.plan.entities] == ["淮海战役"]
+    assert result.plan.search_queries == []
+    assert result.plan.constraints == []
+
+
+def test_referential_question_keeps_history_for_resolution(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    payload = _plan_payload()
+    payload.update(
+        {
+            "normalized_question": "淮海战役的历史意义",
+            "search_queries": ["淮海战役 历史意义"],
+            "entities": [
+                {"type": "event", "text": "淮海战役", "canonical": "淮海战役"},
+                {"type": "person", "text": "林彪", "canonical": "林彪"},
+            ],
+            "start_year": 1930,
+            "end_year": 1949,
+            "coverage": "balanced_period",
+        }
+    )
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    request = QuestionRequest(
+        question="这场战役当时的意义呢？",
+        history=[
+            ConversationMessage(role="user", content="林彪在1930-1949年的职务"),
+            ConversationMessage(role="assistant", content="林彪的有关职务……"),
+            ConversationMessage(role="user", content="详细介绍淮海战役"),
+        ],
+    )
+    result = plan_question(Settings(_env_file=None, llm_api_key="sk-test"), request)
+
+    user_prompt = captured["json"]["messages"][-1]["content"]
+    assert "<conversation_history>" in user_prompt
+    assert "详细介绍淮海战役" in user_prompt
+    assert result.plan is not None
+    assert [entity.canonical for entity in result.plan.entities] == ["淮海战役"]
+    assert result.plan.start_year is None
+    assert result.plan.end_year is None
+    assert result.plan.coverage == "relevance"
+
+
+def test_current_question_year_overrides_planner_years(monkeypatch: Any) -> None:
+    payload = _plan_payload()
+    payload.update(
+        {
+            "normalized_question": "介绍淮海战役1930年至1949年的经过",
+            "search_queries": ["淮海战役 1930年至1949年"],
+            "entities": [
+                {"type": "event", "text": "淮海战役", "canonical": "淮海战役"}
+            ],
+            "start_year": 1930,
+            "end_year": 1949,
+        }
+    )
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = plan_question(
+        Settings(_env_file=None, llm_api_key="sk-test"),
+        QuestionRequest(question="介绍淮海战役1948年的经过"),
+    )
+
+    assert result.plan is not None
+    assert (result.plan.start_year, result.plan.end_year) == (1948, 1948)
+    assert result.plan.normalized_question == "介绍淮海战役1948年的经过"
+    assert result.plan.search_queries == []
 
 
 def test_invalid_query_plan_falls_back_without_using_model_text(monkeypatch: Any) -> None:

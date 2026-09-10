@@ -8,7 +8,10 @@ from typing import Any, Literal, cast
 
 import httpx
 
-from history_agent.answering.context import sanitize_history_content
+from history_agent.answering.context import (
+    requires_conversation_context,
+    sanitize_history_content,
+)
 from history_agent.answering.full_text import answer_full_text_question
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.query_understanding import (
@@ -34,7 +37,7 @@ LEADING_ENTITY = re.compile(
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v13"
+PROMPT_VERSION = "grounded-answer-v14"
 LLM_EVIDENCE_BATCH_SIZE = 12
 MAX_COMPLEX_RETRIEVAL_CHUNKS = 36
 
@@ -321,8 +324,9 @@ def _llm_request_payload(
         "仅提到人物、收发报告或参加一般活动的材料不能作为职务变化。"
         "说明证据时间范围有限时不要逐年罗列证据年份，使用概括表述。"
     )
+    history_items = request.history if requires_conversation_context(request.question) else []
     history_text = "\n".join(
-        f"{item.role}: {sanitize_history_content(item.content)}" for item in request.history
+        f"{item.role}: {sanitize_history_content(item.content)}" for item in history_items
     )
     messages: list[dict[str, object]] = [{"role": "system", "content": system}]
     if history_text:
@@ -352,6 +356,8 @@ def _llm_request_payload(
     }
     if settings.llm_thinking:
         request_payload["reasoning_effort"] = settings.llm_reasoning_effort
+    else:
+        request_payload["temperature"] = 0
     return request_payload
 
 

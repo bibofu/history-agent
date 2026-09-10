@@ -13,6 +13,42 @@ from history_agent.answering.models import ConversationMessage
 
 EVIDENCE_MARKER = re.compile(r"\[E[1-9]\d*\]")
 WHITESPACE = re.compile(r"[ \t]+")
+CONTEXTUAL_PRONOUN = re.compile(
+    r"(?:^|[，,。！？?!；;\s])(?:他|她|他们|她们|它|其)"
+    r"(?:的|在|于|后来|当时|又|还|曾|是否|如何|为何|为什么|做|说|提出|经历|观点)"
+)
+ELLIPTICAL_FOLLOW_UP = re.compile(
+    r"(?:呢|继续|接着说|再详细(?:一点|一些)?|展开(?:说说|介绍)?|还有吗|然后呢)"
+    r"[？?。！!\s]*$"
+)
+CONTEXT_REFERENCE_PHRASES = (
+    "刚才",
+    "前面",
+    "上述",
+    "上一轮",
+    "上一个",
+    "前者",
+    "后者",
+    "这位",
+    "那位",
+    "这个人",
+    "那个人",
+    "这场",
+    "那场",
+    "该战役",
+    "这次",
+    "那次",
+    "这件事",
+    "那件事",
+    "两人",
+    "双方",
+    "同一时期",
+    "同期",
+    "那年",
+    "当年",
+    "这一年",
+    "同年",
+)
 MAX_STORED_MESSAGES_PER_SESSION = 200
 
 CONVERSATION_SCHEMA = """
@@ -43,6 +79,17 @@ def sanitize_history_content(content: str) -> str:
 
     content = EVIDENCE_MARKER.sub("[历史引用]", content)
     return "\n".join(WHITESPACE.sub(" ", line).strip() for line in content.splitlines()).strip()
+
+
+def requires_conversation_context(question: str) -> bool:
+    """Return whether the current question explicitly depends on an earlier turn."""
+
+    compact = question.strip()
+    return (
+        any(marker in compact for marker in CONTEXT_REFERENCE_PHRASES)
+        or CONTEXTUAL_PRONOUN.search(compact) is not None
+        or ELLIPTICAL_FOLLOW_UP.search(compact) is not None
+    )
 
 
 def _truncate(text: str, limit: int) -> str:

@@ -6,7 +6,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from history_agent.answering import service as service_module
-from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
+from history_agent.answering.models import (
+    AnswerResponse,
+    Citation,
+    ConversationMessage,
+    QuestionRequest,
+)
 from history_agent.answering.query_understanding import QueryExecution
 from history_agent.answering.service import (
     AnswerContext,
@@ -305,6 +310,41 @@ def test_deepseek_v4_request_and_usage(monkeypatch: Any) -> None:
     assert "temperature" not in body
     assert "不能把人名共现推断成共同参与" in body["messages"][0]["content"]
     assert "检索年份范围只是召回线索" in body["messages"][0]["content"]
+
+
+@pytest.mark.parametrize(
+    ("question", "expects_history"),
+    [("详细介绍淮海战役", False), ("这场战役的意义呢？", True)],
+)
+def test_generation_only_receives_history_for_referential_questions(
+    monkeypatch: Any,
+    question: str,
+    expects_history: bool,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        captured.update(kwargs)
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": "回答。[E1]"}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    _llm_answer(
+        settings=Settings(_env_file=None, llm_api_key="sk-test"),
+        request=QuestionRequest(
+            question=question,
+            history=[ConversationMessage(role="user", content="林彪在1930-1949年的职务")],
+        ),
+        citations=[_citation()],
+    )
+
+    messages = captured["json"]["messages"]
+    has_history = any("<conversation_history>" in item["content"] for item in messages)
+    assert has_history is expects_history
+    assert captured["json"]["temperature"] == 0
 
 
 def test_deepseek_rejects_unknown_evidence_marker(monkeypatch: Any) -> None:
