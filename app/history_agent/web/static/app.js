@@ -51,6 +51,9 @@ function renderAnswer(data) {
   const planner = data.query_planner_status === "used"
     ? ` · ${escapeHtml(data.query_planner_model || "DeepSeek")} 查询理解`
     : data.query_planner_status === "fallback" ? " · 原问题降级检索" : "";
+  const reflection = data.retrieval_reflection_status === "retried"
+    ? ` · ${data.retrieval_rounds || 2} 轮检索`
+    : data.retrieval_reflection_status === "sufficient" ? " · 证据覆盖已评估" : "";
   const evidence = data.citations.map(item => `
     <details>
       <summary>[${escapeHtml(item.evidence_id)}] 《${escapeHtml(item.document)}》PDF 第 ${item.pdf_page}${item.pdf_page_end && item.pdf_page_end !== item.pdf_page ? `—${item.pdf_page_end}` : ""} 页</summary>
@@ -60,7 +63,7 @@ function renderAnswer(data) {
   const limits = data.limitations.length ? `<p class="limits">${data.limitations.map(escapeHtml).join(" · ")}</p>` : "";
   const removedClaims = data.llm_error_code === "removed_uncited_claims";
   const diagnostics = data.uncited_claims?.length ? `<details class="citation-diagnostics"><summary>${removedClaims ? "哪些草稿内容已移除" : "哪些语句缺少引用"}</summary><p class="meta">以下是未通过引用校验的草稿语句，不作为答案依据。</p><ul>${data.uncited_claims.map(claim => `<li>${escapeHtml(claim)}</li>`).join("")}</ul></details>` : "";
-  return `<p class="meta">${mode}${planner}</p><div class="markdown-body">${renderMarkdown(data.answer)}</div><div class="evidence">${evidence}</div>${limits}${diagnostics}`;
+  return `<p class="meta">${mode}${planner}${reflection}</p><div class="markdown-body">${renderMarkdown(data.answer)}</div><div class="evidence">${evidence}</div>${limits}${diagnostics}`;
 }
 
 function setBusy(busy) {

@@ -235,7 +235,7 @@ v13 的真实 LLM 评测方法、指标口径和首轮基线见
 
 项目已接入 DeepSeek V4。自由问法进入混合 RAG 前，默认先由 `deepseek-v4-flash` 以非思考 JSON 模式完成查询理解：规范化简称与别名，识别人物、事件、时间、意图、逐年/逐项/分阶段覆盖要求，并生成最多 8 条检索表达式。查询计划通过本地 Pydantic schema 后，由执行器把原问题和检索改写作为独立子查询运行，再以 RRF 合并；普通问题最多采用 2 条高价值改写，只有必须逐项覆盖的 `per_item` 问题才保留最多 8 条。每次查询的关键词与向量分支并行执行。人物、年份范围和覆盖策略作为类型化条件同时传给两个分支，月份、地点、否定、来源等约束会保留在子查询中。解析超时、返回非法 JSON 或不可用时自动退回原问题。形式严格的“人物 + 整年/年份区间 + 经历或交集”仍直接查询结构化研究库，不额外调用模型。
 
-证据回答默认使用 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。服务会检查引用编号、文献页码和事实引用覆盖。关键词或向量分支单独故障时会以另一分支继续服务并标记结果不完整。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。查询理解器可分别通过 `HISTORY_AGENT_LLM_QUERY_PLANNING`、`HISTORY_AGENT_LLM_QUERY_PLANNER_MODEL` 和 `HISTORY_AGENT_LLM_QUERY_PLANNER_MAX_TOKENS` 配置；`HISTORY_AGENT_REQUEST_TIMEOUT_SECONDS` 控制 planner 与回答共享的总时限，`HISTORY_AGENT_LLM_MAX_CONCURRENCY` 控制共享连接池的并发准入。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
+证据回答默认使用 `deepseek-v4-pro` 非思考模式；这更适合“证据已检索、模型负责忠实组织”的 RAG 问答，也能显著降低等待时间。服务会检查引用编号、文献页码和事实引用覆盖。关键词或向量分支单独故障时会以另一分支继续服务并标记结果不完整。需要复杂综合时，可临时设置 `HISTORY_AGENT_LLM_THINKING=true` 和相应的 reasoning effort。查询理解器可分别通过 `HISTORY_AGENT_LLM_QUERY_PLANNING`、`HISTORY_AGENT_LLM_QUERY_PLANNER_MODEL` 和 `HISTORY_AGENT_LLM_QUERY_PLANNER_MAX_TOKENS` 配置。复杂问题默认启用一轮证据覆盖反思：首轮材料缺少核心方面时，系统以缺失方面构造最多三条定向查询，补充检索后再生成；可通过 `HISTORY_AGENT_LLM_RETRIEVAL_REFLECTION=false` 关闭，轮次和查询数由 `HISTORY_AGENT_LLM_RETRIEVAL_REFLECTION_MAX_ROUNDS`、`HISTORY_AGENT_LLM_RETRIEVAL_REFLECTION_MAX_QUERIES` 限制。`HISTORY_AGENT_REQUEST_TIMEOUT_SECONDS` 控制 planner、反思和回答共享的总时限，`HISTORY_AGENT_LLM_MAX_CONCURRENCY` 控制共享连接池的并发准入。将 DeepSeek API Key 写入已被 Git 忽略的 `.env`：
 
 生成答案如果只因部分事实要点漏写证据编号而未通过校验，系统会先删除漏引段落并重新校验；剩余答案有效时立即返回，不再为了恢复被删文字增加一次模型调用。只有无法安全裁剪时才把漏引要点反馈给 DeepSeek 修复一次。修复请求只允许使用原证据包，不得增加新事实。伪造证据编号、文献名或 PDF 页码等错误不会触发自动修复。
 
@@ -360,9 +360,12 @@ flowchart LR
     C --> D[文献元数据与页码映射]
     D --> E[关键词与向量混合索引]
     D --> F[人物/事件/关系抽取]
-    E --> G[候选片段召回与重排]
+    E --> G[首轮候选片段召回与重排]
     F --> H[时间线与关系查询]
-    G --> I[证据汇总]
+    G --> R{核心方面是否有证据}
+    R -->|不足且仍有预算| Q[针对缺失方面改写查询]
+    Q --> G
+    R -->|充分或达到上限| I[证据汇总]
     H --> I
     I --> J[带出处的回答]
 ```

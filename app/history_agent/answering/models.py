@@ -89,6 +89,13 @@ class AnswerResponse(BaseModel):
     query_planner_error_code: str | None = None
     retrieval_mode: str
     query_intent: str
+    retrieval_reflection_status: Literal[
+        "not_applicable", "disabled", "skipped", "sufficient", "retried", "fallback"
+    ] = "not_applicable"
+    retrieval_rounds: int = Field(default=1, ge=1, le=3)
+    retrieval_missing_aspects: list[str] = Field(default_factory=list, max_length=4)
+    retrieval_reflection_usage: dict[str, int] | None = None
+    retrieval_reflection_error_code: str | None = None
     citations: list[Citation]
     retrieved_evidence_count: int = Field(default=0, ge=0)
     limitations: list[str] = Field(default_factory=list)

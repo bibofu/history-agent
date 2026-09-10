@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     llm_query_planner_model: Literal["deepseek-v4-pro", "deepseek-v4-flash"] = "deepseek-v4-flash"
     llm_query_planner_max_tokens: int = Field(default=700, ge=256, le=2000)
     llm_query_planner_timeout_seconds: float = Field(default=20.0, ge=5.0, le=120.0)
+    llm_retrieval_reflection: bool = True
+    llm_retrieval_reflection_max_rounds: int = Field(default=1, ge=0, le=1)
+    llm_retrieval_reflection_max_queries: int = Field(default=3, ge=1, le=4)
+    llm_retrieval_reflection_max_tokens: int = Field(default=450, ge=256, le=1000)
+    llm_retrieval_reflection_timeout_seconds: float = Field(default=15.0, ge=5.0, le=60.0)
     context_max_messages: int = Field(default=12, ge=4, le=50)
     context_max_chars: int = Field(default=12_000, ge=1000, le=100_000)
 
@@ -173,6 +178,13 @@ class Settings(BaseSettings):
             "llm_query_planner_model": self.llm_query_planner_model,
             "llm_query_planner_max_tokens": self.llm_query_planner_max_tokens,
             "llm_query_planner_timeout_seconds": self.llm_query_planner_timeout_seconds,
+            "llm_retrieval_reflection": self.llm_retrieval_reflection,
+            "llm_retrieval_reflection_max_rounds": self.llm_retrieval_reflection_max_rounds,
+            "llm_retrieval_reflection_max_queries": self.llm_retrieval_reflection_max_queries,
+            "llm_retrieval_reflection_max_tokens": self.llm_retrieval_reflection_max_tokens,
+            "llm_retrieval_reflection_timeout_seconds": (
+                self.llm_retrieval_reflection_timeout_seconds
+            ),
             "context_max_messages": self.context_max_messages,
             "context_max_chars": self.context_max_chars,
         }

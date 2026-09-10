@@ -205,7 +205,15 @@ def test_stream_uses_semantic_plan_before_retrieval(monkeypatch: pytest.MonkeyPa
         model_name="deepseek-v4-flash",
         usage={"total_tokens": 50},
     )
-    context = AnswerContext(_response([]), [], "no_evidence", None)
+    context = AnswerContext(
+        _response([]),
+        [],
+        "no_evidence",
+        None,
+        reflection_status="retried",
+        retrieval_rounds=2,
+        missing_aspects=("会议结果",),
+    )
     received: list[QueryPlanningResult] = []
     monkeypatch.setattr(
         "history_agent.answering.streaming.answer_structured_question", lambda *a: None
@@ -215,7 +223,7 @@ def test_stream_uses_semantic_plan_before_retrieval(monkeypatch: pytest.MonkeyPa
     )
 
     def retrieve(*args: Any) -> AnswerContext:
-        received.append(args[-1])
+        received.append(args[2])
         return context
 
     monkeypatch.setattr("history_agent.answering.streaming._retrieve_context", retrieve)
@@ -225,6 +233,9 @@ def test_stream_uses_semantic_plan_before_retrieval(monkeypatch: pytest.MonkeyPa
     assert received == [planning]
     assert any(
         event.event == "status" and "规划检索" in event.data["message"] for event in events
+    )
+    assert any(
+        event.event == "status" and "补充检索" in event.data["message"] for event in events
     )
     assert events[-1].data["query_planner_status"] == "used"
     assert events[-1].data["query_plan"]["normalized_question"] == plan.normalized_question

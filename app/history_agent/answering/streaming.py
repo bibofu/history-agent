@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 from history_agent.answering.full_text import answer_full_text_question
 from history_agent.answering.models import Citation, QuestionRequest
 from history_agent.answering.query_understanding import plan_question
+from history_agent.answering.retrieval_reflection import should_reflect
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.service import (
     LLM_EVIDENCE_BATCH_SIZE,
@@ -332,8 +333,17 @@ async def stream_answer_question(
     if planning.plan is not None and planning.plan.needs_clarification:
         yield AnswerStreamEvent("done", _clarification_response(request, planning).model_dump())
         return
-    yield AnswerStreamEvent("status", {"message": "正在检索本地史料…"})
-    context = await run_in_threadpool(_retrieve_context, settings, request, planning)
+    retrieval_status = (
+        "正在检索并检查证据覆盖…"
+        if should_reflect(settings, request, planning.plan)
+        else "正在检索本地史料…"
+    )
+    yield AnswerStreamEvent("status", {"message": retrieval_status})
+    context = await run_in_threadpool(
+        _retrieve_context, settings, request, planning, runtime, budget
+    )
+    if context.retrieval_rounds > 1:
+        yield AnswerStreamEvent("status", {"message": "已针对证据缺口完成补充检索…"})
     result = LLMResult(answer=None, error_code="not_configured")
     if not context.citations:
         result = LLMResult(answer=None, error_code="no_evidence")

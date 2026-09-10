@@ -20,6 +20,7 @@ from history_agent.answering.query_understanding import (
     plan_question,
     query_execution,
 )
+from history_agent.answering.retrieval_reflection import assess_retrieval
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.structured import (
     answer_structured_question,
@@ -27,6 +28,7 @@ from history_agent.answering.structured import (
 )
 from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
+from history_agent.errors import RetrievalError
 from history_agent.retrieval.hybrid import search_hybrid_index
 from history_agent.retrieval.models import SearchHit, SearchResponse
 
@@ -663,6 +665,13 @@ class AnswerContext:
     citations: list[Citation]
     evidence_status: Literal["supported", "partial", "no_evidence"]
     unsupported_entity: str | None
+    reflection_status: Literal[
+        "disabled", "skipped", "sufficient", "retried", "fallback"
+    ] = "skipped"
+    retrieval_rounds: int = 1
+    missing_aspects: tuple[str, ...] = ()
+    reflection_usage: dict[str, int] | None = None
+    reflection_error_code: str | None = None
 
 
 def _retrieval_limit(request: QuestionRequest, execution: QueryExecution) -> int:
@@ -676,10 +685,46 @@ def _retrieval_limit(request: QuestionRequest, execution: QueryExecution) -> int
     return min(MAX_COMPLEX_RETRIEVAL_CHUNKS, desired)
 
 
+def _merge_retrieval_rounds(
+    initial: SearchResponse,
+    retry: SearchResponse,
+    *,
+    query: str,
+    limit: int,
+) -> SearchResponse:
+    """Preserve first-pass ranking while appending genuinely new retry evidence."""
+
+    hits: list[SearchHit] = []
+    seen: set[str] = set()
+    for hit in [*initial.hits, *retry.hits]:
+        if hit.chunk_id in seen:
+            continue
+        seen.add(hit.chunk_id)
+        hits.append(hit.model_copy(update={"rank": len(hits) + 1}))
+        if len(hits) >= limit:
+            break
+    return initial.model_copy(
+        update={
+            "query": query,
+            "query_terms": list(dict.fromkeys([*initial.query_terms, *retry.query_terms])),
+            "hits": hits,
+            "retrieval_mode": f"{initial.retrieval_mode}_refined",
+            "degraded_components": sorted(
+                {*initial.degraded_components, *retry.degraded_components}
+            ),
+            "coverage_gaps": list(
+                dict.fromkeys([*initial.coverage_gaps, *retry.coverage_gaps])
+            ),
+        }
+    )
+
+
 def _retrieve_context(
     settings: Settings,
     request: QuestionRequest,
     planning: QueryPlanningResult | None = None,
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
 ) -> AnswerContext:
     execution = query_execution(
         request.question,
@@ -698,6 +743,45 @@ def _retrieve_context(
         additional_queries=list(execution.additional_queries),
     )
     retrieval = retrieval.model_copy(update={"query": request.question})
+    reflection = assess_retrieval(
+        settings,
+        request,
+        planning.plan if planning is not None else None,
+        retrieval,
+        runtime,
+        budget,
+    )
+    reflection_status: Literal[
+        "disabled", "skipped", "sufficient", "retried", "fallback"
+    ] = reflection.status if reflection.status != "retry" else "retried"
+    retrieval_rounds = 1
+    reflection_error_code = reflection.error_code
+    if reflection.status == "retry":
+        try:
+            retry_limit = min(12, max(6, len(reflection.followup_queries) * 4))
+            retry = search_hybrid_index(
+                keyword_index_path=settings.keyword_index_path,
+                vector_index_path=settings.vector_index_path,
+                model_cache_dir=settings.model_cache_dir / "fastembed",
+                aliases_path=settings.person_aliases_path,
+                query=reflection.followup_queries[0],
+                top_k=retry_limit,
+                plan=execution.retrieval_plan,
+                additional_queries=list(reflection.followup_queries[1:]),
+            )
+            retrieval = _merge_retrieval_rounds(
+                retrieval,
+                retry,
+                query=request.question,
+                limit=min(
+                    MAX_COMPLEX_RETRIEVAL_CHUNKS,
+                    max(retrieval_limit, request.top_k + retry_limit),
+                ),
+            )
+            retrieval_rounds = 2
+        except RetrievalError:
+            reflection_status = "fallback"
+            reflection_error_code = "retry_retrieval_failed"
     keyword_backed = [hit for hit in retrieval.hits if hit.keyword_rank is not None]
     unsupported_entity = _unsupported_leading_entity(request.question, retrieval.hits)
     keyword_unavailable = "keyword" in retrieval.degraded_components
@@ -717,7 +801,17 @@ def _retrieve_context(
             )
             else "partial"
         )
-    return AnswerContext(retrieval, citations, evidence_status, unsupported_entity)
+    return AnswerContext(
+        retrieval,
+        citations,
+        evidence_status,
+        unsupported_entity,
+        reflection_status,
+        retrieval_rounds,
+        tuple(reflection.assessment.missing_aspects) if reflection.assessment else (),
+        reflection.usage,
+        reflection_error_code,
+    )
 
 
 def _finish_answer(
@@ -794,6 +888,16 @@ def _finish_answer(
         limitations.append(
             f"查询理解模型未通过（{planning.error_code}），本次已使用用户原问题检索。"
         )
+    if context.reflection_status == "retried":
+        aspects = "、".join(context.missing_aspects)
+        limitations.append(
+            f"首轮证据评估发现仍缺少{aspects or '部分核心方面'}，"
+            "已执行一轮定向补充检索。"
+        )
+    elif context.reflection_status == "fallback":
+        limitations.append(
+            "证据充分性评估或补充检索未通过，已保留首轮检索结果继续回答。"
+        )
     return AnswerResponse(
         question=request.question,
         answer=answer,
@@ -819,6 +923,11 @@ def _finish_answer(
         query_planner_error_code=planning.error_code if planning is not None else None,
         retrieval_mode=retrieval.retrieval_mode,
         query_intent=retrieval.query_intent,
+        retrieval_reflection_status=context.reflection_status,
+        retrieval_rounds=context.retrieval_rounds,
+        retrieval_missing_aspects=list(context.missing_aspects),
+        retrieval_reflection_usage=context.reflection_usage,
+        retrieval_reflection_error_code=context.reflection_error_code,
         citations=citations,
         retrieved_evidence_count=len(retrieved_citations),
         limitations=limitations,
@@ -919,7 +1028,7 @@ def answer_question(
     planning = plan_question(settings, request, runtime, budget)
     if planning.plan is not None and planning.plan.needs_clarification:
         return _clarification_response(request, planning)
-    context = _retrieve_context(settings, request, planning)
+    context = _retrieve_context(settings, request, planning, runtime, budget)
     llm_result = (
         _llm_answer(
             settings=settings,

@@ -262,7 +262,7 @@ def test_api_health_and_question_contract(monkeypatch: Any) -> None:
     assert health.status_code == 200
     assert health.json()["indexes"] == {"keyword": False, "vector": False}
     assert index.headers["cache-control"] == "no-store"
-    assert "app.js?v=context-v1" in index.text
+    assert "app.js?v=agentic-rag-v1" in index.text
     assert javascript.headers["cache-control"] == "no-store"
     assert "/api/questions/stream" in javascript.text
     assert response.status_code == 200

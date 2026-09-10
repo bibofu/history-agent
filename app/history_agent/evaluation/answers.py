@@ -316,6 +316,13 @@ def evaluate_answers(
                 "llm_usage": response.llm_usage,
                 "query_planner_status": response.query_planner_status,
                 "query_planner_usage": response.query_planner_usage,
+                "retrieval_reflection_status": response.retrieval_reflection_status,
+                "retrieval_rounds": response.retrieval_rounds,
+                "retrieval_missing_aspects": response.retrieval_missing_aspects,
+                "retrieval_reflection_usage": response.retrieval_reflection_usage,
+                "retrieval_reflection_error_code": (
+                    response.retrieval_reflection_error_code
+                ),
                 "gold_page_hit": gold_hit,
                 "required_facts_covered": covered,
                 "required_facts_total": required,
@@ -369,6 +376,11 @@ def evaluate_answers(
         "latency_max_ms": latency["max_ms"],
         "complex_latency_p50_ms": complex_latency["p50_ms"],
         "complex_latency_p95_ms": complex_latency["p95_ms"],
+        "retrieval_reflection_retry_rate": (
+            sum(result["retrieval_rounds"] > 1 for result in results) / total_questions
+            if total_questions
+            else 0.0
+        ),
     }
     gates = {
         "至少 30 个固定问题": total_questions >= 30,
@@ -420,6 +432,9 @@ def evaluate_answers(
         "usage": {
             "answer_generation": _sum_usage(results, "llm_usage"),
             "query_planner": _sum_usage(results, "query_planner_usage"),
+            "retrieval_reflection": _sum_usage(
+                results, "retrieval_reflection_usage"
+            ),
             "semantic_judge": _sum_usage(
                 [
                     {"usage": result["semantic_judgment"]["usage"]}

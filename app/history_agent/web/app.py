@@ -121,6 +121,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "llm_thinking": active_settings.llm_thinking,
             "llm_query_planning": active_settings.llm_query_planning,
             "llm_query_planner_model": active_settings.llm_query_planner_model,
+            "llm_retrieval_reflection": active_settings.llm_retrieval_reflection,
+            "llm_retrieval_reflection_max_rounds": (
+                active_settings.llm_retrieval_reflection_max_rounds
+            ),
             "research_range": [
                 active_settings.research_start.year,
                 active_settings.research_end.year,
