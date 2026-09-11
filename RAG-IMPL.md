@@ -63,13 +63,32 @@ flowchart LR
 - 每个领域 `SearchHit` 转换为 `TextNode + NodeWithScore`，完整保留文献、页码、章节、年份、人物和原始排序元数据；
 - 节点去重、合法性检查和数量限制由 `BaseNodePostprocessor` 执行；
 - 首轮检索、充分性判断、定向补充检索和有界停止由 LlamaIndex `Workflow` 及类型化 Event 编排；
-- 最终证据回答提示词由 `ChatPromptTemplate` 构造，项目继续使用自己的 DeepSeek HTTP 运行时，以保留连接池、并发准入、请求总预算、供应商 `thinking` 参数和 SSE 故障降级。
+- 查询规划、证据充分性判断、最终回答和流式回答统一通过自定义 `DeepSeekLlamaIndexLLM`；该适配器实现 LlamaIndex `LLM` 接口，接入共享 `CallbackManager`，同时保留连接池、并发准入、请求总预算、供应商 `thinking` 参数和 SSE 故障降级；
+- 最终证据回答提示词由 `ChatPromptTemplate` 构造。
 
 框架与领域层之间通过适配器隔离。SQLite FTS5、FastEmbed/Qdrant、RRF、年代覆盖、人物
 硬过滤和引用校验没有替换成通用默认实现，因为这些规则是当前评测表现和史料可核验性的
-关键。API 响应和健康检查都公开 `rag_framework=llamaindex`，便于运行时确认真实链路。
+关键。普通混合检索响应公开 `rag_framework=llamaindex`；篇目全文、结构化数据库和直接检索
+等绕过 LlamaIndex 检索工作流的路径公开 `rag_framework=native`。健康检查同时列出两种执行路径
+和当前启用的 LlamaIndex 组件，避免把配置框架与单次请求的真实路径混为一谈。
 
-### 1.2 篇目全文路由
+### 1.2 框架组件取舍
+
+本轮对 `QueryFusionRetriever`、`QdrantVectorStore` 和框架内置 Response Synthesizer 做过边界评估，
+暂不替换现有领域实现：
+
+| 候选组件 | 当前结论 | 原因 |
+| --- | --- | --- |
+| `QueryFusionRetriever` | 暂不接入 | 当前后端已经并发执行 BM25、向量和多查询召回，并按人物硬过滤、年代覆盖与 RRF 统一融合；再套一层通用融合会重复计分并改变已有评测语义。 |
+| `QdrantVectorStore` | 暂不接管存储 | 现有 24,036 个点使用稳定 chunk UUID、完整可回填 `SearchHit` 的 payload、原子目录切换及专用过滤。直接迁移会要求重建索引且没有即时质量收益；扩库时应通过新 collection 双读评测后再切换。 |
+| Response Synthesizer | 暂不替换 | 项目需要分组摘要、事实级引用 ID、无引用段落删除、一次修复和确定性摘录降级；通用合成器不能直接保留这套失败语义。 |
+
+这里的原则不是排斥框架组件，而是只让框架接管具有统一生命周期和可观测性收益的部分。
+当前实际接入的是 `Workflow`、类型化 Event/Context、`QueryBundle`、`BaseRetriever`、证据 Node、
+NodePostprocessor、LLM/CallbackManager、Pydantic 输出解析器和提示词模板。后端存储、领域融合、
+证据约束仍通过明确的扩展接口保留。
+
+### 1.3 篇目全文路由
 
 只有问题同时包含书名号篇名和“全文”“完整原文”等明确标记时才进入全文路由。系统先在
 `data/processed/structure/*.json` 中精确匹配篇名，再只读取对应文档的 chunk 文件，并按

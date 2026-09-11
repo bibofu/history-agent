@@ -21,9 +21,7 @@ class RetrievalPlan(BaseModel):
     query_years: list[int] = Field(default_factory=list)
     query_year_range: list[int] = Field(default_factory=list, max_length=2)
     query_people: list[str] = Field(default_factory=list)
-    coverage: Literal["relevance", "per_year", "per_item", "balanced_period"] = (
-        "relevance"
-    )
+    coverage: Literal["relevance", "per_year", "per_item", "balanced_period"] = "relevance"
 
 
 class KeywordIndexSummary(BaseModel):
@@ -89,4 +87,4 @@ class SearchResponse(BaseModel):
     retrieval_mode: str = "keyword"
     degraded_components: list[str] = Field(default_factory=list)
     coverage_gaps: list[str] = Field(default_factory=list)
-    rag_framework: Literal["llamaindex"] = "llamaindex"
+    rag_framework: Literal["native", "llamaindex"] = "native"

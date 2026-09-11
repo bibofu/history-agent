@@ -11,6 +11,7 @@ from time import monotonic
 from typing import Any
 
 import httpx
+from llama_index.core.callbacks import CallbackManager
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,7 @@ class LLMRuntime:
             transport=httpx.AsyncHTTPTransport(retries=1),
         )
         self._capacity = threading.BoundedSemaphore(max_concurrency)
+        self.callback_manager = CallbackManager()
 
     def post(
         self,
@@ -58,6 +60,27 @@ class LLMRuntime:
             raise httpx.PoolTimeout("LLM concurrency limit reached")
         try:
             return self.sync_client.post(
+                url,
+                timeout=timeout,
+                headers=headers,
+                json=json,
+            )
+        finally:
+            self._capacity.release()
+
+    async def apost(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        headers: dict[str, str],
+        json: dict[str, object],
+    ) -> httpx.Response:
+        acquired = await asyncio.to_thread(self._capacity.acquire, True, timeout)
+        if not acquired:
+            raise httpx.PoolTimeout("LLM concurrency limit reached")
+        try:
+            return await self.async_client.post(
                 url,
                 timeout=timeout,
                 headers=headers,

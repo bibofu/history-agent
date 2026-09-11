@@ -15,7 +15,7 @@ from history_agent import __version__
 from history_agent.answering.context import ConversationStore, build_prompt_context
 from history_agent.answering.models import AnswerResponse, QuestionRequest
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
-from history_agent.answering.service import answer_question
+from history_agent.answering.service import answer_question_async
 from history_agent.answering.streaming import AnswerStreamEvent, stream_answer_question
 from history_agent.config import Settings, get_settings
 from history_agent.db import Database
@@ -115,6 +115,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "status": "ok",
             "version": __version__,
             "rag_framework": "llamaindex",
+            "rag_execution_paths": ["llamaindex", "native"],
+            "llamaindex_components": [
+                "workflow",
+                "query_bundle",
+                "retriever",
+                "node_postprocessor",
+                "llm_adapter",
+                "callback_manager",
+                "output_parser",
+                "prompt_template",
+            ],
             "indexes": indexes,
             "llm_enabled": active_settings.llm_enabled,
             "llm_provider": active_settings.llm_provider,
@@ -139,14 +150,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(snapshot, status_code=status_code)
 
     @api.post("/api/questions", response_model=AnswerResponse)
-    def question(request: QuestionRequest) -> AnswerResponse:
+    async def question(request: QuestionRequest) -> AnswerResponse:
         try:
             contextual_request = with_server_context(request)
             runtime = getattr(api.state, "llm_runtime", None)
             if runtime is None:
-                response = answer_question(active_settings, contextual_request)
+                response = await answer_question_async(active_settings, contextual_request)
             else:
-                response = answer_question(
+                response = await answer_question_async(
                     active_settings,
                     contextual_request,
                     runtime,

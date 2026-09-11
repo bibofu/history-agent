@@ -15,6 +15,11 @@ from history_agent.answering.context import (
     sanitize_history_content,
 )
 from history_agent.answering.full_text import answer_full_text_question
+from history_agent.answering.llamaindex_llm import (
+    DeepSeekLlamaIndexLLM,
+    chat_messages,
+    response_usage,
+)
 from history_agent.answering.llamaindex_workflow import run_retrieval_workflow
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.query_understanding import (
@@ -70,9 +75,7 @@ def _quote_for_hit(
     if len(text) <= limit:
         return text
     person_positions = [
-        match.start()
-        for person in people
-        for match in re.finditer(re.escape(person), text)
+        match.start() for person in people for match in re.finditer(re.escape(person), text)
     ]
     positions = person_positions or [text.find(term) for term in query_terms if len(term) >= 2]
     positions = [position for position in positions if position >= 0]
@@ -178,10 +181,6 @@ def _extractive_answer(intent: str, citations: list[Citation]) -> str:
     return lead + "\n\n" + "\n".join(bullets)
 
 
-def _chat_completions_url(base_url: str) -> str:
-    return base_url.rstrip("/") + "/chat/completions"
-
-
 @dataclass(frozen=True)
 class LLMResult:
     answer: str | None
@@ -256,26 +255,16 @@ def _request_deepseek_completion(
             if budget is not None
             else settings.llm_timeout_seconds
         )
-        url = _chat_completions_url(settings.llm_base_url)
-        headers = {
-            "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-            "Content-Type": "application/json",
-        }
-        result = (
-            runtime.post(url, headers=headers, json=request_payload, timeout=timeout)
-            if runtime is not None
-            else httpx.post(url, headers=headers, json=request_payload, timeout=timeout)
+        llm = DeepSeekLlamaIndexLLM(
+            settings=settings,
+            runtime=runtime,
+            budget=budget,
+            timeout_seconds=timeout,
         )
-        result.raise_for_status()
-        payload = result.json()
-        answer = str(payload["choices"][0]["message"]["content"]).strip()
-        finish_reason = payload["choices"][0].get("finish_reason")
-        raw_usage = payload.get("usage", {})
-        usage = {
-            key: int(raw_usage[key])
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-            if key in raw_usage
-        }
+        result = llm.chat(chat_messages(request_payload), request_payload=request_payload)
+        answer = (result.message.content or "").strip()
+        finish_reason = result.additional_kwargs.get("finish_reason")
+        usage = response_usage(result) or {}
     except httpx.HTTPError as exc:
         return LLMResult(answer=None, error_code=_deepseek_error_code(exc))
     except (KeyError, IndexError, TypeError, ValueError):
@@ -354,9 +343,7 @@ def _llm_request_payload(
                 ),
             }
         )
-    messages.append(
-        {"role": formatted[-1].role.value, "content": formatted[-1].content or ""}
-    )
+    messages.append({"role": formatted[-1].role.value, "content": formatted[-1].content or ""})
     request_payload: dict[str, object] = {
         "model": settings.llm_model,
         "messages": messages,
@@ -526,17 +513,14 @@ def _prepare_hierarchical_answer(
         )
         if partial.answer:
             return partial.answer, partial
-        fallback = "\n".join(
-            f"[{citation.evidence_id}] {citation.quote}" for citation in batch
-        )
+        fallback = "\n".join(f"[{citation.evidence_id}] {citation.quote}" for citation in batch)
         return fallback, partial
 
     workers = min(len(batches), 3)
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="evidence-map") as executor:
         mapped = list(executor.map(summarize, enumerate(batches)))
     summaries = "\n\n".join(
-        f"第 {index + 1} 组已核查摘要：\n{summary}"
-        for index, (summary, _) in enumerate(mapped)
+        f"第 {index + 1} 组已核查摘要：\n{summary}" for index, (summary, _) in enumerate(mapped)
     )
     request_payload = _llm_request_payload(
         settings=settings,
@@ -629,24 +613,18 @@ def check_deepseek_connection(settings: Settings) -> dict[str, object]:
     assert settings.llm_api_key is not None
     started = perf_counter()
     try:
-        result = httpx.post(
-            _chat_completions_url(settings.llm_base_url),
-            headers={
-                "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": settings.llm_model,
-                "messages": [{"role": "user", "content": "只回答：OK"}],
-                "stream": False,
-                "max_tokens": 16,
-                "thinking": {"type": "disabled"},
-            },
-            timeout=settings.llm_timeout_seconds,
+        request_payload: dict[str, object] = {
+            "model": settings.llm_model,
+            "messages": [{"role": "user", "content": "只回答：OK"}],
+            "stream": False,
+            "max_tokens": 16,
+            "thinking": {"type": "disabled"},
+        }
+        result = DeepSeekLlamaIndexLLM(settings=settings).chat(
+            chat_messages(request_payload),
+            request_payload=request_payload,
         )
-        result.raise_for_status()
-        payload = result.json()
-        content = str(payload["choices"][0]["message"]["content"]).strip()
+        content = (result.message.content or "").strip()
     except httpx.HTTPError as exc:
         return {
             **base,
@@ -673,9 +651,9 @@ class AnswerContext:
     citations: list[Citation]
     evidence_status: Literal["supported", "partial", "no_evidence"]
     unsupported_entity: str | None
-    reflection_status: Literal[
-        "disabled", "skipped", "sufficient", "retried", "fallback"
-    ] = "skipped"
+    reflection_status: Literal["disabled", "skipped", "sufficient", "retried", "fallback"] = (
+        "skipped"
+    )
     retrieval_rounds: int = 1
     missing_aspects: tuple[str, ...] = ()
     reflection_usage: dict[str, int] | None = None
@@ -720,14 +698,12 @@ def _merge_retrieval_rounds(
             "degraded_components": sorted(
                 {*initial.degraded_components, *retry.degraded_components}
             ),
-            "coverage_gaps": list(
-                dict.fromkeys([*initial.coverage_gaps, *retry.coverage_gaps])
-            ),
+            "coverage_gaps": list(dict.fromkeys([*initial.coverage_gaps, *retry.coverage_gaps])),
         }
     )
 
 
-def _retrieve_context(
+async def _aretrieve_context(
     settings: Settings,
     request: QuestionRequest,
     planning: QueryPlanningResult | None = None,
@@ -740,20 +716,21 @@ def _retrieve_context(
         settings.person_aliases_path,
     )
     retrieval_limit = _retrieval_limit(request, execution)
-    workflow_result = asyncio.run(
-        run_retrieval_workflow(
-            settings=settings,
-            request=request,
-            plan=planning.plan if planning is not None else None,
-            execution=execution,
-            retrieval_limit=retrieval_limit,
-            search_backend=search_hybrid_index,
-            assess_retrieval=assess_retrieval,
-            merge_retrieval=_merge_retrieval_rounds,
-            runtime=runtime,
-            budget=budget,
-            max_chunks=MAX_COMPLEX_RETRIEVAL_CHUNKS,
-        )
+    workflow_result = await run_retrieval_workflow(
+        settings=settings,
+        request=request,
+        plan=planning.plan if planning is not None else None,
+        primary_query=execution.primary_query,
+        additional_queries=list(execution.additional_queries),
+        retrieval_plan=execution.retrieval_plan,
+        retrieval_limit=retrieval_limit,
+        search_backend=search_hybrid_index,
+        assess_retrieval=assess_retrieval,
+        merge_retrieval=_merge_retrieval_rounds,
+        runtime=runtime,
+        budget=budget,
+        max_chunks=MAX_COMPLEX_RETRIEVAL_CHUNKS,
+        callback_manager=getattr(runtime, "callback_manager", None),
     )
     retrieval = workflow_result.retrieval
     keyword_backed = [hit for hit in retrieval.hits if hit.keyword_rank is not None]
@@ -786,6 +763,18 @@ def _retrieve_context(
         workflow_result.reflection_usage,
         workflow_result.reflection_error_code,
     )
+
+
+def _retrieve_context(
+    settings: Settings,
+    request: QuestionRequest,
+    planning: QueryPlanningResult | None = None,
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
+) -> AnswerContext:
+    """Synchronous compatibility wrapper for CLI and evaluation callers."""
+
+    return asyncio.run(_aretrieve_context(settings, request, planning, runtime, budget))
 
 
 def _finish_answer(
@@ -827,9 +816,7 @@ def _finish_answer(
             "生成草稿中的未引用段落已移除，其余内容已通过引用核查；可展开“哪些草稿内容已移除”查看。"
         )
     elif llm_result.error_code == "hierarchical_partial_map_fallback":
-        limitations.append(
-            "部分证据分组未能生成局部摘要，最终综合时已改用该组原文摘录。"
-        )
+        limitations.append("部分证据分组未能生成局部摘要，最终综合时已改用该组原文摘录。")
     if retrieved_citations:
         if retrieval.degraded_components:
             limitations.append(
@@ -865,13 +852,10 @@ def _finish_answer(
     if context.reflection_status == "retried":
         aspects = "、".join(context.missing_aspects)
         limitations.append(
-            f"首轮证据评估发现仍缺少{aspects or '部分核心方面'}，"
-            "已执行一轮定向补充检索。"
+            f"首轮证据评估发现仍缺少{aspects or '部分核心方面'}，已执行一轮定向补充检索。"
         )
     elif context.reflection_status == "fallback":
-        limitations.append(
-            "证据充分性评估或补充检索未通过，已保留首轮检索结果继续回答。"
-        )
+        limitations.append("证据充分性评估或补充检索未通过，已保留首轮检索结果继续回答。")
     return AnswerResponse(
         question=request.question,
         answer=answer,
@@ -905,6 +889,7 @@ def _finish_answer(
         citations=citations,
         retrieved_evidence_count=len(retrieved_citations),
         limitations=limitations,
+        rag_framework=retrieval.rag_framework,
     )
 
 
@@ -977,20 +962,21 @@ def _clarification_response(
     )
 
 
-def answer_question(
+async def answer_question_async(
     settings: Settings,
     request: QuestionRequest,
     runtime: LLMRuntime | None = None,
     budget: RequestBudget | None = None,
 ) -> AnswerResponse:
     budget = budget or RequestBudget.start(settings.request_timeout_seconds)
-    full_text = answer_full_text_question(settings, request)
+    full_text = await asyncio.to_thread(answer_full_text_question, settings, request)
     if full_text is not None:
         return full_text
-    structured = answer_structured_question(settings, request)
+    structured = await asyncio.to_thread(answer_structured_question, settings, request)
     if structured is not None:
         if requires_structured_generation(structured):
-            llm_result = _llm_answer(
+            llm_result = await asyncio.to_thread(
+                _llm_answer,
                 settings=settings,
                 request=request,
                 citations=structured.citations,
@@ -999,12 +985,13 @@ def answer_question(
             )
             return _finish_structured_answer(settings, structured, llm_result)
         return structured
-    planning = plan_question(settings, request, runtime, budget)
+    planning = await asyncio.to_thread(plan_question, settings, request, runtime, budget)
     if planning.plan is not None and planning.plan.needs_clarification:
         return _clarification_response(request, planning)
-    context = _retrieve_context(settings, request, planning, runtime, budget)
+    context = await _aretrieve_context(settings, request, planning, runtime, budget)
     llm_result = (
-        _llm_answer(
+        await asyncio.to_thread(
+            _llm_answer,
             settings=settings,
             request=request,
             citations=context.citations,
@@ -1015,3 +1002,14 @@ def answer_question(
         else LLMResult(answer=None, error_code="no_evidence")
     )
     return _finish_answer(settings, request, context, llm_result, planning)
+
+
+def answer_question(
+    settings: Settings,
+    request: QuestionRequest,
+    runtime: LLMRuntime | None = None,
+    budget: RequestBudget | None = None,
+) -> AnswerResponse:
+    """Synchronous compatibility entry point for CLI and offline evaluation."""
+
+    return asyncio.run(answer_question_async(settings, request, runtime, budget))

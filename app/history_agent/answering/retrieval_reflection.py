@@ -10,6 +10,11 @@ import httpx
 from llama_index.core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field, ValidationError
 
+from history_agent.answering.llamaindex_llm import (
+    DeepSeekLlamaIndexLLM,
+    chat_messages,
+    response_usage,
+)
 from history_agent.answering.models import QueryPlan, QuestionRequest
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.config import Settings
@@ -139,9 +144,10 @@ def _followup_queries(
     plan: QueryPlan,
     assessment: EvidenceAssessment,
 ) -> tuple[str, ...]:
-    subject = " ".join(
-        dict.fromkeys(entity.canonical for entity in plan.entities)
-    ).strip() or plan.normalized_question
+    subject = (
+        " ".join(dict.fromkeys(entity.canonical for entity in plan.entities)).strip()
+        or plan.normalized_question
+    )
     constraints = " ".join(plan.constraints).strip()
     allowed_years = {match["year"] for match in YEAR.finditer(request.question)}
     queries: list[str] = []
@@ -188,49 +194,28 @@ def assess_retrieval(
             if budget is not None
             else settings.llm_retrieval_reflection_timeout_seconds
         )
-        url = settings.llm_base_url.rstrip("/") + "/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-            "Content-Type": "application/json",
-        }
         request_payload = _request_payload(settings, request, plan, retrieval)
-        response = (
-            runtime.post(
-                url,
-                headers=headers,
-                json=request_payload,
-                timeout=timeout,
-            )
-            if runtime is not None
-            else httpx.post(
-                url,
-                headers=headers,
-                json=request_payload,
-                timeout=timeout,
-            )
+        response = DeepSeekLlamaIndexLLM(
+            settings=settings,
+            runtime=runtime,
+            model=settings.llm_model,
+            timeout_seconds=timeout,
+        ).chat(
+            chat_messages(request_payload),
+            request_payload=request_payload,
         )
-        response.raise_for_status()
-        payload = response.json()
-        choice = payload["choices"][0]
-        if choice.get("finish_reason") == "length":
+        if response.additional_kwargs.get("finish_reason") == "length":
             return ReflectionResult("fallback", error_code="max_tokens_exhausted")
-        assessment = EVIDENCE_ASSESSMENT_PARSER.parse(
-            str(choice["message"]["content"]).strip()
-        )
-        raw_usage = payload.get("usage", {})
-        usage = {
-            key: int(raw_usage[key])
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-            if key in raw_usage
-        }
+        assessment = EVIDENCE_ASSESSMENT_PARSER.parse((response.message.content or "").strip())
+        usage = response_usage(response)
         if assessment.sufficient:
-            return ReflectionResult("sufficient", assessment, usage=usage or None)
+            return ReflectionResult("sufficient", assessment, usage=usage)
         queries = _followup_queries(settings, request, plan, assessment)
         if not queries:
             return ReflectionResult(
-                "fallback", assessment, usage=usage or None, error_code="no_safe_followup_query"
+                "fallback", assessment, usage=usage, error_code="no_safe_followup_query"
             )
-        return ReflectionResult("retry", assessment, queries, usage or None)
+        return ReflectionResult("retry", assessment, queries, usage)
     except httpx.HTTPError as exc:
         return ReflectionResult("fallback", error_code=_error_code(exc))
     except (KeyError, IndexError, TypeError, ValueError, ValidationError):

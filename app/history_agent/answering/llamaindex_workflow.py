@@ -1,32 +1,40 @@
-"""Agentic retrieval loop implemented as a LlamaIndex Workflow."""
+"""Serializable, asynchronous Agentic RAG retrieval workflow."""
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
-from llama_index.core.workflow import Event, StartEvent, StopEvent, Workflow, step
+from llama_index.core.callbacks import CallbackManager
+from llama_index.core.workflow import Context, Event, StartEvent, StopEvent, Workflow, step
+from pydantic import BaseModel, ConfigDict
 
 from history_agent.answering.models import QueryPlan, QuestionRequest
-from history_agent.answering.query_understanding import QueryExecution
-from history_agent.answering.retrieval_reflection import ReflectionResult
+from history_agent.answering.retrieval_reflection import (
+    EvidenceAssessment,
+    ReflectionResult,
+)
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.config import Settings
 from history_agent.errors import RetrievalError
-from history_agent.retrieval.llamaindex import SearchBackend, retrieve_with_llamaindex
-from history_agent.retrieval.models import SearchResponse
+from history_agent.retrieval.llamaindex import SearchBackend, aretrieve_with_llamaindex
+from history_agent.retrieval.models import RetrievalPlan, SearchResponse
 
 AssessRetrieval = Callable[..., ReflectionResult]
 MergeRetrieval = Callable[..., SearchResponse]
+ReflectionStatus = Literal["disabled", "skipped", "sufficient", "retried", "fallback"]
+STATE_KEY = "retrieval_state"
+INITIAL_RETRIEVAL_KEY = "initial_retrieval"
 
 
-@dataclass(frozen=True)
-class WorkflowRetrievalResult:
+class WorkflowRetrievalResult(BaseModel):
+    """Serializable result returned by the LlamaIndex Workflow."""
+
+    model_config = ConfigDict(frozen=True)
+
     retrieval: SearchResponse
-    reflection_status: Literal[
-        "disabled", "skipped", "sufficient", "retried", "fallback"
-    ]
+    reflection_status: ReflectionStatus
     retrieval_rounds: int
     missing_aspects: tuple[str, ...]
     reflection_usage: dict[str, int] | None
@@ -34,94 +42,106 @@ class WorkflowRetrievalResult:
 
 
 class RetrievalStartEvent(StartEvent):
-    settings: Any
-    request: Any
-    plan: Any
-    execution: Any
+    request: QuestionRequest
+    plan: QueryPlan | None = None
+    primary_query: str
+    additional_queries: list[str]
+    retrieval_plan: RetrievalPlan | None = None
     retrieval_limit: int
-    search_backend: Any
-    assess_retrieval: Any
-    merge_retrieval: Any
-    runtime: Any = None
-    budget: Any = None
-    max_chunks: int
 
 
 class InitialEvidenceEvent(Event):
-    settings: Any
-    request: Any
-    plan: Any
-    execution: Any
-    retrieval_limit: int
-    retrieval: Any
-    search_backend: Any
-    assess_retrieval: Any
-    merge_retrieval: Any
-    runtime: Any = None
-    budget: Any = None
-    max_chunks: int
+    retrieval: SearchResponse
 
 
 class RetryEvidenceEvent(Event):
-    initial: Any
-    reflection: Any
-    settings: Any
-    request: Any
-    execution: Any
+    followup_queries: list[str]
+    assessment: EvidenceAssessment | None = None
+    usage: dict[str, int] | None = None
+    error_code: str | None = None
+
+
+class RetrievalWorkflowState(BaseModel):
+    """Serializable per-run state persisted through LlamaIndex Context."""
+
+    request: QuestionRequest
+    plan: QueryPlan | None = None
+    retrieval_plan: RetrievalPlan | None = None
     retrieval_limit: int
-    search_backend: Any
-    merge_retrieval: Any
-    max_chunks: int
 
 
-def _search_kwargs(settings: Settings, execution: QueryExecution) -> dict[str, Any]:
+def _search_kwargs(settings: Settings, retrieval_plan: RetrievalPlan | None) -> dict[str, object]:
     return {
         "keyword_index_path": settings.keyword_index_path,
         "vector_index_path": settings.vector_index_path,
         "model_cache_dir": settings.model_cache_dir / "fastembed",
         "aliases_path": settings.person_aliases_path,
-        "plan": execution.retrieval_plan,
+        "plan": retrieval_plan,
     }
 
 
 class HistoryRetrievalWorkflow(Workflow):
-    """Bounded retrieve-assess-retrieve workflow with typed LlamaIndex events."""
+    """Bounded retrieve-assess-retrieve workflow with serializable events."""
+
+    def __init__(
+        self,
+        *,
+        settings: Settings,
+        search_backend: SearchBackend,
+        assess_retrieval: AssessRetrieval,
+        merge_retrieval: MergeRetrieval,
+        runtime: LLMRuntime | None,
+        budget: RequestBudget | None,
+        max_chunks: int,
+        callback_manager: CallbackManager | None = None,
+    ) -> None:
+        super().__init__(
+            timeout=settings.request_timeout_seconds,
+            workflow_name="history-agent-retrieval",
+        )
+        self._settings = settings
+        self._search_backend = search_backend
+        self._assess_retrieval = assess_retrieval
+        self._merge_retrieval = merge_retrieval
+        self._llm_runtime = runtime
+        self._budget = budget
+        self._max_chunks = max_chunks
+        self._callback_manager = callback_manager or CallbackManager()
 
     @step
-    async def retrieve(self, ev: RetrievalStartEvent) -> InitialEvidenceEvent:
-        settings: Settings = ev.settings
-        execution: QueryExecution = ev.execution
-        retrieval = retrieve_with_llamaindex(
-            search_backend=ev.search_backend,
-            query=execution.primary_query,
-            additional_queries=list(execution.additional_queries),
-            top_k=ev.retrieval_limit,
-            search_kwargs=_search_kwargs(settings, execution),
-        ).model_copy(update={"query": ev.request.question})
-        return InitialEvidenceEvent(
-            settings=settings,
+    async def retrieve(self, ctx: Context, ev: RetrievalStartEvent) -> InitialEvidenceEvent:
+        state = RetrievalWorkflowState(
             request=ev.request,
             plan=ev.plan,
-            execution=execution,
+            retrieval_plan=ev.retrieval_plan,
             retrieval_limit=ev.retrieval_limit,
-            retrieval=retrieval,
-            search_backend=ev.search_backend,
-            assess_retrieval=ev.assess_retrieval,
-            merge_retrieval=ev.merge_retrieval,
-            runtime=ev.runtime,
-            budget=ev.budget,
-            max_chunks=ev.max_chunks,
         )
+        await ctx.store.set(STATE_KEY, state)
+        retrieval = await aretrieve_with_llamaindex(
+            search_backend=self._search_backend,
+            query=ev.primary_query,
+            additional_queries=ev.additional_queries,
+            top_k=ev.retrieval_limit,
+            search_kwargs=_search_kwargs(self._settings, ev.retrieval_plan),
+            callback_manager=self._callback_manager,
+        )
+        retrieval = retrieval.model_copy(update={"query": ev.request.question})
+        await ctx.store.set(INITIAL_RETRIEVAL_KEY, retrieval)
+        return InitialEvidenceEvent(retrieval=retrieval)
 
     @step
-    async def assess(self, ev: InitialEvidenceEvent) -> RetryEvidenceEvent | StopEvent:
-        assessment: ReflectionResult = ev.assess_retrieval(
-            ev.settings,
-            ev.request,
-            ev.plan,
+    async def assess(
+        self, ctx: Context, ev: InitialEvidenceEvent
+    ) -> RetryEvidenceEvent | StopEvent:
+        state = RetrievalWorkflowState.model_validate(await ctx.store.get(STATE_KEY))
+        assessment = await asyncio.to_thread(
+            self._assess_retrieval,
+            self._settings,
+            state.request,
+            state.plan,
             ev.retrieval,
-            ev.runtime,
-            ev.budget,
+            self._llm_runtime,
+            self._budget,
         )
         if assessment.status != "retry":
             return StopEvent(
@@ -139,44 +159,40 @@ class HistoryRetrievalWorkflow(Workflow):
                 )
             )
         return RetryEvidenceEvent(
-            initial=ev.retrieval,
-            reflection=assessment,
-            settings=ev.settings,
-            request=ev.request,
-            execution=ev.execution,
-            retrieval_limit=ev.retrieval_limit,
-            search_backend=ev.search_backend,
-            merge_retrieval=ev.merge_retrieval,
-            max_chunks=ev.max_chunks,
+            followup_queries=list(assessment.followup_queries),
+            assessment=assessment.assessment,
+            usage=assessment.usage,
+            error_code=assessment.error_code,
         )
 
     @step
-    async def retry(self, ev: RetryEvidenceEvent) -> StopEvent:
-        reflection: ReflectionResult = ev.reflection
-        queries = list(reflection.followup_queries)
+    async def retry(self, ctx: Context, ev: RetryEvidenceEvent) -> StopEvent:
+        state = RetrievalWorkflowState.model_validate(await ctx.store.get(STATE_KEY))
+        initial = SearchResponse.model_validate(await ctx.store.get(INITIAL_RETRIEVAL_KEY))
         try:
-            retry_limit = min(12, max(6, len(queries) * 4))
-            retry = retrieve_with_llamaindex(
-                search_backend=ev.search_backend,
-                query=queries[0],
-                additional_queries=queries[1:],
+            retry_limit = min(12, max(6, len(ev.followup_queries) * 4))
+            retry = await aretrieve_with_llamaindex(
+                search_backend=self._search_backend,
+                query=ev.followup_queries[0],
+                additional_queries=ev.followup_queries[1:],
                 top_k=retry_limit,
-                search_kwargs=_search_kwargs(ev.settings, ev.execution),
+                search_kwargs=_search_kwargs(self._settings, state.retrieval_plan),
+                callback_manager=self._callback_manager,
             )
-            retrieval = ev.merge_retrieval(
-                ev.initial,
+            retrieval = self._merge_retrieval(
+                initial,
                 retry,
-                query=ev.request.question,
+                query=state.request.question,
                 limit=min(
-                    ev.max_chunks,
-                    max(ev.retrieval_limit, ev.request.top_k + retry_limit),
+                    self._max_chunks,
+                    max(state.retrieval_limit, state.request.top_k + retry_limit),
                 ),
             ).model_copy(update={"rag_framework": "llamaindex"})
             status: Literal["retried", "fallback"] = "retried"
             rounds = 2
-            error_code = reflection.error_code
+            error_code = ev.error_code
         except RetrievalError:
-            retrieval = ev.initial
+            retrieval = initial
             status = "fallback"
             rounds = 1
             error_code = "retry_retrieval_failed"
@@ -185,12 +201,8 @@ class HistoryRetrievalWorkflow(Workflow):
                 retrieval=retrieval,
                 reflection_status=status,
                 retrieval_rounds=rounds,
-                missing_aspects=(
-                    tuple(reflection.assessment.missing_aspects)
-                    if reflection.assessment
-                    else ()
-                ),
-                reflection_usage=reflection.usage,
+                missing_aspects=(tuple(ev.assessment.missing_aspects) if ev.assessment else ()),
+                reflection_usage=ev.usage,
                 reflection_error_code=error_code,
             )
         )
@@ -201,7 +213,9 @@ async def run_retrieval_workflow(
     settings: Settings,
     request: QuestionRequest,
     plan: QueryPlan | None,
-    execution: QueryExecution,
+    primary_query: str,
+    additional_queries: list[str],
+    retrieval_plan: RetrievalPlan | None,
     retrieval_limit: int,
     search_backend: SearchBackend,
     assess_retrieval: AssessRetrieval,
@@ -209,22 +223,29 @@ async def run_retrieval_workflow(
     runtime: LLMRuntime | None,
     budget: RequestBudget | None,
     max_chunks: int,
+    callback_manager: CallbackManager | None = None,
 ) -> WorkflowRetrievalResult:
-    workflow = HistoryRetrievalWorkflow(timeout=settings.request_timeout_seconds)
+    workflow = HistoryRetrievalWorkflow(
+        settings=settings,
+        search_backend=search_backend,
+        assess_retrieval=assess_retrieval,
+        merge_retrieval=merge_retrieval,
+        runtime=runtime,
+        budget=budget,
+        max_chunks=max_chunks,
+        callback_manager=callback_manager,
+    )
+    ctx = Context(workflow)
     result = await workflow.run(
+        ctx=ctx,
         start_event=RetrievalStartEvent(
-            settings=settings,
             request=request,
             plan=plan,
-            execution=execution,
+            primary_query=primary_query,
+            additional_queries=additional_queries,
+            retrieval_plan=retrieval_plan,
             retrieval_limit=retrieval_limit,
-            search_backend=search_backend,
-            assess_retrieval=assess_retrieval,
-            merge_retrieval=merge_retrieval,
-            runtime=runtime,
-            budget=budget,
-            max_chunks=max_chunks,
-        )
+        ),
     )
     if not isinstance(result, WorkflowRetrievalResult):
         raise TypeError("LlamaIndex retrieval workflow returned an invalid result")

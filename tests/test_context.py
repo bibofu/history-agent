@@ -80,12 +80,12 @@ def test_web_session_uses_server_history_and_ignores_client_history(
     settings = Settings(_env_file=None, project_root=work_path, data_dir=work_path / "data")
     received: list[QuestionRequest] = []
 
-    def fake_answer(active_settings: Settings, request: QuestionRequest) -> AnswerResponse:
+    async def fake_answer(active_settings: Settings, request: QuestionRequest) -> AnswerResponse:
         assert active_settings is settings
         received.append(request)
         return _answer(request.question)
 
-    monkeypatch.setattr(web_module, "answer_question", fake_answer)
+    monkeypatch.setattr(web_module, "answer_question_async", fake_answer)
     client = TestClient(web_module.create_app(settings))
     session_id = "session-12345678"
 
@@ -161,13 +161,13 @@ def test_context_storage_failure_does_not_break_answering(
     def unavailable(*args: object, **kwargs: object) -> Any:
         raise OSError("disk unavailable")
 
-    def fake_answer(active_settings: Settings, request: QuestionRequest) -> AnswerResponse:
+    async def fake_answer(active_settings: Settings, request: QuestionRequest) -> AnswerResponse:
         assert request.history == []
         return _answer(request.question)
 
     monkeypatch.setattr(ConversationStore, "messages", unavailable)
     monkeypatch.setattr(ConversationStore, "append_exchange", unavailable)
-    monkeypatch.setattr(web_module, "answer_question", fake_answer)
+    monkeypatch.setattr(web_module, "answer_question_async", fake_answer)
     client = TestClient(web_module.create_app(settings))
 
     response = client.post(

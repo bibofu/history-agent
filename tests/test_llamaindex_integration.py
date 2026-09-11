@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from history_agent.answering.llamaindex_workflow import run_retrieval_workflow
+from history_agent.answering.llamaindex_workflow import (
+    RetrievalStartEvent,
+    run_retrieval_workflow,
+)
 from history_agent.answering.models import QueryPlan, QuestionRequest
-from history_agent.answering.query_understanding import QueryExecution
 from history_agent.answering.retrieval_reflection import (
     EvidenceAssessment,
     ReflectionResult,
@@ -18,6 +20,7 @@ from history_agent.retrieval.llamaindex import (
 )
 from history_agent.retrieval.models import RetrievalPlan, SearchHit, SearchResponse
 from llama_index.core import QueryBundle
+from llama_index.core.callbacks import CallbackManager
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore
 
@@ -71,11 +74,10 @@ def test_custom_backend_is_exposed_as_llamaindex_retriever() -> None:
     retriever = HistoryHybridRetriever(
         search_backend=search,
         search_kwargs={"top_k": 3, "plan": None},
+        additional_queries=["会议前", "会议后"],
     )
     assert isinstance(retriever, BaseRetriever)
-    nodes = retriever.retrieve(
-        QueryBundle(query_str="遵义会议", custom_embedding_strs=["会议前", "会议后"])
-    )
+    nodes = retriever.retrieve(QueryBundle(query_str="遵义会议"))
     assert isinstance(nodes[0], NodeWithScore)
     assert nodes[0].node.node_id == "00000000-0000-0000-0000-000000000001"
     assert captured["additional_queries"] == ["会议前", "会议后"]
@@ -102,6 +104,16 @@ def test_llamaindex_pipeline_round_trips_domain_metadata() -> None:
     assert result.rag_framework == "llamaindex"
     assert len(result.hits) == 1
     assert result.hits[0].rank == 1
+
+
+def test_retriever_uses_supplied_callback_manager() -> None:
+    manager = CallbackManager()
+    retriever = HistoryHybridRetriever(
+        search_backend=lambda **kwargs: _response(str(kwargs["query"]), []),
+        search_kwargs={"top_k": 1},
+        callback_manager=manager,
+    )
+    assert retriever.callback_manager is manager
 
 
 def test_llamaindex_workflow_runs_bounded_reflection_retry(work_path) -> None:
@@ -147,19 +159,15 @@ def test_llamaindex_workflow_runs_bounded_reflection_retry(work_path) -> None:
         search_queries=["周恩来 遵义会议"],
         coverage="balanced_period",
     )
-    execution = QueryExecution(
-        primary_query="周恩来 遵义会议",
-        additional_queries=("遵义会议前",),
-        retrieval_plan=RetrievalPlan(
-            query_intent="event_overview", coverage="balanced_period"
-        ),
-    )
+    retrieval_plan = RetrievalPlan(query_intent="event_overview", coverage="balanced_period")
     result = asyncio.run(
         run_retrieval_workflow(
             settings=Settings(project_root=work_path),
             request=QuestionRequest(question="周恩来在遵义会议前后做了什么"),
             plan=plan,
-            execution=execution,
+            primary_query="周恩来 遵义会议",
+            additional_queries=["遵义会议前"],
+            retrieval_plan=retrieval_plan,
             retrieval_limit=12,
             search_backend=search,
             assess_retrieval=assess,
@@ -174,3 +182,17 @@ def test_llamaindex_workflow_runs_bounded_reflection_retry(work_path) -> None:
     assert result.reflection_status == "retried"
     assert result.missing_aspects == ("会议后",)
     assert len(result.retrieval.hits) == 2
+
+
+def test_workflow_events_and_results_are_json_serializable() -> None:
+    event = RetrievalStartEvent(
+        request=QuestionRequest(question="周恩来在遵义会议前后做了什么"),
+        plan=None,
+        primary_query="周恩来 遵义会议",
+        additional_queries=["遵义会议前", "遵义会议后"],
+        retrieval_plan=RetrievalPlan(query_intent="event_overview"),
+        retrieval_limit=12,
+    )
+    payload = event.model_dump_json()
+    assert "周恩来 遵义会议" in payload
+    assert "search_backend" not in payload

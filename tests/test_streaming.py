@@ -75,10 +75,14 @@ def _provider(
 
 def _context(monkeypatch: pytest.MonkeyPatch) -> None:
     context = AnswerContext(_response([_hit("one", 1, page=688)]), [_citation()], "partial", None)
+
+    async def retrieve(*args: object) -> AnswerContext:
+        return context
+
     monkeypatch.setattr(
         "history_agent.answering.streaming.answer_structured_question", lambda *a: None
     )
-    monkeypatch.setattr("history_agent.answering.streaming._retrieve_context", lambda *a: context)
+    monkeypatch.setattr("history_agent.answering.streaming._aretrieve_context", retrieve)
 
 
 def _events(settings: Settings | None = None) -> list[Any]:
@@ -144,9 +148,7 @@ def test_stream_returns_valid_salvage_without_background_repair(
     assert "".join(e.data["text"] for e in events if e.event == "delta") == (
         "参加有关会议。[E1]\n\n随后主持工作。"
     )
-    assert not any(
-        e.event == "status" and e.data["message"] == "正在后台补全引用…" for e in events
-    )
+    assert not any(e.event == "status" and e.data["message"] == "正在后台补全引用…" for e in events)
     assert events[-1].data["answer"] == "参加有关会议。[E1]"
     assert events[-1].data["llm_usage"] == {"total_tokens": 20}
     assert len(requests) == 1
@@ -218,25 +220,19 @@ def test_stream_uses_semantic_plan_before_retrieval(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         "history_agent.answering.streaming.answer_structured_question", lambda *a: None
     )
-    monkeypatch.setattr(
-        "history_agent.answering.streaming.plan_question", lambda *a: planning
-    )
+    monkeypatch.setattr("history_agent.answering.streaming.plan_question", lambda *a: planning)
 
-    def retrieve(*args: Any) -> AnswerContext:
+    async def retrieve(*args: Any) -> AnswerContext:
         received.append(args[2])
         return context
 
-    monkeypatch.setattr("history_agent.answering.streaming._retrieve_context", retrieve)
+    monkeypatch.setattr("history_agent.answering.streaming._aretrieve_context", retrieve)
     settings = _settings().model_copy(update={"llm_query_planning": True})
     events = _events(settings)
 
     assert received == [planning]
-    assert any(
-        event.event == "status" and "规划检索" in event.data["message"] for event in events
-    )
-    assert any(
-        event.event == "status" and "补充检索" in event.data["message"] for event in events
-    )
+    assert any(event.event == "status" and "规划检索" in event.data["message"] for event in events)
+    assert any(event.event == "status" and "补充检索" in event.data["message"] for event in events)
     assert events[-1].data["query_planner_status"] == "used"
     assert events[-1].data["query_plan"]["normalized_question"] == plan.normalized_question
 
@@ -252,10 +248,10 @@ def test_stream_endpoint_sends_final_result_and_safe_error(monkeypatch: pytest.M
     assert "event: status\n" in response.text
     assert client.post("/api/questions/stream", json={"question": ""}).status_code == 422
 
-    def failed(*args: object) -> LLMResult:
+    async def failed(*args: object) -> LLMResult:
         raise RetrievalError("internal path and secret must not leak")
 
-    monkeypatch.setattr("history_agent.answering.streaming._retrieve_context", failed)
+    monkeypatch.setattr("history_agent.answering.streaming._aretrieve_context", failed)
     response = client.post("/api/questions/stream", json={"question": "测试观点"})
     assert "event: error\n" in response.text
     assert "internal path" not in response.text
@@ -279,9 +275,7 @@ def test_structured_summary_streams_through_llm(monkeypatch: pytest.MonkeyPatch)
         query_intent="timeline",
         citations=[_citation()],
     )
-    body = ChunkStream(
-        [_chunk("可归纳为外事和会议工作。[E1]", finish="stop"), b"data: [DONE]\n\n"]
-    )
+    body = ChunkStream([_chunk("可归纳为外事和会议工作。[E1]", finish="stop"), b"data: [DONE]\n\n"])
     _provider(monkeypatch, [body])
     monkeypatch.setattr(
         "history_agent.answering.streaming.answer_structured_question",
@@ -291,8 +285,7 @@ def test_structured_summary_streams_through_llm(monkeypatch: pytest.MonkeyPatch)
     events = _events()
 
     assert any(
-        event.event == "status" and "归纳结构化史料" in event.data["message"]
-        for event in events
+        event.event == "status" and "归纳结构化史料" in event.data["message"] for event in events
     )
     assert events[-1].data["retrieval_mode"] == "structured_timeline"
     assert events[-1].data["llm_status"] == "used"
@@ -366,16 +359,17 @@ def test_large_evidence_set_uses_hierarchical_generation_in_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     citations = [
-        _citation().model_copy(update={"evidence_id": f"E{index}"})
-        for index in range(1, 14)
+        _citation().model_copy(update={"evidence_id": f"E{index}"}) for index in range(1, 14)
     ]
     context = AnswerContext(_response([]), citations, "partial", None)
+
+    async def retrieve(*args: object) -> AnswerContext:
+        return context
+
     monkeypatch.setattr(
         "history_agent.answering.streaming.answer_structured_question", lambda *args: None
     )
-    monkeypatch.setattr(
-        "history_agent.answering.streaming._retrieve_context", lambda *args: context
-    )
+    monkeypatch.setattr("history_agent.answering.streaming._aretrieve_context", retrieve)
     monkeypatch.setattr(
         "history_agent.answering.streaming._prepare_hierarchical_answer",
         lambda **kwargs: HierarchicalPreparation(
@@ -395,9 +389,7 @@ def test_large_evidence_set_uses_hierarchical_generation_in_stream(
 
     events = _events()
 
-    assert any(
-        event.event == "status" and "分组归纳" in event.data["message"] for event in events
-    )
+    assert any(event.event == "status" and "分组归纳" in event.data["message"] for event in events)
     assert [event.data["text"] for event in events if event.event == "delta"] == [
         "分层",
         "综合答案。[E1][E13]",
@@ -423,12 +415,14 @@ def test_ceremony_overview_has_same_validation_and_diagnostics_in_both_apis(
     citation = _citation(fact)
     context = AnswerContext(_response([_hit("one", 1, page=688)]), [citation], "partial", None)
     for module in ("service", "streaming"):
+
+        async def retrieve(*args: object) -> AnswerContext:
+            return context
+
         monkeypatch.setattr(
             f"history_agent.answering.{module}.answer_structured_question", lambda *a: None
         )
-        monkeypatch.setattr(
-            f"history_agent.answering.{module}._retrieve_context", lambda *a: context
-        )
+        monkeypatch.setattr(f"history_agent.answering.{module}._aretrieve_context", retrieve)
     sync_calls = []
 
     def fake_post(url: str, **kwargs: Any) -> httpx.Response:

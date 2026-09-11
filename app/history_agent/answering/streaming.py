@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import aclosing, asynccontextmanager
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -12,6 +12,11 @@ import httpx
 from starlette.concurrency import run_in_threadpool
 
 from history_agent.answering.full_text import answer_full_text_question
+from history_agent.answering.llamaindex_llm import (
+    DeepSeekLlamaIndexLLM,
+    chat_messages,
+    response_usage,
+)
 from history_agent.answering.models import Citation, QuestionRequest
 from history_agent.answering.query_understanding import plan_question
 from history_agent.answering.retrieval_reflection import should_reflect
@@ -19,7 +24,7 @@ from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.service import (
     LLM_EVIDENCE_BATCH_SIZE,
     LLMResult,
-    _chat_completions_url,
+    _aretrieve_context,
     _clarification_response,
     _deepseek_error_code,
     _finish_answer,
@@ -29,7 +34,6 @@ from history_agent.answering.service import (
     _prefer_llm_result,
     _prepare_hierarchical_answer,
     _repair_request_payload,
-    _retrieve_context,
     _salvage_llm_result,
 )
 from history_agent.answering.structured import (
@@ -49,41 +53,6 @@ class AnswerStreamEvent:
         return f"event: {self.event}\ndata: {json.dumps(self.data, ensure_ascii=False)}\n\n"
 
 
-async def _sse_data(response: httpx.Response) -> AsyncIterator[str]:
-    data: list[str] = []
-    async for line in response.aiter_lines():
-        if not line:
-            if data:
-                yield "\n".join(data)
-                data.clear()
-        elif line.startswith("data:"):
-            data.append(line[5:].removeprefix(" "))
-    if data:
-        yield "\n".join(data)
-
-
-@asynccontextmanager
-async def _ephemeral_stream(
-    settings: Settings,
-    request_payload: dict[str, object],
-    timeout: float,
-) -> AsyncIterator[httpx.Response]:
-    assert settings.llm_api_key is not None
-    async with (
-        httpx.AsyncClient(timeout=timeout) as client,
-        client.stream(
-            "POST",
-            _chat_completions_url(settings.llm_base_url),
-            headers={
-                "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-                "Content-Type": "application/json",
-            },
-            json={**request_payload, "stream": True, "stream_options": {"include_usage": True}},
-        ) as response,
-    ):
-        yield response
-
-
 async def _stream_completion(
     settings: Settings,
     request_payload: dict[str, object],
@@ -101,49 +70,28 @@ async def _stream_completion(
             if budget is not None
             else settings.llm_timeout_seconds
         )
-        stream = (
-            runtime.stream(
-                "POST",
-                _chat_completions_url(settings.llm_base_url),
-                timeout=timeout,
-                headers={
-                    "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-                    "Content-Type": "application/json",
-                },
-                json={**request_payload, "stream": True, "stream_options": {"include_usage": True}},
-            )
-            if runtime is not None
-            else _ephemeral_stream(settings, request_payload, timeout)
+        llm = DeepSeekLlamaIndexLLM(
+            settings=settings,
+            runtime=runtime,
+            timeout_seconds=timeout,
         )
-        async with stream as response:
-            response.raise_for_status()
-            async for data in _sse_data(response):
-                if data == "[DONE]":
+        stream = llm.raw_astream_chat(
+            chat_messages(request_payload),
+            request_payload=request_payload,
+        )
+        async with aclosing(stream):
+            async for response in stream:
+                usage = response_usage(response) or usage
+                if response.additional_kwargs.get("done"):
                     finished = True
                     break
-                payload = json.loads(data)
-                if "error" in payload:
-                    raise ValueError("upstream error")
-                raw_usage = payload.get("usage")
-                if isinstance(raw_usage, dict):
-                    usage = {
-                        key: int(raw_usage[key])
-                        for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-                        if key in raw_usage
-                    }
-                choices = payload["choices"]
-                if not choices:  # Also accept compatible providers' usage-only chunk.
-                    continue
-                choice = choices[0]
-                delta = choice.get("delta", {})
-                content = delta.get("content")
-                if content is not None and not isinstance(content, str):
-                    raise ValueError("invalid content delta")
+                content = response.delta
                 if content:
                     parts.append(content)
                     yield content
-                if choice.get("finish_reason") is not None:
-                    finish_reason = choice["finish_reason"]
+                raw_finish_reason = response.additional_kwargs.get("finish_reason")
+                if raw_finish_reason is not None:
+                    finish_reason = str(raw_finish_reason)
     except httpx.HTTPError as exc:
         yield LLMResult(answer=None, error_code=_deepseek_error_code(exc), usage=usage)
         return
@@ -313,9 +261,7 @@ async def stream_answer_question(
             elif settings.llm_enabled:
                 yield AnswerStreamEvent("status", {"message": "正在归纳结构化史料…"})
                 async with aclosing(
-                    _stream_llm_answer(
-                        settings, request, structured.citations, runtime, budget
-                    )
+                    _stream_llm_answer(settings, request, structured.citations, runtime, budget)
                 ) as generation:
                     async for item in generation:
                         if isinstance(item, LLMResult):
@@ -339,9 +285,7 @@ async def stream_answer_question(
         else "正在检索本地史料…"
     )
     yield AnswerStreamEvent("status", {"message": retrieval_status})
-    context = await run_in_threadpool(
-        _retrieve_context, settings, request, planning, runtime, budget
-    )
+    context = await _aretrieve_context(settings, request, planning, runtime, budget)
     if context.retrieval_rounds > 1:
         yield AnswerStreamEvent("status", {"message": "已针对证据缺口完成补充检索…"})
     result = LLMResult(answer=None, error_code="not_configured")
@@ -350,9 +294,7 @@ async def stream_answer_question(
     elif settings.llm_enabled and len(context.citations) > LLM_EVIDENCE_BATCH_SIZE:
         yield AnswerStreamEvent("status", {"message": "正在分组归纳跨阶段证据…"})
         async with aclosing(
-            _stream_hierarchical_llm_answer(
-                settings, request, context.citations, runtime, budget
-            )
+            _stream_hierarchical_llm_answer(settings, request, context.citations, runtime, budget)
         ) as generation:
             async for item in generation:
                 if isinstance(item, LLMResult):

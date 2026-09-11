@@ -16,6 +16,11 @@ from history_agent.answering.context import (
     requires_conversation_context,
     sanitize_history_content,
 )
+from history_agent.answering.llamaindex_llm import (
+    DeepSeekLlamaIndexLLM,
+    chat_messages,
+    response_usage,
+)
 from history_agent.answering.models import QueryEntity, QueryPlan, QuestionRequest
 from history_agent.answering.runtime import LLMRuntime, RequestBudget
 from history_agent.answering.time_ranges import parse_relative_year_range
@@ -117,18 +122,11 @@ def _messages(settings: Settings, request: QuestionRequest) -> list[dict[str, st
     )
     content = f"<current_question>{request.question}</current_question>"
     if history:
-        content = (
-            "<conversation_history>\n"
-            f"{history}\n"
-            "</conversation_history>\n\n"
-            f"{content}"
-        )
+        content = f"<conversation_history>\n{history}\n</conversation_history>\n\n{content}"
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
-def _current_question_year_range(
-    settings: Settings, question: str
-) -> tuple[int, int] | None:
+def _current_question_year_range(settings: Settings, question: str) -> tuple[int, int] | None:
     relative = parse_relative_year_range(
         question, settings.research_start.year, settings.research_end.year
     )
@@ -148,9 +146,7 @@ def _compact(value: str) -> str:
 
 
 def _latest_user_question(request: QuestionRequest) -> str:
-    return next(
-        (item.content for item in reversed(request.history) if item.role == "user"), ""
-    )
+    return next((item.content for item in reversed(request.history) if item.role == "user"), "")
 
 
 def _entity_is_grounded(
@@ -162,17 +158,12 @@ def _entity_is_grounded(
     compact_question = _compact(request.question)
     if _compact(entity.canonical) in compact_question:
         return True
-    if (
-        _compact(entity.text) in compact_question
-        and not requires_conversation_context(entity.text)
-    ):
+    if _compact(entity.text) in compact_question and not requires_conversation_context(entity.text):
         return True
     if not allow_contextual_reference:
         return False
     compact_previous = _compact(_latest_user_question(request))
-    return any(
-        _compact(value) in compact_previous for value in (entity.text, entity.canonical)
-    )
+    return any(_compact(value) in compact_previous for value in (entity.text, entity.canonical))
 
 
 def _guard_plan_against_history(
@@ -194,9 +185,7 @@ def _guard_plan_against_history(
     start_year, end_year = plan.start_year, plan.end_year
     disallowed_terms: set[str] = set()
     if current_year_range is None and allow_contextual_time:
-        current_year_range = _current_question_year_range(
-            settings, _latest_user_question(request)
-        )
+        current_year_range = _current_question_year_range(settings, _latest_user_question(request))
 
     if current_year_range is not None:
         start_year, end_year = current_year_range
@@ -230,9 +219,7 @@ def _guard_plan_against_history(
     normalized_question = plan.normalized_question
     if contains_disallowed(normalized_question):
         normalized_question = request.question
-    search_queries = [
-        query for query in plan.search_queries if not contains_disallowed(query)
-    ]
+    search_queries = [query for query in plan.search_queries if not contains_disallowed(query)]
     constraints = [
         constraint for constraint in plan.constraints if not contains_disallowed(constraint)
     ]
@@ -283,9 +270,7 @@ def _normalize_coverage(plan: QueryPlan) -> QueryPlan:
     return plan
 
 
-def _relative_intersection_plan(
-    settings: Settings, request: QuestionRequest
-) -> QueryPlan | None:
+def _relative_intersection_plan(settings: Settings, request: QuestionRequest) -> QueryPlan | None:
     if not any(marker in request.question for marker in ("交集", "共同")):
         return None
     relative = parse_relative_year_range(
@@ -307,9 +292,7 @@ def _relative_intersection_plan(
             entities.append(QueryEntity(type="person", text=matched, canonical=canonical))
     if len(entities) != 2:
         return None
-    normalized = request.question.replace(
-        relative.raw, f"{relative.start}年至{relative.end}年"
-    )
+    normalized = request.question.replace(relative.raw, f"{relative.start}年至{relative.end}年")
     return QueryPlan(
         intent="intersection",
         normalized_question=normalized,
@@ -338,10 +321,6 @@ def plan_question(
             if budget is not None
             else settings.llm_query_planner_timeout_seconds
         )
-        headers = {
-            "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
-            "Content-Type": "application/json",
-        }
         request_payload: dict[str, object] = {
             "model": settings.llm_query_planner_model,
             "messages": _messages(settings, request),
@@ -351,16 +330,16 @@ def plan_question(
             "temperature": 0,
             "thinking": {"type": "disabled"},
         }
-        url = settings.llm_base_url.rstrip("/") + "/chat/completions"
-        response = (
-            runtime.post(url, headers=headers, json=request_payload, timeout=timeout)
-            if runtime is not None
-            else httpx.post(url, headers=headers, json=request_payload, timeout=timeout)
+        response = DeepSeekLlamaIndexLLM(
+            settings=settings,
+            runtime=runtime,
+            model=settings.llm_query_planner_model,
+            timeout_seconds=timeout,
+        ).chat(
+            chat_messages(request_payload),
+            request_payload=request_payload,
         )
-        response.raise_for_status()
-        payload = response.json()
-        choice = payload["choices"][0]
-        if choice.get("finish_reason") == "length":
+        if response.additional_kwargs.get("finish_reason") == "length":
             return QueryPlanningResult(
                 None,
                 "fallback",
@@ -371,16 +350,15 @@ def plan_question(
             _guard_plan_against_history(
                 settings,
                 request,
-                _validated_plan(str(choice["message"]["content"])),
+                _validated_plan(response.message.content or ""),
             )
         )
-        raw_usage = payload.get("usage", {})
-        usage = {
-            key: int(raw_usage[key])
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
-            if key in raw_usage
-        }
-        return QueryPlanningResult(plan, "used", settings.llm_query_planner_model, usage or None)
+        return QueryPlanningResult(
+            plan,
+            "used",
+            settings.llm_query_planner_model,
+            response_usage(response),
+        )
     except httpx.HTTPError as exc:
         return QueryPlanningResult(
             None, "fallback", settings.llm_query_planner_model, error_code=_error_code(exc)
@@ -433,9 +411,7 @@ def _coverage_queries(plan: QueryPlan, people: list[str]) -> list[str]:
             start = plan.start_year + span * index // 3
             end = plan.start_year + span * (index + 1) // 3 - 1
             ranges.append((start, max(start, end)))
-        return [
-            f"{subject} {start}年至{end}年 {suffix}".strip() for start, end in ranges
-        ]
+        return [f"{subject} {start}年至{end}年 {suffix}".strip() for start, end in ranges]
     return []
 
 
@@ -450,9 +426,7 @@ def query_execution(question: str, plan: QueryPlan | None, aliases_path: Path) -
     # question because the original question is always executed separately.
     parts = [*plan.search_queries, plan.normalized_question]
     for entity in plan.entities:
-        if entity.canonical != entity.text and not any(
-            entity.canonical in part for part in parts
-        ):
+        if entity.canonical != entity.text and not any(entity.canonical in part for part in parts):
             parts.append(entity.canonical)
     constraint_hint = " ".join(plan.constraints)
     if constraint_hint:

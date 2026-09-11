@@ -7,10 +7,12 @@ contains corpus-specific ranking, temporal coverage, and safety rules.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
 from llama_index.core import QueryBundle
+from llama_index.core.callbacks import CallbackManager
 from llama_index.core.postprocessor.types import BaseNodePostprocessor
 from llama_index.core.retrievers import BaseRetriever
 from llama_index.core.schema import NodeWithScore, TextNode
@@ -67,20 +69,29 @@ class HistoryHybridRetriever(BaseRetriever):
         *,
         search_backend: SearchBackend,
         search_kwargs: dict[str, Any],
+        additional_queries: list[str] | None = None,
+        callback_manager: CallbackManager | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(callback_manager=callback_manager)
         self._search_backend = search_backend
         self._search_kwargs = search_kwargs
+        self._additional_queries = additional_queries or []
         self.last_response: SearchResponse | None = None
 
-    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+    def _run_backend(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
         kwargs = {
             **self._search_kwargs,
             "query": query_bundle.query_str,
-            "additional_queries": list(query_bundle.custom_embedding_strs or []),
+            "additional_queries": self._additional_queries,
         }
         self.last_response = self._search_backend(**kwargs)
         return [search_hit_to_node(hit) for hit in self.last_response.hits]
+
+    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+        return self._run_backend(query_bundle)
+
+    async def _aretrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
+        return await asyncio.to_thread(self._run_backend, query_bundle)
 
 
 class HistoryEvidencePostprocessor(BaseNodePostprocessor):
@@ -115,21 +126,51 @@ def retrieve_with_llamaindex(
     additional_queries: list[str],
     top_k: int,
     search_kwargs: dict[str, Any],
+    callback_manager: CallbackManager | None = None,
 ) -> SearchResponse:
     """Execute one retrieval round through LlamaIndex abstractions."""
 
     retriever = HistoryHybridRetriever(
         search_backend=search_backend,
         search_kwargs={**search_kwargs, "top_k": top_k},
+        additional_queries=additional_queries,
+        callback_manager=callback_manager,
     )
-    bundle = QueryBundle(query_str=query, custom_embedding_strs=additional_queries)
+    bundle = QueryBundle(query_str=query)
     nodes = retriever.retrieve(bundle)
-    nodes = HistoryEvidencePostprocessor(max_nodes=top_k).postprocess_nodes(
-        nodes, query_bundle=bundle
-    )
+    nodes = HistoryEvidencePostprocessor(
+        max_nodes=top_k, callback_manager=callback_manager or CallbackManager()
+    ).postprocess_nodes(nodes, query_bundle=bundle)
     if retriever.last_response is None:
         raise RuntimeError("LlamaIndex retriever completed without a search response")
     hits = [node_to_search_hit(node, rank) for rank, node in enumerate(nodes, start=1)]
-    return retriever.last_response.model_copy(
-        update={"hits": hits, "rag_framework": "llamaindex"}
+    return retriever.last_response.model_copy(update={"hits": hits, "rag_framework": "llamaindex"})
+
+
+async def aretrieve_with_llamaindex(
+    *,
+    search_backend: SearchBackend,
+    query: str,
+    additional_queries: list[str],
+    top_k: int,
+    search_kwargs: dict[str, Any],
+    callback_manager: CallbackManager | None = None,
+) -> SearchResponse:
+    """Asynchronously execute one retrieval round without blocking the event loop."""
+
+    manager = callback_manager or CallbackManager()
+    retriever = HistoryHybridRetriever(
+        search_backend=search_backend,
+        search_kwargs={**search_kwargs, "top_k": top_k},
+        additional_queries=additional_queries,
+        callback_manager=manager,
     )
+    bundle = QueryBundle(query_str=query)
+    nodes = await retriever.aretrieve(bundle)
+    nodes = await HistoryEvidencePostprocessor(
+        max_nodes=top_k, callback_manager=manager
+    ).apostprocess_nodes(nodes, query_bundle=bundle)
+    if retriever.last_response is None:
+        raise RuntimeError("LlamaIndex retriever completed without a search response")
+    hits = [node_to_search_hit(node, rank) for rank, node in enumerate(nodes, start=1)]
+    return retriever.last_response.model_copy(update={"hits": hits, "rag_framework": "llamaindex"})

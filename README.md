@@ -398,11 +398,20 @@ flowchart LR
 `PydanticOutputParser` 解析和校验，查询进入 `QueryBundle`，本地混合召回实现为
 `BaseRetriever`，候选史料转换为带完整出处元数据的 `TextNode/NodeWithScore`，去重和
 数量限制由 `BaseNodePostprocessor` 执行，首轮检索、证据充分性评估和一次定向补检由
-LlamaIndex `Workflow` 的类型化事件编排。最终提示词使用 `ChatPromptTemplate` 构造。
+LlamaIndex `Workflow` 的类型化事件编排。查询规划、证据评估、普通与流式生成统一通过
+自定义 LlamaIndex `LLM` 适配器，并接入应用级 `CallbackManager`；最终提示词使用
+`ChatPromptTemplate` 构造。工作流事件与 Context 中只保存可序列化的 Pydantic 数据，连接池、
+调用器和配置等运行时依赖由工作流实例注入。
 
 项目没有把领域逻辑强行换成框架默认值：BM25/Qdrant 融合、人物硬过滤、时间覆盖、页码
 映射和事实级引用校验仍是自定义组件，通过 LlamaIndex 扩展接口接入。这些能力直接决定
 历史问答的可核验性，也是与通用 RAG 示例的主要区别。
+
+本项目也没有为了框架覆盖率重复套用 `QueryFusionRetriever`、`QdrantVectorStore` 或通用
+Response Synthesizer：现有混合后端已经实现带人物/时间约束的多查询 RRF；已有 Qdrant
+payload、稳定点 ID 和原子重建协议需要兼容；生成端还有分组综合、引用修复与安全降级。
+这三项只有在双读评测证明质量或运维收益后才迁移。接口返回的 `rag_framework` 表示单次
+请求真实执行路径：普通混合 RAG 为 `llamaindex`，全文和结构化等旁路为 `native`。
 
 初期不强制使用图数据库。人物关系首先存入可审计的 SQL 表，并用 NetworkX 完成分析和可视化；只有当关系规模和多跳查询明显变复杂时，再迁移到 Neo4j。
 

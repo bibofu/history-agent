@@ -6,6 +6,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 from history_agent.answering import service as service_module
+from history_agent.answering.llamaindex_llm import DeepSeekLlamaIndexLLM
 from history_agent.answering.models import (
     AnswerResponse,
     Citation,
@@ -30,6 +31,7 @@ from history_agent.answering.validation import (
 from history_agent.config import Settings
 from history_agent.retrieval.models import RetrievalPlan, SearchHit
 from history_agent.web import app as web_module
+from llama_index.core.llms import LLM
 
 
 def _citation(quote: str = "【1956年1月】参加会议并讨论科学规划。") -> Citation:
@@ -65,8 +67,7 @@ def test_extractive_answer_skips_bare_ellipsis_sentence() -> None:
 
 def test_final_response_only_exposes_citations_used_by_answer() -> None:
     citations = [
-        _citation().model_copy(update={"evidence_id": f"E{index}"})
-        for index in range(1, 4)
+        _citation().model_copy(update={"evidence_id": f"E{index}"}) for index in range(1, 4)
     ]
     retrieval = service_module.SearchResponse(
         query="习仲勋在1921—1949年党内职务的变化",
@@ -246,12 +247,12 @@ def test_api_health_and_question_contract(monkeypatch: Any) -> None:
         citations=[_citation()],
     )
 
-    def fake_answer(active_settings: Settings, request: QuestionRequest) -> AnswerResponse:
+    async def fake_answer(active_settings: Settings, request: QuestionRequest) -> AnswerResponse:
         assert active_settings is settings
         assert request.question == expected.question
         return expected
 
-    monkeypatch.setattr(web_module, "answer_question", fake_answer)
+    monkeypatch.setattr(web_module, "answer_question_async", fake_answer)
     client = TestClient(web_module.create_app(settings))
 
     health = client.get("/api/health")
@@ -267,6 +268,12 @@ def test_api_health_and_question_contract(monkeypatch: Any) -> None:
     assert "/api/questions/stream" in javascript.text
     assert response.status_code == 200
     assert response.json()["citations"][0]["pdf_page"] == 688
+
+
+def test_deepseek_adapter_is_a_llamaindex_llm_without_serialized_secret() -> None:
+    llm = DeepSeekLlamaIndexLLM(settings=Settings(_env_file=None, llm_api_key="secret-test-key"))
+    assert isinstance(llm, LLM)
+    assert "secret-test-key" not in str(llm.to_payload())
 
 
 def test_deepseek_v4_request_and_usage(monkeypatch: Any) -> None:
@@ -399,9 +406,7 @@ def test_uncited_markdown_label_is_removed_without_collapsing_cited_answer() -> 
     assert validation.error_code == "uncited_core_claim"
     assert validation.uncited_claims == ("晚年：称蒋介石为“老朋友”，主张和平谈判",)
     salvaged = remove_uncited_claim_blocks(draft, validation.uncited_claims)
-    assert salvaged == (
-        "# 毛泽东对蒋介石的评价\n\n1960年，毛泽东称蒋介石为老朋友。[E1]"
-    )
+    assert salvaged == ("# 毛泽东对蒋介石的评价\n\n1960年，毛泽东称蒋介石为老朋友。[E1]")
     assert validate_grounded_answer(salvaged, [_citation()]).valid
 
 
