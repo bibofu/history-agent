@@ -17,6 +17,8 @@ from history_agent.evaluation.golden import (
     RelevantEvidence,
     RetrievalGold,
     RouteGold,
+    _index_attribution,
+    _retrieval_branches,
     _selected_dimensions,
     aggregate_results,
     compare_golden_runs,
@@ -29,7 +31,7 @@ from history_agent.evaluation.golden import (
     load_golden_dataset,
     run_golden_benchmark,
 )
-from history_agent.processing.chunks import index_artifact_manifest
+from history_agent.processing.chunks import index_artifact_manifest, index_artifact_sha256
 from history_agent.retrieval.models import SearchHit, SearchResponse
 from pydantic import ValidationError
 from typer.testing import CliRunner
@@ -581,6 +583,10 @@ def test_full_runner_uses_stub_backends_and_records_actual_metadata(work_path: P
     )
     settings = Settings(project_root=work_path, _env_file=None)
     settings.reports_dir.mkdir(parents=True)
+    settings.keyword_index_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.keyword_index_path.write_bytes(b"keyword-index")
+    settings.vector_index_path.mkdir(parents=True)
+    (settings.vector_index_path / "segment.bin").write_bytes(b"vector-index")
     chunking = {
         "version": "manifest-v1",
         "target_chars": 650,
@@ -590,11 +596,17 @@ def test_full_runner_uses_stub_backends_and_records_actual_metadata(work_path: P
     keyword_manifest = {
         "chunking": chunking,
         "chunk_artifact_sha256": "abc",
+        "index_artifact_sha256": index_artifact_sha256(settings.keyword_index_path),
+        "build_run_id": "keyword-build",
+        "git_commit": "commit",
         "keyword_index_version": "keyword-v1",
     }
     vector_manifest = {
         "chunking": chunking,
         "chunk_artifact_sha256": "abc",
+        "index_artifact_sha256": index_artifact_sha256(settings.vector_index_path),
+        "build_run_id": "vector-build",
+        "git_commit": "commit",
         "embedding_model": "embed-v1",
         "vector_index_version": "vector-v1",
     }
@@ -619,6 +631,8 @@ def test_full_runner_uses_stub_backends_and_records_actual_metadata(work_path: P
     assert payload["run_metadata"]["chunking"] == chunking
     assert payload["run_metadata"]["embedding_model"] == "embed-v1"
     assert payload["run_metadata"]["chunk_artifact_sha256"] == "abc"
+    assert payload["run_metadata"]["index_manifest_consistent"] is True
+    assert payload["run_metadata"]["attribution_safe"] is True
 
 
 def test_index_manifest_uses_actual_chunk_report(work_path: Path) -> None:
@@ -627,12 +641,15 @@ def test_index_manifest_uses_actual_chunk_report(work_path: Path) -> None:
     chunks.mkdir(parents=True)
     reports.mkdir(parents=True)
     (chunks / "doc.jsonl").write_text('{"text":"one"}\n', encoding="utf-8")
+    index_path = work_path / "keyword.db"
+    index_path.write_bytes(b"index")
     first = index_artifact_manifest(
         chunks_dir=chunks,
         reports_dir=reports,
         project_root=work_path,
         run_id="old",
         keyword_index_version="k1",
+        index_path=index_path,
     )
     assert first["chunking"] is None
     assert first["warnings"] == ["chunk build manifest is missing"]
@@ -651,11 +668,13 @@ def test_index_manifest_uses_actual_chunk_report(work_path: Path) -> None:
         project_root=work_path,
         run_id="keyword-1",
         keyword_index_version="k1",
+        index_path=index_path,
     )
 
     assert manifest["chunking"] == chunk_manifest["chunking"]
     assert manifest["chunk_artifact_sha256"] == chunk_manifest["chunk_artifact_sha256"]
     assert manifest["build_run_id"] == "keyword-1"
+    assert manifest["index_artifact_sha256"]
 
 
 def _comparison_run(
@@ -663,9 +682,20 @@ def _comparison_run(
 ) -> dict[str, Any]:
     ids = case_ids or ["a"]
     return {
+        "schema_version": 1,
         "dataset": {"sha256": sha},
         "requested_dimension": "all",
-        "run_metadata": {"retrieval_config": {"top_k": 10}},
+        "run_metadata": {
+            "retrieval_config": {"top_k": 10},
+            "attribution_safe": True,
+            "evaluator": {
+                "version": "unified-golden-evaluator-v2",
+                "metric_definition_version": "golden-metrics-v2",
+                "page_mapping_version": "page-range-evidence-unit-v2",
+                "text_normalization_version": "alnum-casefold-v1",
+                "relevance_schema_version": "page-positive-and-graded-v1",
+            },
+        },
         "results": [{"case_id": item} for item in ids],
         "aggregate": {
             "retrieval": {
@@ -673,6 +703,7 @@ def _comparison_run(
                     "value": value,
                     "evaluable_cases": len(ids),
                     "evaluable_case_ids": ids,
+                    "evaluation_bases": ["deterministic"],
                 }
             },
             "operational": {"token_usage": {"answer": {"total_tokens": 3}}},
@@ -749,3 +780,295 @@ def test_golden_compare_cli_json_and_incompatible_exit(work_path: Path) -> None:
     )
     assert incompatible.exit_code == 2
     assert json.loads(incompatible.stdout)["compatible"] is False
+
+
+def _required_fact(fact_id: str, pattern: str, *, importance: str = "required") -> GoldFact:
+    return GoldFact(
+        fact_id=fact_id,
+        claim=f"事实{fact_id}",
+        importance=importance,  # type: ignore[arg-type]
+        evidence=[EvidenceAnchor(document_id="doc", pdf_page=10)],
+        deterministic_patterns=[pattern],
+    )
+
+
+def test_fact_recall_aggregate_is_micro_over_fact_units() -> None:
+    one_fact = _gold_case().model_copy(
+        update={"id": "one", "gold_facts": [_required_fact("f1", "命中")]}
+    )
+    three_facts = _gold_case().model_copy(
+        update={
+            "id": "three",
+            "gold_facts": [
+                _required_fact("f1", "不会命中1"),
+                _required_fact("f2", "不会命中2"),
+                _required_fact("f3", "不会命中3"),
+            ],
+        }
+    )
+    first = evaluate_generation(one_fact, _response(answer="命中"))
+    second = evaluate_generation(
+        three_facts,
+        _response(answer="均未覆盖"),
+        fact_judgment={
+            "status": "used",
+            "decisions": [
+                {"fact_id": fact_id, "covered": False, "reason": "not stated"}
+                for fact_id in ("f1", "f2", "f3")
+            ],
+        },
+    )
+
+    aggregate = aggregate_results(
+        [
+            {"case_id": "one", "generation": first},
+            {"case_id": "three", "generation": second},
+        ]
+    )["generation"]["required_fact_recall"]
+
+    assert aggregate["value"] == 0.25
+    assert aggregate["aggregation"] == "micro_over_fact_units"
+    assert aggregate["evaluable_unit_ids"] == [
+        "one:f1",
+        "three:f1",
+        "three:f2",
+        "three:f3",
+    ]
+
+
+def _fact_metric_run(unit_ids: list[str], value: float) -> dict[str, Any]:
+    run = _comparison_run(value=0.5)
+    evaluator = run["run_metadata"]["evaluator"]
+    evaluator.update(
+        {
+            "fact_judge_version": "fact-v1",
+            "fact_judge_provider": "test-provider",
+            "fact_judge_model": "judge-a",
+            "citation_judge_version": "citation-v1",
+            "citation_judge_provider": "test-provider",
+            "citation_judge_model": "judge-a",
+        }
+    )
+    run["aggregate"]["generation"] = {
+        "required_fact_recall": {
+            "value": value,
+            "evaluable_cases": 1,
+            "evaluable_case_ids": ["a"],
+            "evaluable_unit_ids": unit_ids,
+            "evaluation_bases": ["semantic"],
+        },
+        "answer_correctness": {
+            "value": value,
+            "evaluable_cases": 1,
+            "evaluable_case_ids": ["a"],
+            "evaluation_bases": ["deterministic"],
+        },
+    }
+    return run
+
+
+def test_fact_unit_difference_suppresses_only_fact_delta(work_path: Path) -> None:
+    path_a = work_path / "a.json"
+    path_b = work_path / "b.json"
+    path_a.write_text(json.dumps(_fact_metric_run(["a:f1"], 1.0)), encoding="utf-8")
+    path_b.write_text(
+        json.dumps(_fact_metric_run(["a:f1", "a:f2", "a:f3"], 2 / 3)),
+        encoding="utf-8",
+    )
+
+    result = compare_golden_runs(path_a, path_b)
+
+    fact = result["metrics"]["generation.required_fact_recall"]
+    assert fact["delta"] is None
+    assert "evaluable fact unit set differs" in fact["non_comparable_reasons"]
+    correctness = result["metrics"]["generation.answer_correctness"]
+    assert correctness["comparable"] is True
+
+
+def test_judge_version_only_blocks_semantic_metrics(work_path: Path) -> None:
+    run_a = _fact_metric_run(["a:f1"], 0.5)
+    run_b = _fact_metric_run(["a:f1"], 0.7)
+    run_b["run_metadata"]["evaluator"]["fact_judge_version"] = "fact-v2"
+    path_a = work_path / "a.json"
+    path_b = work_path / "b.json"
+    path_a.write_text(json.dumps(run_a), encoding="utf-8")
+    path_b.write_text(json.dumps(run_b), encoding="utf-8")
+
+    result = compare_golden_runs(path_a, path_b)
+
+    assert result["metrics"]["generation.required_fact_recall"]["comparable"] is False
+    assert result["metrics"]["retrieval.hit_rate_at_5"]["comparable"] is True
+
+
+def test_generation_model_change_does_not_block_retrieval(work_path: Path) -> None:
+    run_a = _comparison_run(value=0.5)
+    run_b = _comparison_run(value=0.6)
+    run_a["run_metadata"]["generation"] = {"model": "model-a"}
+    run_b["run_metadata"]["generation"] = {"model": "model-b"}
+    path_a = work_path / "a.json"
+    path_b = work_path / "b.json"
+    path_a.write_text(json.dumps(run_a), encoding="utf-8")
+    path_b.write_text(json.dumps(run_b), encoding="utf-8")
+
+    result = compare_golden_runs(path_a, path_b)
+
+    assert result["metrics"]["retrieval.hit_rate_at_5"]["delta"] == 0.1
+    assert "generation.model" in result["metadata_differences"]
+
+
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    [
+        ("version", "evaluator version differs"),
+        ("metric_definition_version", "metric definition version differs"),
+    ],
+)
+def test_evaluator_definition_change_blocks_metric_delta(
+    work_path: Path, field: str, reason: str
+) -> None:
+    run_a = _comparison_run(value=0.5)
+    run_b = _comparison_run(value=0.6)
+    run_b["run_metadata"]["evaluator"][field] = "changed"
+    path_a = work_path / "a.json"
+    path_b = work_path / "b.json"
+    path_a.write_text(json.dumps(run_a), encoding="utf-8")
+    path_b.write_text(json.dumps(run_b), encoding="utf-8")
+
+    metric = compare_golden_runs(path_a, path_b)["metrics"]["retrieval.hit_rate_at_5"]
+
+    assert metric["delta"] is None
+    assert reason in metric["non_comparable_reasons"]
+
+
+def _manifest(branch: str, chunk_hash: str = "chunks") -> dict[str, Any]:
+    manifest: dict[str, Any] = {
+        "chunking": {
+            "version": "v1",
+            "target_chars": 650,
+            "max_chars": 900,
+            "overlap": 0,
+        },
+        "chunk_artifact_sha256": chunk_hash,
+        "index_artifact_sha256": f"{branch}-index",
+        "build_run_id": f"{branch}-run",
+        "git_commit": "commit",
+    }
+    if branch == "keyword":
+        manifest["keyword_index_version"] = "keyword-v1"
+    else:
+        manifest["vector_index_version"] = "vector-v1"
+        manifest["embedding_model"] = "embed-v1"
+    return manifest
+
+
+def _index_reports(keyword_hash: str = "chunks", vector_hash: str = "chunks") -> dict[str, Any]:
+    return {
+        "keyword_index": {
+            "manifest": _manifest("keyword", keyword_hash),
+            "artifact_verified": True,
+        },
+        "vector_index": {
+            "manifest": _manifest("vector", vector_hash),
+            "artifact_verified": True,
+        },
+    }
+
+
+def test_index_attribution_consistent_and_inconsistent_manifests() -> None:
+    consistent = _index_attribution(_index_reports(), ["keyword", "vector"])
+    inconsistent = _index_attribution(_index_reports(vector_hash="other"), ["keyword", "vector"])
+
+    assert consistent["index_manifest_consistent"] is True
+    assert consistent["attribution_safe"] is True
+    assert consistent["chunk_artifact_sha256"] == "chunks"
+    assert inconsistent["index_manifest_consistent"] is False
+    assert inconsistent["attribution_safe"] is False
+    assert inconsistent["chunk_artifact_sha256"] is None
+    assert inconsistent["chunking"] is None
+
+
+def test_index_attribution_legacy_and_single_branch_degradation() -> None:
+    legacy = _index_attribution(
+        {"keyword_index": {"manifest": None, "artifact_verified": False}},
+        ["keyword"],
+    )
+    reports = _index_reports(vector_hash="other")
+    keyword_only = _index_attribution(reports, ["keyword"])
+
+    assert legacy["attribution_safe"] is False
+    assert "no index manifest" in legacy["attribution_unsafe_reasons"][0]
+    assert keyword_only["attribution_safe"] is True
+    assert keyword_only["embedding_model"] is None
+    used, degraded = _retrieval_branches(
+        [
+            {
+                "operational": {
+                    "retrieval_mode": "keyword_only",
+                    "degraded_components": ["vector"],
+                }
+            }
+        ]
+    )
+    assert used == ["keyword"]
+    assert degraded == ["vector"]
+
+
+def test_optional_only_generation_case_is_rejected_but_non_generation_is_compatible() -> None:
+    payload = _gold_case().model_dump()
+    payload["gold_facts"] = [_required_fact("optional", "可选", importance="optional").model_dump()]
+    with pytest.raises(ValidationError, match="at least one required"):
+        GoldenCase.model_validate(payload)
+
+    payload["eval_dimensions"] = ["retrieval"]
+    assert GoldenCase.model_validate(payload).gold_facts[0].importance == "optional"
+
+
+def test_old_report_missing_evaluator_metadata_is_explicitly_not_comparable(
+    work_path: Path,
+) -> None:
+    old = _comparison_run(value=0.5)
+    old["run_metadata"].pop("evaluator")
+    old["run_metadata"].pop("attribution_safe")
+    current = _comparison_run(value=0.6)
+    path_a = work_path / "old.json"
+    path_b = work_path / "current.json"
+    path_a.write_text(json.dumps(old), encoding="utf-8")
+    path_b.write_text(json.dumps(current), encoding="utf-8")
+
+    result = compare_golden_runs(path_a, path_b)
+
+    assert result["compatible"] is True
+    assert result["attribution_safe"] is False
+    metric = result["metrics"]["retrieval.hit_rate_at_5"]
+    assert metric["comparable"] is False
+    assert "evaluator version is missing" in metric["non_comparable_reasons"]
+    from history_agent import cli
+
+    cli_result = CliRunner().invoke(
+        cli.app, ["eval", "golden-compare", str(path_a), str(path_b)]
+    )
+    assert cli_result.exit_code == 0
+    assert "metric not comparable" in cli_result.stdout
+
+
+def test_compare_cli_reports_attribution_unsafe_without_failing(work_path: Path) -> None:
+    from history_agent import cli
+
+    run_a = _comparison_run(value=0.5)
+    run_b = _comparison_run(value=0.6)
+    run_b["run_metadata"]["attribution_safe"] = False
+    run_b["run_metadata"]["attribution_unsafe_reasons"] = ["legacy manifest"]
+    path_a = work_path / "a.json"
+    path_b = work_path / "b.json"
+    path_a.write_text(json.dumps(run_a), encoding="utf-8")
+    path_b.write_text(json.dumps(run_b), encoding="utf-8")
+
+    output = CliRunner().invoke(cli.app, ["eval", "golden-compare", str(path_a), str(path_b)])
+
+    assert output.exit_code == 0
+    assert "comparison possible but attribution unsafe" in output.stdout
+    json_output = CliRunner().invoke(
+        cli.app, ["eval", "golden-compare", str(path_a), str(path_b), "--json"]
+    )
+    assert json_output.exit_code == 0
+    assert json.loads(json_output.stdout)["attribution_safe"] is False

@@ -1485,6 +1485,12 @@ def eval_golden_compare(
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         typer.echo(f"compatible: {payload['compatible']}")
+        typer.echo(f"attribution safe: {payload['attribution_safe']}")
+        if payload["compatible"] and not payload["attribution_safe"]:
+            typer.echo(
+                "warning: comparison possible but attribution unsafe; "
+                "do not attribute deltas to chunking, embeddings, or index changes"
+            )
         for message in payload["errors"]:
             typer.echo(f"error: {message}")
         for message in payload["warnings"]:
@@ -1502,8 +1508,10 @@ def eval_golden_compare(
                 )
             else:
                 typer.echo(
-                    f"{name}: not comparable "
-                    f"(n={metric['evaluable_cases_a']}/{metric['evaluable_cases_b']})"
+                    f"{name}: {metric['run_a']} -> {metric['run_b']}; "
+                    "metric not comparable "
+                    f"(n={metric['evaluable_cases_a']}/{metric['evaluable_cases_b']}; "
+                    f"reasons={'; '.join(metric['non_comparable_reasons'])})"
                 )
     if not payload["compatible"]:
         raise typer.Exit(code=2)

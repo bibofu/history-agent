@@ -37,6 +37,7 @@ from history_agent.evaluation.semantic import (
     judge_citation_semantics,
     judge_fact_coverage,
 )
+from history_agent.processing.chunks import index_artifact_sha256
 from history_agent.retrieval.hybrid import RRF_K, search_hybrid_index
 from history_agent.retrieval.models import SearchHit, SearchResponse
 
@@ -82,6 +83,11 @@ ALL_DIMENSIONS: tuple[EvalDimension, ...] = (
     "citation",
 )
 DEFAULT_K_VALUES = (5, 10)
+GOLDEN_EVALUATOR_VERSION = "unified-golden-evaluator-v2"
+METRIC_DEFINITION_VERSION = "golden-metrics-v2"
+PAGE_MAPPING_VERSION = "page-range-evidence-unit-v2"
+TEXT_NORMALIZATION_VERSION = "alnum-casefold-v1"
+RELEVANCE_SCHEMA_VERSION = "page-positive-and-graded-v1"
 
 
 class EvidenceAnchor(BaseModel):
@@ -234,6 +240,12 @@ class GoldenCase(BaseModel):
                 raise ValueError("answerable evidence dimensions require page-level gold")
             if "generation" in self.eval_dimensions and not self.gold_facts:
                 raise ValueError("answerable generation cases require gold_facts")
+            if "generation" in self.eval_dimensions and not any(
+                fact.importance == "required" for fact in self.gold_facts
+            ):
+                raise ValueError(
+                    "answerable generation cases require at least one required gold fact"
+                )
         fact_ids = [item.fact_id for item in self.gold_facts]
         if len(fact_ids) != len(set(fact_ids)):
             raise ValueError("gold fact IDs must be unique within a case")
@@ -333,6 +345,9 @@ def _record_metric(
     *,
     evaluable: bool,
     reason: str,
+    evaluation_bases: list[str] | None = None,
+    evaluable_unit_ids: list[str] | None = None,
+    unevaluable_unit_ids: list[str] | None = None,
 ) -> None:
     result[key] = value if evaluable else None
     status = result.setdefault("metric_status", {})
@@ -340,6 +355,9 @@ def _record_metric(
         "value": value if evaluable else None,
         "evaluable": evaluable,
         "reason": reason,
+        "evaluation_bases": evaluation_bases or ["deterministic"],
+        "evaluable_unit_ids": evaluable_unit_ids or [],
+        "unevaluable_unit_ids": unevaluable_unit_ids or [],
     }
 
 
@@ -364,13 +382,9 @@ def evaluate_retrieval_hits(
         matched = _matched_gold_keys(prefix, gold)
         required_keys = {
             item.key
-            for item in (
-                case.retrieval_gold.required_evidence if case.retrieval_gold else []
-            )
+            for item in (case.retrieval_gold.required_evidence if case.retrieval_gold else [])
         }
-        returned_keys = (
-            set().union(*(_hit_page_keys(hit) for hit in prefix)) if prefix else set()
-        )
+        returned_keys = set().union(*(_hit_page_keys(hit) for hit in prefix)) if prefix else set()
         relevant_hits = sum(bool(_hit_page_keys(hit).intersection(gold)) for hit in prefix)
         _record_metric(
             result,
@@ -626,6 +640,7 @@ def evaluate_generation(
         fact_results.append(
             {
                 "fact_id": fact.fact_id,
+                "unit_id": f"{case.id}:{fact.fact_id}",
                 "importance": fact.importance,
                 "covered": covered,
                 "evaluable": covered is not None,
@@ -652,6 +667,8 @@ def evaluate_generation(
     refusal_correct = disposition == "refused" if refusal_evaluable else None
     required_evaluable = [item for item in required if item["evaluable"]]
     optional_evaluable = [item for item in optional if item["evaluable"]]
+    required_bases = sorted({str(item["judge"]) for item in required_evaluable})
+    optional_bases = sorted({str(item["judge"]) for item in optional_evaluable})
     required_recall = (
         sum(bool(item["covered"]) for item in required_evaluable) / len(required_evaluable)
         if required_evaluable
@@ -704,6 +721,9 @@ def evaluate_generation(
         reason="recall over evaluable required facts"
         if required_evaluable
         else "no required facts were evaluable",
+        evaluation_bases=required_bases,
+        evaluable_unit_ids=[str(item["unit_id"]) for item in required_evaluable],
+        unevaluable_unit_ids=[str(item["unit_id"]) for item in required if not item["evaluable"]],
     )
     _record_metric(
         result,
@@ -713,6 +733,9 @@ def evaluate_generation(
         reason="recall over evaluable optional facts"
         if optional_evaluable
         else "no optional facts were evaluable",
+        evaluation_bases=optional_bases,
+        evaluable_unit_ids=[str(item["unit_id"]) for item in optional_evaluable],
+        unevaluable_unit_ids=[str(item["unit_id"]) for item in optional if not item["evaluable"]],
     )
     _record_metric(
         result,
@@ -724,6 +747,13 @@ def evaluate_generation(
             if forbidden or semantic_used
             else "case has no forbidden-claim labels and semantic judge was unavailable"
         ),
+        evaluation_bases=(
+            ["deterministic", "semantic_citation"]
+            if forbidden and semantic_used
+            else ["semantic_citation"]
+            if semantic_used
+            else ["deterministic"]
+        ),
     )
     _record_metric(
         result,
@@ -733,6 +763,7 @@ def evaluate_generation(
         reason="semantic citation judge completed"
         if semantic_used
         else "semantic citation judge was not available",
+        evaluation_bases=["semantic_citation"],
     )
     _record_metric(
         result,
@@ -761,6 +792,13 @@ def evaluate_generation(
         reason="all required correctness signals are evaluable"
         if correct_evaluable
         else "at least one required fact or refusal disposition is unevaluable",
+        evaluation_bases=sorted(
+            {
+                *(str(item["judge"]) for item in required_evaluable),
+                *(["semantic_citation"] if semantic_used else []),
+                "deterministic",
+            }
+        ),
     )
     return result
 
@@ -895,6 +933,7 @@ def evaluate_citations(
         reason="semantic citation judge completed"
         if semantic_used
         else "semantic citation judge was not available",
+        evaluation_bases=["semantic_citation"],
     )
     return result
 
@@ -938,6 +977,7 @@ def _metric(
     total_cases: int,
     evaluable_case_ids: list[str],
     unevaluable_case_ids: list[str],
+    evaluation_bases: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "value": round(mean(values), 6) if values else None,
@@ -946,6 +986,9 @@ def _metric(
         "unevaluable_cases": total_cases - len(values),
         "evaluable_case_ids": evaluable_case_ids,
         "unevaluable_case_ids": unevaluable_case_ids,
+        "evaluable_unit_ids": evaluable_case_ids,
+        "unevaluable_unit_ids": unevaluable_case_ids,
+        "evaluation_bases": evaluation_bases or ["deterministic"],
     }
 
 
@@ -975,12 +1018,73 @@ def _section_values(
 
 def _aggregate_metric(results: list[dict[str, Any]], section: str, key: str) -> dict[str, Any]:
     values, total, evaluable_ids, unevaluable_ids = _section_values(results, section, key)
+    bases = sorted(
+        {
+            str(basis)
+            for result in results
+            for payload in [result.get(section)]
+            if isinstance(payload, dict)
+            for status in [payload.get("metric_status", {}).get(key)]
+            if isinstance(status, dict) and status.get("evaluable") is True
+            for basis in status.get("evaluation_bases", ["deterministic"])
+        }
+    )
     return _metric(
         values,
         total_cases=total,
         evaluable_case_ids=evaluable_ids,
         unevaluable_case_ids=unevaluable_ids,
+        evaluation_bases=bases,
     )
+
+
+def _aggregate_fact_recall(
+    results: list[dict[str, Any]], importance: FactImportance
+) -> dict[str, Any]:
+    evaluable_units: list[str] = []
+    unevaluable_units: list[str] = []
+    evaluable_cases: set[str] = set()
+    unevaluable_cases: set[str] = set()
+    bases: set[str] = set()
+    covered = 0
+    total_cases = 0
+    for result in results:
+        generation = result.get("generation")
+        if not isinstance(generation, dict):
+            continue
+        total_cases += 1
+        case_id = str(result.get("case_id", ""))
+        case_has_evaluable = False
+        for fact in generation.get("facts", []):
+            if not isinstance(fact, dict) or fact.get("importance") != importance:
+                continue
+            unit_id = str(fact.get("unit_id") or f"{case_id}:{fact.get('fact_id', '')}")
+            if fact.get("evaluable") is True and isinstance(fact.get("covered"), bool):
+                evaluable_units.append(unit_id)
+                covered += int(fact["covered"])
+                case_has_evaluable = True
+                bases.add(str(fact.get("judge") or "deterministic"))
+            else:
+                unevaluable_units.append(unit_id)
+        if case_has_evaluable:
+            evaluable_cases.add(case_id)
+        else:
+            unevaluable_cases.add(case_id)
+    return {
+        "value": round(covered / len(evaluable_units), 6) if evaluable_units else None,
+        "evaluable_cases": len(evaluable_cases),
+        "total_cases": total_cases,
+        "unevaluable_cases": len(unevaluable_cases),
+        "evaluable_case_ids": sorted(evaluable_cases),
+        "unevaluable_case_ids": sorted(unevaluable_cases),
+        "evaluable_units": len(evaluable_units),
+        "total_units": len(evaluable_units) + len(unevaluable_units),
+        "unevaluable_units": len(unevaluable_units),
+        "evaluable_unit_ids": evaluable_units,
+        "unevaluable_unit_ids": unevaluable_units,
+        "evaluation_bases": sorted(bases),
+        "aggregation": "micro_over_fact_units",
+    }
 
 
 def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1007,8 +1111,8 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         aggregate["retrieval"][f"recall_at_{k}"] = aggregate["retrieval"][
             f"annotated_recall_at_{k}"
         ]
-        aggregate["retrieval"][f"required_evidence_recall_at_{k}"] = (
-            _aggregate_metric(results, "retrieval", f"required_evidence_recall_at_{k}")
+        aggregate["retrieval"][f"required_evidence_recall_at_{k}"] = _aggregate_metric(
+            results, "retrieval", f"required_evidence_recall_at_{k}"
         )
         aggregate["retrieval"][f"precision_at_{k}"] = _aggregate_metric(
             results, "retrieval", f"precision_at_{k}"
@@ -1028,9 +1132,9 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "redundancy_ratio",
     ):
         aggregate["context"][key] = _aggregate_metric(results, "context", key)
+    aggregate["generation"]["required_fact_recall"] = _aggregate_fact_recall(results, "required")
+    aggregate["generation"]["optional_fact_recall"] = _aggregate_fact_recall(results, "optional")
     for key in (
-        "required_fact_recall",
-        "optional_fact_recall",
         "answer_correctness",
         "forbidden_claim_violation",
         "unsupported_claim_detected",
@@ -1130,6 +1234,24 @@ def _load_index_metadata(settings: Settings) -> dict[str, Any]:
         }
         if not isinstance(manifest, dict):
             warnings.append(f"{report_name} is legacy and has no artifact manifest")
+        else:
+            index_path = (
+                settings.keyword_index_path
+                if report_name == "keyword_index"
+                else settings.vector_index_path
+            )
+            expected_artifact = manifest.get("index_artifact_sha256")
+            try:
+                actual_artifact = index_artifact_sha256(index_path)
+            except OSError:
+                actual_artifact = None
+            verified = bool(expected_artifact) and expected_artifact == actual_artifact
+            reports[report_name]["artifact_verified"] = verified
+            reports[report_name]["actual_index_artifact_sha256"] = actual_artifact
+            if not expected_artifact:
+                warnings.append(f"{report_name} manifest cannot identify its index artifact")
+            elif not verified:
+                warnings.append(f"{report_name} manifest does not match the queried index artifact")
     manifests = [
         item["manifest"] for item in reports.values() if isinstance(item.get("manifest"), dict)
     ]
@@ -1139,6 +1261,108 @@ def _load_index_metadata(settings: Settings) -> dict[str, Any]:
     for item in manifests:
         warnings.extend(str(value) for value in item.get("warnings", []))
     return {"reports": reports, "warnings": list(dict.fromkeys(warnings))}
+
+
+def _retrieval_branches(results: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+    used: set[str] = set()
+    degraded: set[str] = set()
+
+    def branches_for_mode(mode: str) -> set[str]:
+        if "keyword_only" in mode:
+            return {"keyword"}
+        if "vector_only" in mode:
+            return {"vector"}
+        if "hybrid" in mode:
+            return {"keyword", "vector"}
+        if "keyword" in mode:
+            return {"keyword"}
+        if "vector" in mode:
+            return {"vector"}
+        return set()
+
+    for result in results:
+        operational = result.get("operational")
+        if isinstance(operational, dict):
+            local_degraded = {str(item) for item in operational.get("degraded_components", [])}
+            degraded.update(local_degraded)
+            mode = operational.get("retrieval_mode")
+            if isinstance(mode, str):
+                used.update(branches_for_mode(mode).difference(local_degraded))
+        answer = result.get("answer")
+        if isinstance(answer, dict) and isinstance(answer.get("retrieval_mode"), str):
+            answer_mode = str(answer["retrieval_mode"])
+            used.update(branches_for_mode(answer_mode))
+            if "keyword_only" in answer_mode:
+                degraded.add("vector")
+            elif "vector_only" in answer_mode:
+                degraded.add("keyword")
+    return sorted(used), sorted(degraded)
+
+
+def _required_manifest_fields(branch: str) -> tuple[str, ...]:
+    common = (
+        "chunk_artifact_sha256",
+        "index_artifact_sha256",
+        "build_run_id",
+        "git_commit",
+    )
+    if branch == "vector":
+        return (*common, "embedding_model", "vector_index_version")
+    return (*common, "keyword_index_version")
+
+
+def _index_attribution(reports: dict[str, Any], actual_branches: list[str]) -> dict[str, Any]:
+    reasons: list[str] = []
+    selected_by_branch: dict[str, dict[str, Any]] = {}
+    for branch in actual_branches:
+        report = reports.get(f"{branch}_index")
+        manifest = report.get("manifest") if isinstance(report, dict) else None
+        if not isinstance(manifest, dict):
+            reasons.append(f"actual {branch} branch has no index manifest")
+            continue
+        assert isinstance(report, dict)
+        selected_by_branch[branch] = manifest
+        if report.get("artifact_verified") is not True:
+            reasons.append(f"actual {branch} index artifact is not verified")
+        missing = [key for key in _required_manifest_fields(branch) if not manifest.get(key)]
+        chunking = manifest.get("chunking")
+        if not isinstance(chunking, dict) or any(
+            chunking.get(key) is None for key in ("version", "target_chars", "max_chars", "overlap")
+        ):
+            missing.append("chunking")
+        if missing:
+            reasons.append(f"actual {branch} manifest is missing: {', '.join(missing)}")
+    if not actual_branches:
+        reasons.append("no retrieval branch usage was recorded")
+    selected = list(selected_by_branch.values())
+    hashes = {manifest.get("chunk_artifact_sha256") for manifest in selected}
+    chunkings = {
+        json.dumps(manifest.get("chunking"), sort_keys=True, ensure_ascii=False)
+        for manifest in selected
+    }
+    if len(hashes) > 1:
+        reasons.append("actual retrieval branches use different chunk artifacts")
+    if len(chunkings) > 1:
+        reasons.append("actual retrieval branches use different chunking manifests")
+    consistent = (
+        len(selected) == len(actual_branches)
+        and bool(selected)
+        and len(hashes) == 1
+        and len(chunkings) == 1
+    )
+    unified_hash = next(iter(hashes)) if consistent else None
+    unified_chunking = selected[0].get("chunking") if consistent else None
+    vector_manifest = selected_by_branch.get("vector")
+    return {
+        "index_manifest_consistent": consistent,
+        "attribution_safe": not reasons,
+        "attribution_unsafe_reasons": reasons,
+        "chunk_artifact_sha256": unified_hash,
+        "chunking": unified_chunking,
+        "embedding_model": (
+            vector_manifest.get("embedding_model") if isinstance(vector_manifest, dict) else None
+        ),
+    }
 
 
 def _run_metadata(
@@ -1153,27 +1377,13 @@ def _run_metadata(
 ) -> dict[str, Any]:
     indexes = _load_index_metadata(settings)
     reports = indexes["reports"]
-    keyword_manifest = (reports.get("keyword_index") or {}).get("manifest") or {}
-    vector_manifest = (reports.get("vector_index") or {}).get("manifest") or {}
-    chunk_hash = (
-        keyword_manifest.get("chunk_artifact_sha256")
-        if keyword_manifest.get("chunk_artifact_sha256")
-        == vector_manifest.get("chunk_artifact_sha256")
-        else None
-    )
-    chunking = keyword_manifest.get("chunking") or vector_manifest.get("chunking")
+    actual_branches, degraded_branches = _retrieval_branches(results)
+    attribution = _index_attribution(reports, actual_branches)
     answers = [item["answer"] for item in results if isinstance(item.get("answer"), dict)]
     llm_used = any(item.get("generator_mode") == "llm" for item in answers)
     planner_used = any(item.get("query_planner_status") == "used" for item in answers)
     reflection_used = any(
         item.get("retrieval_reflection_status") in {"sufficient", "retried"} for item in answers
-    )
-    degraded = sorted(
-        {
-            component
-            for item in results
-            for component in item.get("operational", {}).get("degraded_components", [])
-        }
     )
     semantic_used = any(
         (
@@ -1186,6 +1396,19 @@ def _run_metadata(
         )
         for item in results
     )
+    fact_judge_used = any(
+        isinstance(item.get("generation"), dict)
+        and any(
+            isinstance(fact, dict) and fact.get("judge") == "semantic"
+            for fact in item["generation"].get("facts", [])
+        )
+        for item in results
+    )
+    citation_judge_used = any(
+        isinstance(item.get("citation"), dict)
+        and item["citation"].get("semantic_judge_status") == "used"
+        for item in results
+    )
     return {
         "run_name": run_name,
         "timestamp": datetime.now(UTC).isoformat(),
@@ -1194,12 +1417,31 @@ def _run_metadata(
         "prompt_version": PROMPT_VERSION,
         "with_llm": with_llm,
         "semantic_judge_requested": semantic_judge,
+        "evaluator": {
+            "version": GOLDEN_EVALUATOR_VERSION,
+            "metric_definition_version": METRIC_DEFINITION_VERSION,
+            "page_mapping_version": PAGE_MAPPING_VERSION,
+            "text_normalization_version": TEXT_NORMALIZATION_VERSION,
+            "relevance_schema_version": RELEVANCE_SCHEMA_VERSION,
+            "fact_judge_version": FACT_COVERAGE_JUDGE_VERSION,
+            "citation_judge_version": SEMANTIC_CITATION_JUDGE_VERSION,
+            "judge_provider": settings.llm_provider if semantic_used else None,
+            "fact_judge_provider": settings.llm_provider if fact_judge_used else None,
+            "citation_judge_provider": (settings.llm_provider if citation_judge_used else None),
+            "fact_judge_model": settings.llm_model if fact_judge_used else None,
+            "citation_judge_model": settings.llm_model if citation_judge_used else None,
+        },
         "rag_framework": "llamaindex",
         "dataset_sha256": dataset_sha256,
         "evaluated_case_ids": [item["case_id"] for item in results],
-        "embedding_model": vector_manifest.get("embedding_model"),
-        "chunk_artifact_sha256": chunk_hash,
-        "chunking": chunking,
+        "embedding_model": attribution["embedding_model"],
+        "chunk_artifact_sha256": attribution["chunk_artifact_sha256"],
+        "chunking": attribution["chunking"],
+        "index_manifest_consistent": attribution["index_manifest_consistent"],
+        "attribution_safe": attribution["attribution_safe"],
+        "attribution_unsafe_reasons": attribution["attribution_unsafe_reasons"],
+        "actual_retrieval_branches": actual_branches,
+        "degraded_retrieval_branches": degraded_branches,
         "retrieval_config": {
             "backend": "hybrid_rrf",
             "rrf_k": RRF_K,
@@ -1242,7 +1484,7 @@ def _run_metadata(
             "fact_version": FACT_COVERAGE_JUDGE_VERSION,
         },
         "execution": {
-            "degraded_components": degraded,
+            "degraded_components": degraded_branches,
             "fallback_used": any(
                 isinstance(item.get("answer"), dict)
                 and (
@@ -1484,6 +1726,9 @@ def run_golden_benchmark(
                 "degraded_components": (
                     retrieval_response.degraded_components if retrieval_response is not None else []
                 ),
+                "retrieval_mode": (
+                    retrieval_response.retrieval_mode if retrieval_response is not None else None
+                ),
                 "metric_status": {},
             },
         }
@@ -1566,34 +1811,123 @@ def _aggregate_metric_nodes(value: Any, prefix: str = "") -> dict[str, dict[str,
     return nodes
 
 
+def _metric_compatibility_reasons(
+    key: str,
+    metric_a: dict[str, Any],
+    metric_b: dict[str, Any],
+    evaluator_a: dict[str, Any],
+    evaluator_b: dict[str, Any],
+) -> list[str]:
+    reasons: list[str] = []
+
+    def require_equal(field: str, label: str) -> None:
+        value_a = evaluator_a.get(field)
+        value_b = evaluator_b.get(field)
+        if value_a is None or value_b is None:
+            reasons.append(f"{label} is missing")
+        elif value_a != value_b:
+            reasons.append(f"{label} differs")
+
+    require_equal("version", "evaluator version")
+    require_equal("metric_definition_version", "metric definition version")
+    page_mapped = key.startswith(("retrieval.", "ranking.", "context.")) or key in {
+        "citation.citation_page_validity",
+        "citation.citation_quote_consistency",
+        "citation.citation_precision",
+        "citation.citation_recall",
+        "citation.annotated_citation_recall",
+    }
+    relevance_based = key.startswith(("retrieval.", "ranking.")) or key in {
+        "context.known_relevant_ratio_lower_bound",
+        "context.relevant_evidence_ratio",
+        "context.irrelevant_context_ratio",
+        "citation.citation_precision",
+        "citation.citation_recall",
+        "citation.annotated_citation_recall",
+    }
+    normalization_based = key in {
+        "context.redundancy_ratio",
+        "citation.citation_quote_consistency",
+        "citation.claim_to_citation_coverage",
+    }
+    if page_mapped:
+        require_equal("page_mapping_version", "page mapping version")
+    if relevance_based:
+        require_equal("relevance_schema_version", "relevance schema version")
+    if normalization_based:
+        require_equal("text_normalization_version", "text normalization version")
+
+    bases_a = set(metric_a.get("evaluation_bases", []))
+    bases_b = set(metric_b.get("evaluation_bases", []))
+    if bases_a != bases_b:
+        reasons.append("actual evaluation basis differs")
+    bases = bases_a | bases_b
+    if "semantic" in bases:
+        require_equal("fact_judge_version", "fact judge version")
+        require_equal("fact_judge_provider", "fact judge provider")
+        require_equal("fact_judge_model", "fact judge model")
+    if "semantic_citation" in bases:
+        require_equal("citation_judge_version", "citation judge version")
+        require_equal("citation_judge_provider", "citation judge provider")
+        require_equal("citation_judge_model", "citation judge model")
+    return reasons
+
+
 def compare_golden_runs(run_a_path: Path, run_b_path: Path) -> dict[str, Any]:
-    """Compare compatible Golden reports without hiding denominator changes."""
+    """Compare reports at global, metric-definition, denominator, and attribution levels."""
 
     run_a = json.loads(run_a_path.read_text(encoding="utf-8"))
     run_b = json.loads(run_b_path.read_text(encoding="utf-8"))
     errors: list[str] = []
     warnings: list[str] = []
+    schema_a = run_a.get("schema_version")
+    schema_b = run_b.get("schema_version")
+    schema_match = schema_a is not None and schema_a == schema_b
+    if not schema_match:
+        errors.append("Golden result schema version differs or is missing")
     sha_a = run_a.get("dataset", {}).get("sha256")
     sha_b = run_b.get("dataset", {}).get("sha256")
-    if not sha_a or sha_a != sha_b:
+    sha_match = bool(sha_a) and sha_a == sha_b
+    if not sha_match:
         errors.append("dataset SHA-256 differs or is missing")
     ids_a = [item.get("case_id") for item in run_a.get("results", [])]
     ids_b = [item.get("case_id") for item in run_b.get("results", [])]
-    if set(ids_a) != set(ids_b):
+    case_ids_match = set(ids_a) == set(ids_b)
+    if not case_ids_match:
         errors.append("evaluated case IDs differ")
     dimension_a = run_a.get("requested_dimension")
     dimension_b = run_b.get("requested_dimension")
-    if dimension_a != dimension_b:
-        errors.append("requested dimensions differ")
+    dimension_match = dimension_a is not None and dimension_a == dimension_b
+    if not dimension_match:
+        errors.append("requested dimensions differ or are missing")
 
-    metadata_a = _flatten_values(run_a.get("run_metadata", {}))
-    metadata_b = _flatten_values(run_b.get("run_metadata", {}))
+    run_metadata_a = run_a.get("run_metadata", {})
+    run_metadata_b = run_b.get("run_metadata", {})
+    metadata_a = _flatten_values(run_metadata_a)
+    metadata_b = _flatten_values(run_metadata_b)
     ignored_metadata = {"timestamp", "run_name", "git.dirty"}
     metadata_differences = {
         key: {"run_a": metadata_a.get(key), "run_b": metadata_b.get(key)}
         for key in sorted(set(metadata_a) | set(metadata_b))
         if key not in ignored_metadata and metadata_a.get(key) != metadata_b.get(key)
     }
+    evaluator_a = run_metadata_a.get("evaluator", {}) if isinstance(run_metadata_a, dict) else {}
+    evaluator_b = run_metadata_b.get("evaluator", {}) if isinstance(run_metadata_b, dict) else {}
+    attribution_a = (
+        run_metadata_a.get("attribution_safe") is True
+        if isinstance(run_metadata_a, dict)
+        else False
+    )
+    attribution_b = (
+        run_metadata_b.get("attribution_safe") is True
+        if isinstance(run_metadata_b, dict)
+        else False
+    )
+    attribution_safe = attribution_a and attribution_b
+    if not attribution_safe:
+        warnings.append(
+            "comparison is possible, but configuration attribution is unsafe for one or both runs"
+        )
 
     nodes_a = _aggregate_metric_nodes(run_a.get("aggregate", {}))
     nodes_b = _aggregate_metric_nodes(run_b.get("aggregate", {}))
@@ -1601,18 +1935,32 @@ def compare_golden_runs(run_a_path: Path, run_b_path: Path) -> dict[str, Any]:
     for key in sorted(set(nodes_a) | set(nodes_b)):
         a = nodes_a.get(key)
         b = nodes_b.get(key)
+        reasons = list(errors)
         if a is None or b is None:
-            warnings.append(f"metric is present in only one run: {key}")
-            continue
-        set_a = a.get("evaluable_case_ids", [])
-        set_b = b.get("evaluable_case_ids", [])
-        same_evaluable_set = set(set_a) == set(set_b)
-        if not same_evaluable_set:
-            warnings.append(f"evaluable case set differs for {key}; delta suppressed")
+            reasons.append("metric is present in only one run")
+            a = a or {}
+            b = b or {}
+        fact_metric = key in {
+            "generation.required_fact_recall",
+            "generation.optional_fact_recall",
+        }
+        unit_ids_a = a.get("evaluable_unit_ids" if fact_metric else "evaluable_case_ids", [])
+        unit_ids_b = b.get("evaluable_unit_ids" if fact_metric else "evaluable_case_ids", [])
+        if fact_metric and ("evaluable_unit_ids" not in a or "evaluable_unit_ids" not in b):
+            reasons.append("fact-level evaluable unit IDs are missing")
+        elif set(unit_ids_a) != set(unit_ids_b):
+            unit_label = "fact unit" if fact_metric else "case"
+            reasons.append(f"evaluable {unit_label} set differs")
+            warnings.append(f"evaluable {unit_label} set differs for {key}; delta suppressed")
+        if a and b:
+            reasons.extend(_metric_compatibility_reasons(key, a, b, evaluator_a, evaluator_b))
         value_a = a.get("value")
         value_b = b.get("value")
         numeric = isinstance(value_a, (int, float)) and isinstance(value_b, (int, float))
-        metric_comparable = not errors and same_evaluable_set and numeric
+        if not numeric:
+            reasons.append("one or both metric values are not numeric")
+        reasons = list(dict.fromkeys(reasons))
+        metric_comparable = not reasons
         delta = (
             round(value_b - value_a, 6)
             if metric_comparable
@@ -1626,9 +1974,10 @@ def compare_golden_runs(run_a_path: Path, run_b_path: Path) -> dict[str, Any]:
             "delta": delta,
             "evaluable_cases_a": a.get("evaluable_cases"),
             "evaluable_cases_b": b.get("evaluable_cases"),
-            "evaluable_case_ids_a": set_a,
-            "evaluable_case_ids_b": set_b,
+            "evaluable_unit_ids_a": unit_ids_a,
+            "evaluable_unit_ids_b": unit_ids_b,
             "comparable": metric_comparable,
+            "non_comparable_reasons": reasons,
         }
 
     usage_a = _flatten_values(
@@ -1643,22 +1992,53 @@ def compare_golden_runs(run_a_path: Path, run_b_path: Path) -> dict[str, Any]:
             "run_b": usage_b.get(key),
             "delta": (
                 usage_b[key] - usage_a[key]
-                if isinstance(usage_a.get(key), int) and isinstance(usage_b.get(key), int)
+                if not errors
+                and isinstance(usage_a.get(key), int)
+                and isinstance(usage_b.get(key), int)
                 else None
+            ),
+            "comparable": (
+                not errors
+                and isinstance(usage_a.get(key), int)
+                and isinstance(usage_b.get(key), int)
+            ),
+            "non_comparable_reasons": list(errors)
+            or (
+                []
+                if isinstance(usage_a.get(key), int) and isinstance(usage_b.get(key), int)
+                else ["one or both token usage values are missing"]
             ),
         }
         for key in sorted(set(usage_a) | set(usage_b))
+    }
+    global_checks = {
+        "schema_version_match": schema_match,
+        "dataset_sha256_match": sha_match,
+        "case_ids_match": case_ids_match,
+        "requested_dimension_match": dimension_match,
     }
     return {
         "schema_version": 1,
         "run_a": str(run_a_path),
         "run_b": str(run_b_path),
         "compatible": not errors,
-        "checks": {
-            "dataset_sha256_match": sha_a == sha_b and bool(sha_a),
-            "case_ids_match": set(ids_a) == set(ids_b),
-            "requested_dimension_match": dimension_a == dimension_b,
+        "attribution_safe": attribution_safe,
+        "attribution": {
+            "run_a": attribution_a,
+            "run_b": attribution_b,
+            "run_a_reasons": (
+                run_metadata_a.get("attribution_unsafe_reasons", [])
+                if isinstance(run_metadata_a, dict)
+                else ["run metadata is missing"]
+            ),
+            "run_b_reasons": (
+                run_metadata_b.get("attribution_unsafe_reasons", [])
+                if isinstance(run_metadata_b, dict)
+                else ["run metadata is missing"]
+            ),
         },
+        "global_checks": global_checks,
+        "checks": global_checks,
         "errors": errors,
         "warnings": list(dict.fromkeys(warnings)),
         "metadata_differences": metadata_differences,

@@ -285,6 +285,7 @@ def build_keyword_index(
             project_root=project_root or reports_dir.parents[1],
             run_id=run_id,
             keyword_index_version=INDEX_VERSION,
+            index_path=index_path,
         ),
     )
     reports_dir.mkdir(parents=True, exist_ok=True)

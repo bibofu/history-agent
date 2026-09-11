@@ -185,6 +185,7 @@ def build_vector_index(
                 f"{INDEX_VERSION}; fastembed={fastembed_version}; qdrant={qdrant_version}"
             ),
             embedding_model=MODEL_NAME,
+            index_path=index_path,
         ),
     )
     reports_dir.mkdir(parents=True, exist_ok=True)

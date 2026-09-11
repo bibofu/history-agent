@@ -98,6 +98,8 @@ Routing / operational：
 
 所有 case metric 都带统一的 `metric_status.{name}={value,evaluable,reason}`。aggregate 只读取明确 `evaluable=true` 的数值，并继续输出 `{value,evaluable_cases}`，同时增加 `total_cases`、`unevaluable_cases` 和两类 case IDs。没有 forbidden labels、judge 未运行/失败、required fact 未评估等情况不会作为 0 分进入分母；若 required fact 有任一项不可评，Answer Correctness 也是不可评。
 
+Fact Recall 的 aggregate 使用 fact-level micro denominator，不再平均各 case recall。稳定单元 ID 为 `case_id:fact_id`；报告同时保存 `evaluable_unit_ids`、`unevaluable_unit_ids`、实际 unit 数和 `aggregation=micro_over_fact_units`。因此同一个 case ID 在两个 run 中并不保证 Fact Recall 可比。Answer Correctness 仍以 case ID 为评估单元。
+
 ### Reserved / future work
 
 - 完整 LLM prompt context 的独立 precision、token utilization 和跨证据 redundancy；
@@ -134,7 +136,9 @@ Routing / operational：
 
 详细结果写入 `data/reports/golden_benchmark_<run_id>.json`，并更新 `golden_benchmark_latest.json`。
 
-chunk、keyword index 和 vector index 的构建报告均写入 manifest，记录实际 chunking 参数、chunk artifact SHA、embedding/index 版本、build run ID 和 Git commit。Golden 只读取这些 manifest；旧索引缺少 manifest 时相应字段保持 `null` 并产生 warning，不再从当前函数默认值反推历史实验配置。
+chunk、keyword index 和 vector index 的构建报告均写入 manifest，记录实际 chunking 参数、chunk artifact SHA、index artifact SHA、embedding/index 版本、build run ID 和 Git commit。Golden 会把 manifest 的 index artifact SHA 与实际查询路径重新核对；旧索引缺少 manifest 或 artifact identity 时相应字段保持 `null` 并产生 warning，不再从当前函数默认值反推历史实验配置。
+
+run metadata 记录 `actual_retrieval_branches`、`degraded_retrieval_branches`、`index_manifest_consistent` 和 `attribution_safe`。只有实际参与检索的分支用于归因判断：双分支必须具有完整 manifest、索引 artifact 可验证，并使用相同 chunk artifact/chunking；单分支降级时只要求实际分支满足这些条件，未参与的 vector 配置不会被冒充成本次 embedding 配置。
 
 ## How to compare experiments
 
@@ -155,6 +159,14 @@ chunk、keyword index 和 vector index 的构建报告均写入 manifest，记�
 .\.venv\Scripts\history-agent.exe eval golden-compare `
   data/reports/baseline.json data/reports/chunk800.json --json
 ```
+
+compare 分三层给出结论：
+
+- `compatible`：结果 schema、dataset SHA、实际 case IDs 和 requested dimension 是否一致；不一致时 CLI 返回非零退出码；
+- `metrics.*.comparable`：对应 metric definition、page/relevance mapping、实际 judge basis、semantic judge 版本/供应商/模型及评估单元是否一致；某个 semantic 指标不可比不会阻止 deterministic retrieval 指标；
+- `attribution_safe`：两边实际索引 manifest 是否足以支持配置归因。该项为 false 时仍可比较同口径原始指标，CLI 返回零，但会显著警告不得把 delta 归因于 chunking、embedding 或 index 变化。
+
+chunk size、embedding/retrieval 配置、generation model、prompt 和 Top-K 是允许变化的实验变量，会显示在 `metadata_differences`，不会自动阻止无关指标。evaluator/metric definition 不同会阻止相应指标；Fact Recall 还要求两边 `case_id:fact_id` 分母完全相同。旧报告缺少 evaluator 或 unit metadata 时可以读取，但相关 metric 明确标为 `comparable=false` 并给出 `non_comparable_reasons`。
 
 不要只比较 Answer Correctness。应对齐同一 dataset SHA 和 case IDs，再逐层比较：
 

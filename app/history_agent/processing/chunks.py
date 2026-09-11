@@ -152,6 +152,34 @@ def chunk_artifact_sha256(chunks_dir: Path) -> str:
     return digest.hexdigest()
 
 
+def index_artifact_sha256(index_path: Path) -> str | None:
+    """Hash an index file or directory so a report can be tied to the queried artifact."""
+
+    if index_path.is_file():
+        paths = [index_path]
+        root = index_path.parent
+    elif index_path.is_dir():
+        paths = sorted(
+            (
+                path
+                for path in index_path.rglob("*")
+                if path.is_file() and not path.name.endswith(".lock")
+            ),
+            key=lambda path: path.relative_to(index_path).as_posix(),
+        )
+        root = index_path
+    else:
+        return None
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
 def git_commit(project_root: Path) -> str | None:
     try:
         result = subprocess.run(
@@ -182,6 +210,7 @@ def index_artifact_manifest(
     keyword_index_version: str | None = None,
     vector_index_version: str | None = None,
     embedding_model: str | None = None,
+    index_path: Path | None = None,
 ) -> dict[str, Any]:
     """Describe actual inputs of an index build; never infer old chunk parameters."""
 
@@ -210,6 +239,9 @@ def index_artifact_manifest(
     return {
         "chunking": chunking,
         "chunk_artifact_sha256": chunk_artifact_sha256(chunks_dir),
+        "index_artifact_sha256": (
+            index_artifact_sha256(index_path) if index_path is not None else None
+        ),
         "embedding_model": embedding_model,
         "keyword_index_version": keyword_index_version,
         "vector_index_version": vector_index_version,
@@ -462,9 +494,7 @@ def build_all_chunks(
         "build_run_id": run_id,
         "git_commit": git_commit(project_root),
         "warnings": (
-            []
-            if full_build
-            else ["partial chunk build cannot prove uniform chunking parameters"]
+            [] if full_build else ["partial chunk build cannot prove uniform chunking parameters"]
         ),
     }
     summary = ChunkBuildSummary(
