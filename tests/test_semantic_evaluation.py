@@ -137,3 +137,41 @@ def test_semantic_calibration_measures_detection_accuracy(
 
     assert result["coverage"] == 1.0
     assert result["accuracy"] == 1.0
+
+
+def test_fact_coverage_judge_returns_structured_per_fact_results(
+    work_path: Path, monkeypatch: Any
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        project_root=work_path,
+        data_dir=Path("data"),
+        llm_api_key="test-key",
+    )
+    content = json.dumps(
+        {
+            "decisions": [
+                {"fact_id": "f1", "covered": True, "reason": "回答明确提及。"},
+                {"fact_id": "f2", "covered": False, "reason": "回答没有提及。"},
+            ]
+        },
+        ensure_ascii=False,
+    )
+    monkeypatch.setattr(semantic.httpx, "post", lambda *args, **kwargs: _Response(content))
+
+    result = semantic.judge_fact_coverage(
+        settings,
+        question="发生了什么？",
+        answer="回答只覆盖第一项。",
+        facts=[
+            {"fact_id": "f1", "claim": "第一项事实"},
+            {"fact_id": "f2", "claim": "第二项事实"},
+        ],
+    )
+
+    assert result["status"] == "used"
+    assert result["decisions"] == [
+        {"fact_id": "f1", "covered": True, "reason": "回答明确提及。"},
+        {"fact_id": "f2", "covered": False, "reason": "回答没有提及。"},
+    ]
+    assert result["usage"]["total_tokens"] == 120

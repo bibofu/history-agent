@@ -20,6 +20,7 @@ from history_agent.evaluation.comprehensive import (
     audit_comprehensive_question_set,
     evaluate_structured_questions,
 )
+from history_agent.evaluation.golden import run_golden_benchmark
 from history_agent.evaluation.intersections import (
     build_intersection_review_packet,
     evaluate_intersections,
@@ -1356,6 +1357,87 @@ def eval_retrieval(
         typer.echo(f"Recall@{top_k}: {recall:.2%}")
         typer.echo(f"MRR: {mrr:.4f}")
         typer.echo(str(settings.reports_dir / "retrieval_eval_latest.json"))
+
+
+@eval_app.command("golden")
+def eval_golden(
+    dataset: Annotated[
+        str,
+        typer.Option("--dataset", help="Golden dataset path relative to project root."),
+    ] = "evals/golden/golden_questions.json",
+    dimension: Annotated[
+        Literal[
+            "all",
+            "routing",
+            "retrieval",
+            "ranking",
+            "context",
+            "generation",
+            "citation",
+        ],
+        typer.Option("--dimension", help="Evaluate one layer or all annotated layers."),
+    ] = "all",
+    case_id: Annotated[
+        list[str] | None,
+        typer.Option("--case-id", help="Run one or more case IDs."),
+    ] = None,
+    category: Annotated[
+        list[str] | None,
+        typer.Option("--category", help="Run one or more Golden categories."),
+    ] = None,
+    limit: Annotated[int | None, typer.Option("--limit", min=1)] = None,
+    top_k: Annotated[int, typer.Option("--top-k", min=10, max=100)] = 10,
+    run_name: Annotated[
+        str | None,
+        typer.Option("--run-name", help="Experiment label stored in run metadata."),
+    ] = None,
+    with_llm: bool = typer.Option(
+        False,
+        "--with-llm",
+        help="Use the configured generation model for generation/citation dimensions.",
+    ),
+    semantic_judge: bool = typer.Option(
+        False,
+        "--semantic-judge",
+        help="Use the configured LLM for semantic fact and citation judgments.",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit the full JSON result."),
+) -> None:
+    """Run the layered Unified RAG Golden Benchmark."""
+
+    settings = get_settings()
+    settings.ensure_runtime_dirs()
+    try:
+        payload = run_golden_benchmark(
+            settings=settings,
+            dataset_path=settings.project_root / dataset,
+            dimension=dimension,
+            case_ids=set(case_id or []),
+            categories=set(category or []),
+            limit=limit,
+            top_k=top_k,
+            run_name=run_name,
+            with_llm=with_llm,
+            semantic_judge=semantic_judge,
+        )
+    except (OSError, ValueError, ResearchDataError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    aggregate = payload["aggregate"]
+    assert isinstance(aggregate, dict)
+    typer.echo(f"golden benchmark run: {payload['run_id']}")
+    typer.echo(f"cases: {aggregate['case_count']}; dimension: {dimension}")
+    retrieval = aggregate["retrieval"]
+    if isinstance(retrieval, dict) and retrieval.get("hit_rate_at_10"):
+        metric = retrieval["hit_rate_at_10"]
+        if isinstance(metric, dict) and metric["value"] is not None:
+            typer.echo(
+                f"HitRate@10: {float(metric['value']):.2%} "
+                f"({metric['evaluable_cases']} evaluable cases)"
+            )
+    typer.echo(str(settings.reports_dir / "golden_benchmark_latest.json"))
 
 
 @eval_app.command("answers")

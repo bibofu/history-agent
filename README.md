@@ -208,6 +208,9 @@ uv sync --extra ocr --extra vector --extra app --group dev
 # 审计 M8.1 的 105 题综合评估集，并回归 18 个结构化查询
 .\.venv\Scripts\history-agent.exe eval comprehensive --verify-structured
 
+# 用统一 Golden Dataset 分层评估 routing、retrieval、context、generation 与 citation
+.\.venv\Scripts\history-agent.exe eval golden --dimension all --run-name baseline
+
 # 运行 v13 真实 DeepSeek 链路，并启用逐回答语义引文评判、错误校准集和延迟统计
 .\.venv\Scripts\history-agent.exe eval answers --top-k 10 --with-llm
 
@@ -224,6 +227,8 @@ uv sync --extra ocr --extra vector --extra app --group dev
 
 v13 的真实 LLM 评测方法、指标口径和首轮基线见
 [`evals/V13_LLM_EVALUATION.md`](evals/V13_LLM_EVALUATION.md)。
+Unified RAG Golden Benchmark 的标注规则、指标分母和实验对比方法见
+[`evals/golden/README.md`](evals/golden/README.md)。
 
 如果扫描发现某份已登记 PDF 的 SHA-256 发生变化，程序会保留旧版本，不会直接接受新内容。确认差异后运行：
 

@@ -1,0 +1,486 @@
+{
+  "schema_version": 1,
+  "version": "unified-golden-v1",
+  "description": "首批从现有人工页码与必要事实标签迁移的统一 RAG 分层评测样本；relevance_complete 均为 false，不假装拥有完整相关页集合。",
+  "cases": [
+    {
+      "id": "golden_event_zunyi_001",
+      "question": "遵义会议解决了哪些重要问题？",
+      "category": "event",
+      "difficulty": "medium",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "cpc_history_volume_1", "pdf_page": 483},
+          {"document_id": "cpc_history_volume_1", "pdf_page": 484}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "military_issue",
+          "claim": "会议集中解决了军事问题。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 483}],
+          "deterministic_patterns": ["军事问题"]
+        },
+        {
+          "fact_id": "organization_issue",
+          "claim": "会议同时解决了组织问题。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 484}],
+          "deterministic_patterns": ["组织问题"]
+        },
+        {
+          "fact_id": "mao_leadership",
+          "claim": "会议确立了毛泽东在党中央和红军的领导地位。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 484}],
+          "deterministic_patterns": ["确立了毛泽东", "毛泽东的领导地位"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "event_zunyi"}
+    },
+    {
+      "id": "golden_viewpoint_investigation_001",
+      "question": "毛泽东关于调查研究有哪些观点？",
+      "category": "viewpoint",
+      "difficulty": "medium",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "mao_selected_works_combined", "pdf_page": 1370},
+          {"document_id": "mao_selected_works_combined", "pdf_page": 1374},
+          {"document_id": "mao_selected_works_combined", "pdf_page": 1375},
+          {"document_id": "mao_selected_works_combined", "pdf_page": 1848}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "investigation",
+          "claim": "毛泽东强调调查研究。",
+          "importance": "required",
+          "evidence": [{"document_id": "mao_selected_works_combined", "pdf_page": 1370}],
+          "deterministic_patterns": ["调查研究"]
+        },
+        {
+          "fact_id": "mass_line",
+          "claim": "调查研究应当联系群众路线并同群众商量。",
+          "importance": "required",
+          "evidence": [
+            {"document_id": "mao_selected_works_combined", "pdf_page": 1374},
+            {"document_id": "mao_selected_works_combined", "pdf_page": 1375}
+          ],
+          "deterministic_patterns": ["群众路线", "同群众商量"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "viewpoint_mao_investigation"}
+    },
+    {
+      "id": "golden_intersection_long_march_001",
+      "question": "毛泽东和周恩来在长征期间有哪些交集？",
+      "category": "intersection",
+      "difficulty": "hard",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 150},
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 153},
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 156},
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 161}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "both_people",
+          "claim": "答案应明确区分并同时涉及毛泽东和周恩来。",
+          "importance": "required",
+          "evidence": [{"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 150}],
+          "deterministic_patterns": ["毛泽东、周恩来", "毛泽东和周恩来"]
+        },
+        {
+          "fact_id": "documented_contact",
+          "claim": "现有页码中记载了再度会谈或中央负责人共同活动的线索。",
+          "importance": "required",
+          "evidence": [
+            {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 153},
+            {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 156}
+          ],
+          "deterministic_patterns": ["再度会谈", "中央负责人"]
+        }
+      ],
+      "forbidden_claims": [
+        {
+          "claim": "两人只要在同一页出现就能证明共同参与。",
+          "reason": "人名共现不能自动升级为共同动作。",
+          "deterministic_patterns": ["同一页出现就能证明共同参与"]
+        }
+      ],
+      "reference_answer": null,
+      "semantic_criteria": ["两人的具体互动必须由原文直接支持，不能仅凭人名共现确认。"],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "intersection_long_march"}
+    },
+    {
+      "id": "golden_timeline_zhou_1956_001",
+      "question": "周恩来在1956年主要有哪些经历？",
+      "category": "timeline",
+      "difficulty": "hard",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["structured_timeline", "hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 688},
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 691},
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 701},
+          {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 723}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "science_plan",
+          "claim": "1956年的经历包括向科学进军或科学发展远景规划工作。",
+          "importance": "required",
+          "evidence": [{"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 688}],
+          "deterministic_patterns": ["向科学进军", "科学发展远景规划"]
+        },
+        {
+          "fact_id": "economic_work",
+          "claim": "1956年的经历包括国民经济计划或公私合营相关工作。",
+          "importance": "required",
+          "evidence": [
+            {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 701},
+            {"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 723}
+          ],
+          "deterministic_patterns": ["国民经济计划", "公私合营"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "timeline_zhou_1956"}
+    },
+    {
+      "id": "golden_organization_zhou_1954_001",
+      "question": "周恩来在1954年担任哪些主要职务？",
+      "category": "organization",
+      "difficulty": "medium",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval", "structured_timeline"]},
+      "retrieval_gold": {
+        "required_evidence": [{"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 629}],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "premier",
+          "claim": "周恩来担任国务院总理。",
+          "importance": "required",
+          "evidence": [{"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 629}],
+          "deterministic_patterns": ["国务院总理"]
+        },
+        {
+          "fact_id": "foreign_minister",
+          "claim": "周恩来兼任外交部部长。",
+          "importance": "required",
+          "evidence": [{"document_id": "zhou_enlai_chronology_1949_1976", "pdf_page": 629}],
+          "deterministic_patterns": ["兼任外交部部长"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "organization_zhou_1954"}
+    },
+    {
+      "id": "golden_conflict_lushan_001",
+      "question": "庐山会议前期围绕大跃进成绩与问题出现了哪些不同意见？",
+      "category": "conflict",
+      "difficulty": "hard",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "cpc_history_volume_2", "pdf_page": 526},
+          {"document_id": "cpc_history_volume_2", "pdf_page": 527}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "positive_assessment",
+          "claim": "一种意见认为大跃进成绩很大。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_2", "pdf_page": 526}],
+          "deterministic_patterns": ["成绩很大", "成绩伟大"]
+        },
+        {
+          "fact_id": "problem_assessment",
+          "claim": "另一种意见指出问题不少或出现了乱子。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_2", "pdf_page": 527}],
+          "deterministic_patterns": ["问题不少", "乱子"]
+        },
+        {
+          "fact_id": "correction",
+          "claim": "会议前期涉及纠正左倾错误。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_2", "pdf_page": 527}],
+          "deterministic_patterns": ["纠正", "纠左", "纠“左”"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": ["必须分别呈现不同意见，不能把先后变化改写为无证据的因果。"],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "conflict_lushan_correction"}
+    },
+    {
+      "id": "golden_multihop_compare_meetings_001",
+      "question": "比较遵义会议和1959年庐山会议各自讨论的核心问题、会议进程和后续影响。",
+      "category": "multi_hop",
+      "difficulty": "hard",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "cpc_history_volume_1", "pdf_page": 483},
+          {"document_id": "cpc_history_volume_1", "pdf_page": 484},
+          {"document_id": "cpc_history_volume_2", "pdf_page": 526},
+          {"document_id": "cpc_history_volume_2", "pdf_page": 527},
+          {"document_id": "cpc_history_volume_2", "pdf_page": 535},
+          {"document_id": "cpc_history_volume_2", "pdf_page": 536}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "zunyi_military",
+          "claim": "遵义会议讨论并解决军事问题。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 483}],
+          "deterministic_patterns": ["军事问题"]
+        },
+        {
+          "fact_id": "zunyi_organization",
+          "claim": "遵义会议讨论并解决组织问题。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 484}],
+          "deterministic_patterns": ["组织问题"]
+        },
+        {
+          "fact_id": "lushan_correction",
+          "claim": "庐山会议前期讨论纠左。",
+          "importance": "required",
+          "evidence": [
+            {"document_id": "cpc_history_volume_2", "pdf_page": 526},
+            {"document_id": "cpc_history_volume_2", "pdf_page": 527}
+          ],
+          "deterministic_patterns": ["纠左", "纠“左”"]
+        },
+        {
+          "fact_id": "lushan_anti_right",
+          "claim": "庐山会议随后转向反右。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_2", "pdf_page": 535}],
+          "deterministic_patterns": ["反右"]
+        },
+        {
+          "fact_id": "lushan_consequence",
+          "claim": "庐山会议的后续产生了严重后果。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_2", "pdf_page": 536}],
+          "deterministic_patterns": ["严重后果"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": ["两个会议的议题、过程和影响必须分别挂靠各自引文，不得跨会议错配引用。"],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "complex_compare_zunyi_lushan"}
+    },
+    {
+      "id": "golden_adversarial_chair_001",
+      "question": "毛泽东和周恩来在1949年10月9日是否共同当选为全国政协主席？",
+      "category": "adversarial",
+      "difficulty": "hard",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [{"document_id": "mao_zedong_chronology_volume_4", "pdf_page": 12}],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "mao_chair",
+          "claim": "材料记载毛泽东当选为全国政协主席。",
+          "importance": "required",
+          "evidence": [{"document_id": "mao_zedong_chronology_volume_4", "pdf_page": 12}],
+          "deterministic_patterns": ["毛泽东", "全国政协主席"]
+        },
+        {
+          "fact_id": "zhou_distinction",
+          "claim": "周恩来出现在材料中，但不能据此说他也当选全国政协主席。",
+          "importance": "required",
+          "evidence": [{"document_id": "mao_zedong_chronology_volume_4", "pdf_page": 12}],
+          "deterministic_patterns": ["周恩来"]
+        }
+      ],
+      "forbidden_claims": [
+        {
+          "claim": "周恩来当选为全国政协主席",
+          "reason": "名单中出现周恩来不能证明他也当选全国政协主席。",
+          "deterministic_patterns": ["周恩来当选为全国政协主席"]
+        }
+      ],
+      "reference_answer": null,
+      "semantic_criteria": ["必须准确区分主席与其他参会或任职身份。"],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "intersection_negative_mao_zhou_chair"}
+    },
+    {
+      "id": "golden_event_party_foundation_001",
+      "question": "中国共产党在1921年是怎样成立的？",
+      "category": "event",
+      "difficulty": "medium",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "cpc_history_volume_1", "pdf_page": 120},
+          {"document_id": "cpc_history_volume_1", "pdf_page": 121},
+          {"document_id": "cpc_history_volume_1", "pdf_page": 122}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "first_congress",
+          "claim": "中国共产党第一次全国代表大会召开。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 120}],
+          "deterministic_patterns": ["第一次全国代表大会", "党的一大"]
+        },
+        {
+          "fact_id": "shanghai",
+          "claim": "大会最初在上海举行。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 121}],
+          "deterministic_patterns": ["上海"]
+        },
+        {
+          "fact_id": "nanhu",
+          "claim": "大会后来转移到嘉兴南湖继续举行。",
+          "importance": "required",
+          "evidence": [{"document_id": "cpc_history_volume_1", "pdf_page": 122}],
+          "deterministic_patterns": ["嘉兴南湖", "南湖"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "event_party_foundation"}
+    },
+    {
+      "id": "golden_viewpoint_contradiction_001",
+      "question": "毛泽东在矛盾论中怎样分析主要矛盾？",
+      "category": "viewpoint",
+      "difficulty": "medium",
+      "answerability": "answerable",
+      "eval_dimensions": ["routing", "retrieval", "ranking", "context", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": {
+        "required_evidence": [
+          {"document_id": "mao_selected_works_combined", "pdf_page": 196},
+          {"document_id": "mao_selected_works_combined", "pdf_page": 197},
+          {"document_id": "mao_selected_works_combined", "pdf_page": 198}
+        ],
+        "relevant_evidence": [],
+        "relevance_complete": false
+      },
+      "gold_facts": [
+        {
+          "fact_id": "principal_contradiction",
+          "claim": "复杂事物的发展过程中存在主要矛盾。",
+          "importance": "required",
+          "evidence": [{"document_id": "mao_selected_works_combined", "pdf_page": 196}],
+          "deterministic_patterns": ["主要的矛盾", "主要矛盾"]
+        },
+        {
+          "fact_id": "leading_role",
+          "claim": "主要矛盾对事物发展起领导或决定作用。",
+          "importance": "required",
+          "evidence": [{"document_id": "mao_selected_works_combined", "pdf_page": 197}],
+          "deterministic_patterns": ["领导的作用", "决定的作用"]
+        },
+        {
+          "fact_id": "principal_aspect",
+          "claim": "矛盾双方还应区分主要方面。",
+          "importance": "required",
+          "evidence": [{"document_id": "mao_selected_works_combined", "pdf_page": 198}],
+          "deterministic_patterns": ["主要方面"]
+        }
+      ],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "viewpoint_contradiction"}
+    },
+    {
+      "id": "golden_refusal_einstein_001",
+      "question": "爱因斯坦在1925年担任了什么党内职务？",
+      "category": "refusal",
+      "difficulty": "easy",
+      "answerability": "unanswerable",
+      "eval_dimensions": ["routing", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": null,
+      "gold_facts": [],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "refusal_einstein"}
+    },
+    {
+      "id": "golden_refusal_out_of_scope_001",
+      "question": "习近平在2024年考察了哪些地方？",
+      "category": "refusal",
+      "difficulty": "easy",
+      "answerability": "unanswerable",
+      "eval_dimensions": ["routing", "generation", "citation"],
+      "route_gold": {"preferred_routes": ["hybrid_retrieval"]},
+      "retrieval_gold": null,
+      "gold_facts": [],
+      "forbidden_claims": [],
+      "reference_answer": null,
+      "semantic_criteria": [],
+      "metadata": {"source": "evals/retrieval_questions.json", "reviewed": true, "reviewed_by": "existing-eval-curation", "reviewed_at": "2026-09-09", "legacy_case_id": "refusal_xi_2024"}
+    }
+  ]
+}

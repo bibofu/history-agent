@@ -50,6 +50,23 @@ class SemanticCitationCaseSet(BaseModel):
     cases: list[SemanticCitationCase] = Field(min_length=1)
 
 
+class FactCoverageDecision(BaseModel):
+    fact_id: str
+    covered: bool
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class FactCoverageJudgment(BaseModel):
+    decisions: list[FactCoverageDecision] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_fact_ids(self) -> FactCoverageJudgment:
+        ids = [item.fact_id for item in self.decisions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("fact coverage judgment contains duplicate fact IDs")
+        return self
+
+
 def load_semantic_case_set(path: Path) -> SemanticCitationCaseSet:
     return SemanticCitationCaseSet.model_validate_json(path.read_text(encoding="utf-8"))
 
@@ -193,6 +210,112 @@ def judge_citation_semantics(
         "verdict": judgment.verdict,
         "unsupported_claims": judgment.unsupported_claims,
         "rationale": judgment.rationale,
+        "latency_ms": round((perf_counter() - started) * 1000),
+        "usage": usage or None,
+    }
+
+
+def _fact_judge_messages(
+    question: str,
+    answer: str,
+    facts: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    fact_lines = "\n".join(f"- {item['fact_id']}: {item['claim']}" for item in facts)
+    system = (
+        "你是严格的历史问答覆盖度评测员。只判断回答正文是否明确表达了每条给定事实；"
+        "允许忠实同义改写，但不得使用外部知识、问题中的暗示或引文原文替回答补全事实。"
+        "对每个 fact_id 都必须返回一项，不能增加、删除或重复 ID。只输出 JSON 对象，格式为"
+        '{"decisions":[{"fact_id":"f1","covered":true,'
+        '"reason":"回答中对应的简短依据"}]}。reason 必须解释正文为何覆盖或未覆盖。'
+    )
+    user = f"问题：{question}\n\n回答：\n{answer}\n\n待核对事实：\n{fact_lines}"
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def judge_fact_coverage(
+    settings: Settings,
+    *,
+    question: str,
+    answer: str,
+    facts: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Semantically judge gold facts that deterministic matching could not resolve."""
+
+    started = perf_counter()
+    if not facts:
+        return {
+            "status": "not_applicable",
+            "decisions": [],
+            "latency_ms": 0,
+            "usage": None,
+        }
+    if not settings.llm_enabled:
+        return {
+            "status": "not_configured",
+            "decisions": [],
+            "latency_ms": 0,
+            "usage": None,
+        }
+    expected_ids = {item["fact_id"] for item in facts}
+    if len(expected_ids) != len(facts):
+        raise ValueError("fact coverage input requires unique fact IDs")
+    assert settings.llm_api_key is not None
+    usage: dict[str, int] = {}
+    judgment: FactCoverageJudgment | None = None
+    for attempt in range(2):
+        try:
+            response = httpx.post(
+                settings.llm_base_url.rstrip("/") + "/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.llm_api_key.get_secret_value()}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": settings.llm_model,
+                    "messages": _fact_judge_messages(question, answer, facts),
+                    "response_format": {"type": "json_object"},
+                    "stream": False,
+                    "max_tokens": 1200,
+                    "thinking": {"type": "disabled"},
+                },
+                timeout=settings.llm_timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            choice = payload["choices"][0]
+            if choice.get("finish_reason") == "length":
+                raise ValueError("fact judge output reached token limit")
+            candidate = FactCoverageJudgment.model_validate_json(
+                choice["message"]["content"]
+            )
+            if {item.fact_id for item in candidate.decisions} != expected_ids:
+                raise ValueError("fact judge did not return the requested fact IDs")
+            judgment = candidate
+            raw_usage = payload.get("usage", {})
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                if key in raw_usage:
+                    usage[key] = usage.get(key, 0) + int(raw_usage[key])
+            break
+        except httpx.HTTPError as exc:
+            return {
+                "status": _error_code(exc),
+                "decisions": [],
+                "latency_ms": round((perf_counter() - started) * 1000),
+                "usage": usage or None,
+            }
+        except (KeyError, IndexError, TypeError, ValueError, ValidationError):
+            if attempt == 0:
+                continue
+    if judgment is None:
+        return {
+            "status": "invalid_response",
+            "decisions": [],
+            "latency_ms": round((perf_counter() - started) * 1000),
+            "usage": usage or None,
+        }
+    return {
+        "status": "used",
+        "decisions": [item.model_dump() for item in judgment.decisions],
         "latency_ms": round((perf_counter() - started) * 1000),
         "usage": usage or None,
     }
