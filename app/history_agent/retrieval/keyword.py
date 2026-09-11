@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from history_agent.errors import IndexBuildError, RetrievalError
-from history_agent.processing.chunks import load_person_aliases
+from history_agent.processing.chunks import index_artifact_manifest, load_person_aliases
 from history_agent.processing.models import ChunkRecord
 from history_agent.retrieval.models import (
     KeywordIndexSummary,
@@ -212,7 +212,12 @@ def _initialize(connection: sqlite3.Connection) -> None:
 
 
 def build_keyword_index(
-    *, chunks_dir: Path, index_path: Path, reports_dir: Path, run_id: str
+    *,
+    chunks_dir: Path,
+    index_path: Path,
+    reports_dir: Path,
+    run_id: str,
+    project_root: Path | None = None,
 ) -> KeywordIndexSummary:
     started_at = utc_now()
     records = load_chunks(chunks_dir)
@@ -274,6 +279,13 @@ def build_keyword_index(
         chunks=len(records),
         index_path=str(index_path),
         size_bytes=index_path.stat().st_size,
+        manifest=index_artifact_manifest(
+            chunks_dir=chunks_dir,
+            reports_dir=reports_dir,
+            project_root=project_root or reports_dir.parents[1],
+            run_id=run_id,
+            keyword_index_version=INDEX_VERSION,
+        ),
     )
     reports_dir.mkdir(parents=True, exist_ok=True)
     rendered = summary.model_dump_json(indent=2)

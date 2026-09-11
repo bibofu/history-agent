@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -28,6 +29,9 @@ from history_agent.processing.structure import section_path_for_page, structure_
 from history_agent.research.catalog import load_person_catalog
 
 CHUNKER_VERSION = "page-sentence-chunker-v1"
+CHUNK_TARGET_CHARS = 650
+CHUNK_MAX_CHARS = 900
+CHUNK_OVERLAP = 0
 ARABIC_DATE = re.compile(
     r"(?P<year>(?:18|19|20)\d{2})\s*年"
     r"(?:\s*(?P<month>\d{1,2})\s*月(?:\s*(?P<day>\d{1,2})\s*日)?)?"
@@ -96,7 +100,12 @@ def effective_pages(
     return effective
 
 
-def split_text(text: str, *, target_chars: int = 650, max_chars: int = 900) -> list[str]:
+def split_text(
+    text: str,
+    *,
+    target_chars: int = CHUNK_TARGET_CHARS,
+    max_chars: int = CHUNK_MAX_CHARS,
+) -> list[str]:
     units: list[str] = []
     for paragraph in text.splitlines():
         paragraph = paragraph.strip()
@@ -128,6 +137,87 @@ def split_text(text: str, *, target_chars: int = 650, max_chars: int = 900) -> l
         else:
             chunks.append(buffer)
     return [chunk for chunk in chunks if len(chunk.strip()) >= 20]
+
+
+def chunk_artifact_sha256(chunks_dir: Path) -> str:
+    """Hash the exact ordered JSONL chunk artifact consumed by index builders."""
+
+    digest = hashlib.sha256()
+    for path in sorted(chunks_dir.glob("*.jsonl"), key=lambda item: item.name):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def git_commit(project_root: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-c",
+                f"safe.directory={project_root.as_posix()}",
+                "rev-parse",
+                "HEAD",
+            ],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def index_artifact_manifest(
+    *,
+    chunks_dir: Path,
+    reports_dir: Path,
+    project_root: Path,
+    run_id: str,
+    keyword_index_version: str | None = None,
+    vector_index_version: str | None = None,
+    embedding_model: str | None = None,
+) -> dict[str, Any]:
+    """Describe actual inputs of an index build; never infer old chunk parameters."""
+
+    warnings: list[str] = []
+    chunking: dict[str, Any] | None = None
+    chunk_build_run_id: str | None = None
+    chunk_report_path = reports_dir / "chunk_build_latest.json"
+    if chunk_report_path.is_file():
+        try:
+            chunk_payload = json.loads(chunk_report_path.read_text(encoding="utf-8"))
+            source = chunk_payload.get("manifest")
+            if isinstance(source, dict):
+                warnings.extend(str(item) for item in source.get("warnings", []))
+                if source.get("chunk_artifact_sha256") == chunk_artifact_sha256(chunks_dir):
+                    raw_chunking = source.get("chunking")
+                    chunking = raw_chunking if isinstance(raw_chunking, dict) else None
+                    chunk_build_run_id = str(source.get("build_run_id") or "") or None
+                else:
+                    warnings.append("chunk artifact changed after the latest chunk build")
+            else:
+                warnings.append("legacy chunk report has no manifest")
+        except (OSError, ValueError, TypeError):
+            warnings.append("latest chunk report could not be read")
+    else:
+        warnings.append("chunk build manifest is missing")
+    return {
+        "chunking": chunking,
+        "chunk_artifact_sha256": chunk_artifact_sha256(chunks_dir),
+        "embedding_model": embedding_model,
+        "keyword_index_version": keyword_index_version,
+        "vector_index_version": vector_index_version,
+        "build_run_id": run_id,
+        "chunk_build_run_id": chunk_build_run_id,
+        "git_commit": git_commit(project_root),
+        "warnings": warnings,
+    }
 
 
 def extract_dates(text: str) -> tuple[list[int], list[str]]:
@@ -194,9 +284,7 @@ def _write_jsonl(path: Path, records: list[ChunkRecord]) -> None:
 def _write_structure(path: Path, entries: list[StructureEntry]) -> None:
     temporary_path = path.with_suffix(path.suffix + ".tmp")
     payload = [entry.model_dump() for entry in entries]
-    temporary_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    temporary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temporary_path, path)
 
 
@@ -355,11 +443,36 @@ def build_all_chunks(
         )
         for document_id in selected_ids
     ]
+    full_build = set(selected_ids) == set(documents)
+    manifest: dict[str, Any] = {
+        "chunking": (
+            {
+                "version": CHUNKER_VERSION,
+                "target_chars": CHUNK_TARGET_CHARS,
+                "max_chars": CHUNK_MAX_CHARS,
+                "overlap": CHUNK_OVERLAP,
+            }
+            if full_build
+            else None
+        ),
+        "chunk_artifact_sha256": chunk_artifact_sha256(chunks_dir),
+        "embedding_model": None,
+        "keyword_index_version": None,
+        "vector_index_version": None,
+        "build_run_id": run_id,
+        "git_commit": git_commit(project_root),
+        "warnings": (
+            []
+            if full_build
+            else ["partial chunk build cannot prove uniform chunking parameters"]
+        ),
+    }
     summary = ChunkBuildSummary(
         run_id=run_id,
         started_at=started_at,
         finished_at=utc_now(),
         documents=results,
+        manifest=manifest,
     )
     payload = summary.model_dump()
     payload["totals"] = summary.totals

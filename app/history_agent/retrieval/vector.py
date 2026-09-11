@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from history_agent.errors import IndexBuildError, RetrievalError
-from history_agent.processing.chunks import load_person_aliases
+from history_agent.processing.chunks import index_artifact_manifest, load_person_aliases
 from history_agent.processing.models import ChunkRecord
 from history_agent.retrieval.keyword import (
     YEAR,
@@ -113,6 +113,7 @@ def build_vector_index(
     reports_dir: Path,
     run_id: str,
     batch_size: int = 64,
+    project_root: Path | None = None,
 ) -> VectorIndexSummary:
     started_at = utc_now()
     records = load_chunks(chunks_dir)
@@ -175,6 +176,16 @@ def build_vector_index(
         collection_name=COLLECTION_NAME,
         index_path=str(index_path),
         size_bytes=_directory_size(index_path),
+        manifest=index_artifact_manifest(
+            chunks_dir=chunks_dir,
+            reports_dir=reports_dir,
+            project_root=project_root or reports_dir.parents[1],
+            run_id=run_id,
+            vector_index_version=(
+                f"{INDEX_VERSION}; fastembed={fastembed_version}; qdrant={qdrant_version}"
+            ),
+            embedding_model=MODEL_NAME,
+        ),
     )
     reports_dir.mkdir(parents=True, exist_ok=True)
     rendered = summary.model_dump_json(indent=2)

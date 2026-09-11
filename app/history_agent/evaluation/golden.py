@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import inspect
 import json
 import math
+import re
 import subprocess
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
@@ -32,10 +32,11 @@ from history_agent.answering.validation import validate_grounded_answer
 from history_agent.config import Settings, get_settings
 from history_agent.evaluation.answers import _load_effective_page_texts, quote_matches_page
 from history_agent.evaluation.semantic import (
+    FACT_COVERAGE_JUDGE_VERSION,
+    SEMANTIC_CITATION_JUDGE_VERSION,
     judge_citation_semantics,
     judge_fact_coverage,
 )
-from history_agent.processing.chunks import CHUNKER_VERSION, split_text
 from history_agent.retrieval.hybrid import RRF_K, search_hybrid_index
 from history_agent.retrieval.models import SearchHit, SearchResponse
 
@@ -220,16 +221,14 @@ class GoldenCase(BaseModel):
             if self.gold_facts:
                 raise ValueError("unanswerable cases cannot declare gold facts")
             if self.retrieval_gold and (
-                self.retrieval_gold.required_evidence
-                or self.retrieval_gold.relevant_evidence
+                self.retrieval_gold.required_evidence or self.retrieval_gold.relevant_evidence
             ):
                 raise ValueError("unanswerable cases cannot declare gold evidence")
         else:
             if needs_evidence and (
                 self.retrieval_gold is None
                 or not (
-                    self.retrieval_gold.required_evidence
-                    or self.retrieval_gold.relevant_evidence
+                    self.retrieval_gold.required_evidence or self.retrieval_gold.relevant_evidence
                 )
             ):
                 raise ValueError("answerable evidence dimensions require page-level gold")
@@ -239,9 +238,9 @@ class GoldenCase(BaseModel):
         if len(fact_ids) != len(set(fact_ids)):
             raise ValueError("gold fact IDs must be unique within a case")
         if self.retrieval_gold is not None:
-            gold_pages = {
-                item.key for item in self.retrieval_gold.required_evidence
-            } | {item.key for item in self.retrieval_gold.relevant_evidence}
+            gold_pages = {item.key for item in self.retrieval_gold.required_evidence} | {
+                item.key for item in self.retrieval_gold.relevant_evidence
+            }
             fact_pages = {anchor.key for fact in self.gold_facts for anchor in fact.evidence}
             if not fact_pages.issubset(gold_pages):
                 raise ValueError("gold fact evidence must be declared in retrieval_gold")
@@ -271,10 +270,7 @@ def load_golden_dataset(path: Path) -> GoldenDataset:
 def _hit_page_keys(hit: SearchHit) -> set[tuple[str, int]]:
     """Map a chunk to every physical page in its inclusive page range."""
 
-    return {
-        (hit.document_id, page)
-        for page in range(hit.pdf_page_start, hit.pdf_page_end + 1)
-    }
+    return {(hit.document_id, page) for page in range(hit.pdf_page_start, hit.pdf_page_end + 1)}
 
 
 def hit_matches_evidence(hit: SearchHit, evidence: EvidenceAnchor) -> bool:
@@ -297,28 +293,54 @@ def _matched_gold_keys(
     return returned.intersection(gold)
 
 
+def _evidence_unit_key(hit: SearchHit) -> tuple[str, int, int, str]:
+    fingerprint = hashlib.sha256(_normalize_text(hit.text).encode("utf-8")).hexdigest()
+    return hit.document_id, hit.pdf_page_start, hit.pdf_page_end, fingerprint
+
+
 def _ranked_relevance(
     hits: list[SearchHit], gold: dict[tuple[str, int], int], k: int
-) -> list[int]:
-    """Assign each gold page once so duplicate chunks cannot inflate nDCG."""
+) -> tuple[list[int], bool]:
+    """Assign one gain per stable evidence unit and consume all pages it covers."""
 
     unused = set(gold)
+    seen_units: set[tuple[str, int, int, str]] = set()
     grades: list[int] = []
+    ambiguous = False
     for hit in hits[:k]:
+        unit = _evidence_unit_key(hit)
+        if unit in seen_units:
+            grades.append(0)
+            continue
+        seen_units.add(unit)
         matches = _hit_page_keys(hit).intersection(unused)
+        ambiguous = ambiguous or len(matches) > 1
         grade = max((gold[key] for key in matches), default=0)
         grades.append(grade)
-        if matches:
-            best = min(key for key in matches if gold[key] == grade)
-            unused.remove(best)
+        unused.difference_update(matches)
     grades.extend([0] * (k - len(grades)))
-    return grades
+    return grades, ambiguous
 
 
 def _dcg(grades: list[int]) -> float:
-    return float(
-        sum((2**grade - 1) / math.log2(rank + 1) for rank, grade in enumerate(grades, 1))
-    )
+    return float(sum((2**grade - 1) / math.log2(rank + 1) for rank, grade in enumerate(grades, 1)))
+
+
+def _record_metric(
+    result: dict[str, Any],
+    key: str,
+    value: bool | int | float | None,
+    *,
+    evaluable: bool,
+    reason: str,
+) -> None:
+    result[key] = value if evaluable else None
+    status = result.setdefault("metric_status", {})
+    status[key] = {
+        "value": value if evaluable else None,
+        "evaluable": evaluable,
+        "reason": reason,
+    }
 
 
 def evaluate_retrieval_hits(
@@ -335,33 +357,104 @@ def evaluate_retrieval_hits(
         "known_relevant_pages": len(gold),
         "relevance_annotation_complete": complete,
         "returned_count": len(hits),
+        "metric_status": {},
     }
     for k in k_values:
         prefix = hits[:k]
         matched = _matched_gold_keys(prefix, gold)
+        required_keys = {
+            item.key
+            for item in (
+                case.retrieval_gold.required_evidence if case.retrieval_gold else []
+            )
+        }
+        returned_keys = (
+            set().union(*(_hit_page_keys(hit) for hit in prefix)) if prefix else set()
+        )
         relevant_hits = sum(bool(_hit_page_keys(hit).intersection(gold)) for hit in prefix)
-        result[f"hit_at_{k}"] = bool(matched) if gold else None
-        result[f"recall_at_{k}"] = len(matched) / len(gold) if gold else None
-        result[f"precision_at_{k}"] = relevant_hits / k if complete else None
+        _record_metric(
+            result,
+            f"hit_at_{k}",
+            bool(matched),
+            evaluable=bool(gold),
+            reason="evaluated against annotated gold pages" if gold else "no annotated gold pages",
+        )
+        known_recall = len(matched) / len(gold) if gold else None
+        _record_metric(
+            result,
+            f"annotated_recall_at_{k}",
+            known_recall,
+            evaluable=bool(gold),
+            reason=(
+                "recall over annotated gold pages; annotations may be incomplete"
+                if gold
+                else "no annotated gold pages"
+            ),
+        )
+        result[f"recall_at_{k}"] = result[f"annotated_recall_at_{k}"]
+        result["metric_status"][f"recall_at_{k}"] = result["metric_status"][
+            f"annotated_recall_at_{k}"
+        ]
+        _record_metric(
+            result,
+            f"required_evidence_recall_at_{k}",
+            len(returned_keys.intersection(required_keys)) / len(required_keys)
+            if required_keys
+            else None,
+            evaluable=bool(required_keys),
+            reason=(
+                "recall over annotated required evidence pages"
+                if required_keys
+                else "no required evidence pages"
+            ),
+        )
+        _record_metric(
+            result,
+            f"precision_at_{k}",
+            relevant_hits / k,
+            evaluable=complete,
+            reason=(
+                "evaluated against complete relevance annotations"
+                if complete
+                else "relevance annotations are incomplete"
+            ),
+        )
         result[f"precision_at_{k}_evaluable"] = complete
         if complete:
-            grades = _ranked_relevance(hits, gold, k)
+            grades, ambiguous = _ranked_relevance(hits, gold, k)
             ideal = sorted(gold.values(), reverse=True)[:k]
             ideal.extend([0] * (k - len(ideal)))
             ideal_dcg = _dcg(ideal)
-            result[f"ndcg_at_{k}"] = _dcg(grades) / ideal_dcg if ideal_dcg else None
+            value = _dcg(grades) / ideal_dcg if ideal_dcg else None
         else:
-            result[f"ndcg_at_{k}"] = None
-        result[f"ndcg_at_{k}_evaluable"] = complete
+            ambiguous = False
+            value = None
+        ndcg_evaluable = complete and not ambiguous and value is not None
+        _record_metric(
+            result,
+            f"ndcg_at_{k}",
+            value,
+            evaluable=ndcg_evaluable,
+            reason=(
+                "cross-page evidence maps to multiple gold pages; graded gain is ambiguous"
+                if ambiguous
+                else "evaluated against complete relevance annotations"
+                if ndcg_evaluable
+                else "relevance annotations are incomplete or have no ideal gain"
+            ),
+        )
+        result[f"ndcg_at_{k}_evaluable"] = ndcg_evaluable
     first_rank = next(
-        (
-            rank
-            for rank, hit in enumerate(hits, 1)
-            if _hit_page_keys(hit).intersection(gold)
-        ),
+        (rank for rank, hit in enumerate(hits, 1) if _hit_page_keys(hit).intersection(gold)),
         None,
     )
-    result["mrr"] = 1.0 / first_rank if first_rank is not None else 0.0 if gold else None
+    _record_metric(
+        result,
+        "mrr",
+        1.0 / first_rank if first_rank is not None else 0.0,
+        evaluable=bool(gold),
+        reason="first rank of an annotated gold page" if gold else "no annotated gold pages",
+    )
     required = case.retrieval_gold.required_evidence if case.retrieval_gold else []
     result["required_evidence_ranks"] = [
         {
@@ -377,35 +470,78 @@ def evaluate_retrieval_hits(
     return result
 
 
-def evaluate_context_hits(
-    case: GoldenCase, hits: list[SearchHit], *, top_k: int
-) -> dict[str, Any]:
+def evaluate_context_hits(case: GoldenCase, hits: list[SearchHit], *, top_k: int) -> dict[str, Any]:
     """Score the final retrieval candidate list used as component context."""
 
     selected = hits[:top_k]
     gold = _known_relevance(case)
-    known_relevant = sum(
-        bool(_hit_page_keys(hit).intersection(gold)) for hit in selected
-    )
+    known_relevant = sum(bool(_hit_page_keys(hit).intersection(gold)) for hit in selected)
     complete = bool(case.retrieval_gold and case.retrieval_gold.relevance_complete)
     seen_starts: set[tuple[str, int]] = set()
+    seen_units: set[tuple[str, int, int, str]] = set()
     duplicate_starts = 0
+    duplicate_units = 0
     for hit in selected:
         key = (hit.document_id, hit.pdf_page_start)
         duplicate_starts += int(key in seen_starts)
         seen_starts.add(key)
+        unit = _evidence_unit_key(hit)
+        duplicate_units += int(unit in seen_units)
+        seen_units.add(unit)
     total = len(selected)
     known_ratio = known_relevant / total if total else None
-    return {
+    result: dict[str, Any] = {
         "context_size": total,
-        "known_relevant_ratio_lower_bound": known_ratio,
-        "relevant_evidence_ratio": known_ratio if complete else None,
-        "irrelevant_context_ratio": (
-            (1.0 - known_ratio) if complete and known_ratio is not None else None
-        ),
         "relevance_ratio_evaluable": complete,
-        "duplicate_start_page_ratio": duplicate_starts / total if total else None,
+        "metric_status": {},
     }
+    _record_metric(
+        result,
+        "known_relevant_ratio_lower_bound",
+        known_ratio,
+        evaluable=total > 0,
+        reason="lower bound from annotated pages" if total else "empty context",
+    )
+    _record_metric(
+        result,
+        "relevant_evidence_ratio",
+        known_ratio,
+        evaluable=complete and total > 0,
+        reason="evaluated against complete relevance annotations"
+        if complete
+        else "relevance annotations are incomplete",
+    )
+    _record_metric(
+        result,
+        "irrelevant_context_ratio",
+        1.0 - known_ratio if known_ratio is not None else None,
+        evaluable=complete and total > 0,
+        reason="evaluated against complete relevance annotations"
+        if complete
+        else "relevance annotations are incomplete",
+    )
+    concentration = duplicate_starts / total if total else None
+    _record_metric(
+        result,
+        "start_page_concentration_ratio",
+        concentration,
+        evaluable=total > 0,
+        reason="repeated document/start-page locations" if total else "empty context",
+    )
+    result["duplicate_start_page_ratio"] = concentration
+    result["metric_status"]["duplicate_start_page_ratio"] = result["metric_status"][
+        "start_page_concentration_ratio"
+    ]
+    _record_metric(
+        result,
+        "redundancy_ratio",
+        duplicate_units / total if total else None,
+        evaluable=total > 0,
+        reason="duplicate page-range and normalized-text fingerprints"
+        if total
+        else "empty context",
+    )
+    return result
 
 
 def _normalize_text(value: str) -> str:
@@ -418,6 +554,48 @@ def _pattern_match(answer: str, patterns: list[str], fallback: str) -> bool:
     return any(_normalize_text(item) in normalized for item in candidates)
 
 
+REFUSAL_PATTERNS = (
+    re.compile(
+        r"(?:现有|当前|本地).{0,12}(?:资料|证据).{0,16}(?:不足|没有|无法|不能).{0,12}(?:回答|判断|确认|支持)"
+    ),
+    re.compile(
+        r"(?:无法|不能).{0,10}(?:依据|从).{0,12}(?:现有|当前|本地)?(?:资料|证据).{0,12}(?:回答|判断|确认)"
+    ),
+    re.compile(r"(?:资料|证据).{0,12}(?:不足|缺失).{0,12}(?:无法|不能).{0,12}(?:回答|判断|确认)"),
+)
+CLARIFICATION_PATTERN = re.compile(
+    r"(?:请|需要).{0,10}(?:明确|补充|说明).{0,16}(?:人物|年份|时间|范围|条件|问题)"
+)
+SUBSTANTIVE_ASSERTION_PATTERN = re.compile(
+    r"(?:18|19|20)\d{2}年|(?:是|为|担任|发生|位于|当选|参加|参与|提出|成立|导致|造成)"
+)
+NEGATED_ASSERTION_PATTERN = re.compile(r"无法|不能|不足|没有证据|未能|不可确认|难以判断")
+
+
+def classify_answer_disposition(response: AnswerResponse) -> tuple[str, str]:
+    """Classify outcome without treating evidence flags alone as a refusal."""
+
+    text = response.answer.strip()
+    if response.retrieval_mode == "query_clarification" or (
+        not response.citations and CLARIFICATION_PATTERN.search(text)
+    ):
+        return "clarification", "production route requested clarification"
+    if response.citations:
+        return "answered", "answer includes one or more citations"
+    refusal_semantics = any(pattern.search(text) for pattern in REFUSAL_PATTERNS)
+    clauses = re.split(r"[。！？；\n]|但是|然而|不过|但", text)
+    substantive = any(
+        SUBSTANTIVE_ASSERTION_PATTERN.search(clause)
+        and not NEGATED_ASSERTION_PATTERN.search(clause)
+        for clause in clauses
+    )
+    if response.evidence_status == "no_evidence" and refusal_semantics and not substantive:
+        return "refused", "explicit evidence-scoped refusal with no citations"
+    if text:
+        return "answered_uncited", "substantive output has no citations"
+    return "unknown", "empty answer cannot be classified"
+
+
 def evaluate_generation(
     case: GoldenCase,
     response: AnswerResponse,
@@ -425,15 +603,15 @@ def evaluate_generation(
     fact_judgment: dict[str, Any] | None = None,
     semantic_judgment: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    fact_status = (fact_judgment or {}).get("status", "not_run")
     decisions = {
         item["fact_id"]: item
         for item in (fact_judgment or {}).get("decisions", [])
+        if fact_status == "used"
     }
     fact_results: list[dict[str, Any]] = []
     for fact in case.gold_facts:
-        deterministic = _pattern_match(
-            response.answer, fact.deterministic_patterns, fact.claim
-        )
+        deterministic = _pattern_match(response.answer, fact.deterministic_patterns, fact.claim)
         semantic = decisions.get(fact.fact_id)
         if deterministic:
             covered, judge, reason = True, "deterministic", "matched an annotated pattern"
@@ -442,7 +620,7 @@ def evaluate_generation(
             judge = "semantic"
             reason = str(semantic["reason"])
         else:
-            covered = False
+            covered = None
             judge = "not_evaluated"
             reason = "no deterministic match; semantic fallback was not available"
         fact_results.append(
@@ -450,6 +628,7 @@ def evaluate_generation(
                 "fact_id": fact.fact_id,
                 "importance": fact.importance,
                 "covered": covered,
+                "evaluable": covered is not None,
                 "judge": judge,
                 "reason": reason,
             }
@@ -460,55 +639,130 @@ def evaluate_generation(
         {
             "claim": item.claim,
             "reason": item.reason,
-            "violated": _pattern_match(
-                response.answer, item.deterministic_patterns, item.claim
-            ),
+            "violated": _pattern_match(response.answer, item.deterministic_patterns, item.claim),
         }
         for item in case.forbidden_claims
     ]
-    unsupported_claims = list((semantic_judgment or {}).get("unsupported_claims", []))
-    unsupported_claims.extend(item["claim"] for item in forbidden if item["violated"])
-    unsupported_claims = list(dict.fromkeys(unsupported_claims))
-    semantic_used = (semantic_judgment or {}).get("verdict") is not None
-    unsupported_evaluable = semantic_used or bool(forbidden)
-    has_answer = response.evidence_status != "no_evidence" and bool(response.citations)
-    refusal_correct = not has_answer if case.answerability == "unanswerable" else None
+    semantic_used = (semantic_judgment or {}).get("status") == "used"
+    unsupported_claims = (
+        list((semantic_judgment or {}).get("unsupported_claims", [])) if semantic_used else []
+    )
+    disposition, disposition_reason = classify_answer_disposition(response)
+    refusal_evaluable = case.answerability == "unanswerable" and disposition != "unknown"
+    refusal_correct = disposition == "refused" if refusal_evaluable else None
+    required_evaluable = [item for item in required if item["evaluable"]]
+    optional_evaluable = [item for item in optional if item["evaluable"]]
     required_recall = (
-        sum(bool(item["covered"]) for item in required) / len(required)
-        if required
+        sum(bool(item["covered"]) for item in required_evaluable) / len(required_evaluable)
+        if required_evaluable
         else None
     )
     optional_recall = (
-        sum(bool(item["covered"]) for item in optional) / len(optional)
-        if optional
+        sum(bool(item["covered"]) for item in optional_evaluable) / len(optional_evaluable)
+        if optional_evaluable
         else None
     )
-    semantic_failed = (semantic_judgment or {}).get("verdict") == "fail"
-    forbidden_violation = any(bool(item["violated"]) for item in forbidden)
+    semantic_failed = semantic_used and (semantic_judgment or {}).get("verdict") == "fail"
+    forbidden_violation = any(bool(item["violated"]) for item in forbidden) or semantic_failed
     if case.answerability == "unanswerable":
-        correct = bool(refusal_correct) and not forbidden_violation and not semantic_failed
+        correct_evaluable = refusal_evaluable
+        correct = (
+            bool(refusal_correct) and not forbidden_violation and not semantic_failed
+            if correct_evaluable
+            else None
+        )
     else:
-        correct = required_recall == 1.0 and not forbidden_violation and not semantic_failed
-    return {
-        "required_fact_recall": required_recall,
-        "optional_fact_recall": optional_recall,
+        correct_evaluable = len(required_evaluable) == len(required)
+        correct = (
+            required_recall == 1.0 and not forbidden_violation and not semantic_failed
+            if correct_evaluable
+            else None
+        )
+    result: dict[str, Any] = {
         "facts": fact_results,
-        "fact_judge_status": (fact_judgment or {}).get("status", "not_run"),
-        "forbidden_claim_violation": forbidden_violation,
+        "fact_counts": {
+            "required_total": len(required),
+            "required_evaluable": len(required_evaluable),
+            "optional_total": len(optional),
+            "optional_evaluable": len(optional_evaluable),
+        },
+        "fact_judge_status": fact_status,
         "forbidden_claims": forbidden,
         "unsupported_claims": unsupported_claims,
-        "unsupported_claim_detected": (
-            bool(unsupported_claims) if unsupported_evaluable else None
-        ),
-        "refusal_correct": refusal_correct,
-        "false_answer": not bool(refusal_correct)
-        if case.answerability == "unanswerable"
-        else None,
-        "answer_correctness": correct,
+        "answer_disposition": disposition,
+        "answer_disposition_reason": disposition_reason,
+        "metric_status": {},
         "correctness_basis": (
             "deterministic+semantic" if semantic_used or decisions else "deterministic"
         ),
     }
+    _record_metric(
+        result,
+        "required_fact_recall",
+        required_recall,
+        evaluable=bool(required_evaluable),
+        reason="recall over evaluable required facts"
+        if required_evaluable
+        else "no required facts were evaluable",
+    )
+    _record_metric(
+        result,
+        "optional_fact_recall",
+        optional_recall,
+        evaluable=bool(optional_evaluable),
+        reason="recall over evaluable optional facts"
+        if optional_evaluable
+        else "no optional facts were evaluable",
+    )
+    _record_metric(
+        result,
+        "forbidden_claim_violation",
+        forbidden_violation,
+        evaluable=bool(forbidden) or semantic_used,
+        reason=(
+            "checked annotated forbidden-claim patterns and/or semantic unsupported claims"
+            if forbidden or semantic_used
+            else "case has no forbidden-claim labels and semantic judge was unavailable"
+        ),
+    )
+    _record_metric(
+        result,
+        "unsupported_claim_detected",
+        bool(unsupported_claims),
+        evaluable=semantic_used,
+        reason="semantic citation judge completed"
+        if semantic_used
+        else "semantic citation judge was not available",
+    )
+    _record_metric(
+        result,
+        "refusal_correct",
+        refusal_correct,
+        evaluable=refusal_evaluable,
+        reason=disposition_reason
+        if refusal_evaluable
+        else "not an unanswerable case or disposition unknown",
+    )
+    false_answer = disposition in {"answered", "answered_uncited"} if refusal_evaluable else None
+    _record_metric(
+        result,
+        "false_answer",
+        false_answer,
+        evaluable=refusal_evaluable,
+        reason=disposition_reason
+        if refusal_evaluable
+        else "not an unanswerable case or disposition unknown",
+    )
+    _record_metric(
+        result,
+        "answer_correctness",
+        correct,
+        evaluable=correct_evaluable,
+        reason="all required correctness signals are evaluable"
+        if correct_evaluable
+        else "at least one required fact or refusal disposition is unevaluable",
+    )
+    return result
 
 
 def evaluate_citations(
@@ -525,24 +779,38 @@ def evaluate_citations(
     details: list[dict[str, Any]] = []
     for citation in response.citations:
         end = citation.pdf_page_end or citation.pdf_page
-        pages = {
-            (citation.document_id, page)
-            for page in range(citation.pdf_page, end + 1)
-        }
+        pages = {(citation.document_id, page) for page in range(citation.pdf_page, end + 1)}
         matches = pages.intersection(gold)
         cited_gold.update(matches)
         relevant_citations += int(bool(matches))
-        page_text = page_texts.get((citation.document_id, citation.pdf_page))
+        available = {
+            page: page_texts.get((citation.document_id, page))
+            for page in range(citation.pdf_page, end + 1)
+        }
+        match_pages = [
+            page
+            for page, text in available.items()
+            if text is not None and quote_matches_page(citation.quote, text)
+        ]
+        available_text = "\n".join(text for text in available.values() if text is not None)
+        range_match = bool(match_pages) or bool(
+            available_text and quote_matches_page(citation.quote, available_text)
+        )
+        all_pages_exist = all(text is not None for text in available.values())
+        quote_evaluable = range_match or all_pages_exist
+        quote_match: bool | None = range_match if quote_evaluable else None
         details.append(
             {
                 "evidence_id": citation.evidence_id,
                 "document_id": citation.document_id,
                 "pdf_page": citation.pdf_page,
                 "pdf_page_end": citation.pdf_page_end,
-                "page_exists": page_text is not None,
-                "quote_matches_page": bool(
-                    page_text and quote_matches_page(citation.quote, page_text)
-                ),
+                "page_exists": all_pages_exist,
+                "page_range_evaluable": True,
+                "quote_matches_page": quote_match,
+                "quote_matches_range": quote_match,
+                "quote_check_evaluable": quote_evaluable,
+                "quote_match_pages": match_pages,
                 "matches_gold_page": bool(matches),
             }
         )
@@ -552,38 +820,83 @@ def evaluate_citations(
         if response.citations
         else None
     )
-    return {
+    result: dict[str, Any] = {
         "citation_presence": bool(response.citations),
-        "citation_presence_correct": bool(response.citations)
-        == (case.answerability == "answerable"),
-        "citation_page_validity": (
-            sum(bool(item["page_exists"]) for item in details) / count if count else None
-        ),
-        "citation_quote_consistency": (
-            sum(bool(item["quote_matches_page"]) for item in details) / count
-            if count
-            else None
-        ),
-        "claim_to_citation_coverage": (
-            bool(validation.valid)
-            if validation is not None
-            else False
-            if case.answerability == "answerable"
-            else None
-        ),
         "uncited_claims": list(validation.uncited_claims) if validation else [],
-        "citation_precision": relevant_citations / count if complete and count else None,
         "citation_precision_evaluable": complete and bool(count),
-        "citation_recall": len(cited_gold) / len(gold) if gold else None,
-        "semantic_support": (
-            (semantic_judgment or {}).get("verdict") == "pass"
-            if (semantic_judgment or {}).get("verdict") is not None
-            else None
-        ),
         "semantic_judge_status": (semantic_judgment or {}).get("status", "not_run"),
         "semantic_judge_reason": (semantic_judgment or {}).get("rationale"),
         "details": details,
+        "metric_status": {},
     }
+    _record_metric(
+        result,
+        "citation_presence_correct",
+        bool(response.citations) == (case.answerability == "answerable"),
+        evaluable=True,
+        reason="compared citation presence with answerability",
+    )
+    _record_metric(
+        result,
+        "citation_page_validity",
+        sum(bool(item["page_exists"]) for item in details) / count if count else None,
+        evaluable=count > 0,
+        reason="all pages in each citation range are available" if count else "no citations",
+    )
+    quote_details = [item for item in details if item["quote_check_evaluable"]]
+    _record_metric(
+        result,
+        "citation_quote_consistency",
+        sum(bool(item["quote_matches_page"]) for item in quote_details) / len(quote_details)
+        if quote_details
+        else None,
+        evaluable=len(quote_details) == count and count > 0,
+        reason="quote checked across every page in each citation range"
+        if len(quote_details) == count and count
+        else "one or more citation ranges could not be fully verified",
+    )
+    coverage_value = bool(validation.valid) if validation is not None else False
+    _record_metric(
+        result,
+        "claim_to_citation_coverage",
+        coverage_value,
+        evaluable=case.answerability == "answerable",
+        reason="deterministic claim-to-citation validation"
+        if case.answerability == "answerable"
+        else "not applicable to an unanswerable case",
+    )
+    _record_metric(
+        result,
+        "citation_precision",
+        relevant_citations / count if count else None,
+        evaluable=complete and count > 0,
+        reason="evaluated against complete relevance annotations"
+        if complete and count
+        else "relevance annotations are incomplete or there are no citations",
+    )
+    citation_recall = len(cited_gold) / len(gold) if gold else None
+    _record_metric(
+        result,
+        "annotated_citation_recall",
+        citation_recall,
+        evaluable=bool(gold),
+        reason="recall over annotated gold pages" if gold else "no annotated gold pages",
+    )
+    result["citation_recall"] = result["annotated_citation_recall"]
+    result["metric_status"]["citation_recall"] = result["metric_status"][
+        "annotated_citation_recall"
+    ]
+    semantic_used = (semantic_judgment or {}).get("status") == "used"
+    _record_metric(
+        result,
+        "semantic_support",
+        (semantic_judgment or {}).get("verdict") == "pass",
+        evaluable=semantic_used,
+        reason="semantic citation judge completed"
+        if semantic_used
+        else "semantic citation judge was not available",
+    )
+    return result
 
 
 def normalize_route(retrieval_mode: str) -> str:
@@ -601,39 +914,78 @@ def normalize_route(retrieval_mode: str) -> str:
 def evaluate_routing(case: GoldenCase, response: AnswerResponse) -> dict[str, Any]:
     actual = normalize_route(response.retrieval_mode)
     preferred = case.route_gold.preferred_routes if case.route_gold else []
-    return {
+    result: dict[str, Any] = {
         "actual_route": actual,
         "raw_retrieval_mode": response.retrieval_mode,
         "preferred_routes": preferred,
-        "route_match": actual in preferred,
+        "metric_status": {},
     }
+    _record_metric(
+        result,
+        "route_match",
+        actual in preferred,
+        evaluable=bool(preferred),
+        reason="compared with annotated preferred routes"
+        if preferred
+        else "no preferred route labels",
+    )
+    return result
 
 
-def _metric(values: list[float]) -> dict[str, Any]:
+def _metric(
+    values: list[float],
+    *,
+    total_cases: int,
+    evaluable_case_ids: list[str],
+    unevaluable_case_ids: list[str],
+) -> dict[str, Any]:
     return {
         "value": round(mean(values), 6) if values else None,
         "evaluable_cases": len(values),
+        "total_cases": total_cases,
+        "unevaluable_cases": total_cases - len(values),
+        "evaluable_case_ids": evaluable_case_ids,
+        "unevaluable_case_ids": unevaluable_case_ids,
     }
 
 
 def _section_values(
     results: list[dict[str, Any]], section: str, key: str
-) -> list[float]:
+) -> tuple[list[float], int, list[str], list[str]]:
     values: list[float] = []
+    evaluable_ids: list[str] = []
+    unevaluable_ids: list[str] = []
+    total = 0
     for result in results:
         payload = result.get(section)
         if not isinstance(payload, dict):
             continue
+        total += 1
         value = payload.get(key)
-        if isinstance(value, (bool, int, float)):
+        status = payload.get("metric_status", {}).get(key, {})
+        evaluable = isinstance(status, dict) and status.get("evaluable") is True
+        case_id = str(result.get("case_id", ""))
+        if evaluable and isinstance(value, (bool, int, float)):
             values.append(float(value))
-    return values
+            evaluable_ids.append(case_id)
+        else:
+            unevaluable_ids.append(case_id)
+    return values, total, evaluable_ids, unevaluable_ids
+
+
+def _aggregate_metric(results: list[dict[str, Any]], section: str, key: str) -> dict[str, Any]:
+    values, total, evaluable_ids, unevaluable_ids = _section_values(results, section, key)
+    return _metric(
+        values,
+        total_cases=total,
+        evaluable_case_ids=evaluable_ids,
+        unevaluable_case_ids=unevaluable_ids,
+    )
 
 
 def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     dimensions = {
-        name: sum(isinstance(item.get(name), dict) for item in results)
-        for name in ALL_DIMENSIONS
+        name: sum(isinstance(item.get(name), dict) for item in results) for name in ALL_DIMENSIONS
     }
     aggregate: dict[str, Any] = {
         "case_count": len(results),
@@ -646,32 +998,36 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "routing": {},
     }
     for k in DEFAULT_K_VALUES:
-        aggregate["retrieval"][f"hit_rate_at_{k}"] = _metric(
-            _section_values(results, "retrieval", f"hit_at_{k}")
+        aggregate["retrieval"][f"hit_rate_at_{k}"] = _aggregate_metric(
+            results, "retrieval", f"hit_at_{k}"
         )
-        aggregate["retrieval"][f"recall_at_{k}"] = _metric(
-            _section_values(results, "retrieval", f"recall_at_{k}")
+        aggregate["retrieval"][f"annotated_recall_at_{k}"] = _aggregate_metric(
+            results, "retrieval", f"annotated_recall_at_{k}"
         )
-        aggregate["retrieval"][f"precision_at_{k}"] = _metric(
-            _section_values(results, "retrieval", f"precision_at_{k}")
+        aggregate["retrieval"][f"recall_at_{k}"] = aggregate["retrieval"][
+            f"annotated_recall_at_{k}"
+        ]
+        aggregate["retrieval"][f"required_evidence_recall_at_{k}"] = (
+            _aggregate_metric(results, "retrieval", f"required_evidence_recall_at_{k}")
         )
-        aggregate["retrieval"][f"ndcg_at_{k}"] = _metric(
-            _section_values(results, "retrieval", f"ndcg_at_{k}")
+        aggregate["retrieval"][f"precision_at_{k}"] = _aggregate_metric(
+            results, "retrieval", f"precision_at_{k}"
         )
-        aggregate["ranking"][f"ndcg_at_{k}"] = _metric(
-            _section_values(results, "ranking", f"ndcg_at_{k}")
+        aggregate["retrieval"][f"ndcg_at_{k}"] = _aggregate_metric(
+            results, "retrieval", f"ndcg_at_{k}"
         )
-    aggregate["retrieval"]["mrr"] = _metric(
-        _section_values(results, "retrieval", "mrr")
-    )
-    aggregate["ranking"]["mrr"] = _metric(_section_values(results, "ranking", "mrr"))
+        aggregate["ranking"][f"ndcg_at_{k}"] = _aggregate_metric(results, "ranking", f"ndcg_at_{k}")
+    aggregate["retrieval"]["mrr"] = _aggregate_metric(results, "retrieval", "mrr")
+    aggregate["ranking"]["mrr"] = _aggregate_metric(results, "ranking", "mrr")
     for key in (
         "known_relevant_ratio_lower_bound",
         "relevant_evidence_ratio",
         "irrelevant_context_ratio",
         "duplicate_start_page_ratio",
+        "start_page_concentration_ratio",
+        "redundancy_ratio",
     ):
-        aggregate["context"][key] = _metric(_section_values(results, "context", key))
+        aggregate["context"][key] = _aggregate_metric(results, "context", key)
     for key in (
         "required_fact_recall",
         "optional_fact_recall",
@@ -681,9 +1037,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "refusal_correct",
         "false_answer",
     ):
-        aggregate["generation"][key] = _metric(
-            _section_values(results, "generation", key)
-        )
+        aggregate["generation"][key] = _aggregate_metric(results, "generation", key)
     for key in (
         "citation_presence_correct",
         "citation_page_validity",
@@ -693,10 +1047,11 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "citation_recall",
         "semantic_support",
     ):
-        aggregate["citation"][key] = _metric(_section_values(results, "citation", key))
-    aggregate["routing"]["route_accuracy"] = _metric(
-        _section_values(results, "routing", "route_match")
+        aggregate["citation"][key] = _aggregate_metric(results, "citation", key)
+    aggregate["citation"]["annotated_citation_recall"] = _aggregate_metric(
+        results, "citation", "annotated_citation_recall"
     )
+    aggregate["routing"]["route_accuracy"] = _aggregate_metric(results, "routing", "route_match")
     aggregate["routing"]["mismatch_case_ids"] = [
         item["case_id"]
         for item in results
@@ -704,8 +1059,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     latency_keys = ("retrieval_latency_ms", "answer_latency_ms", "total_latency_ms")
     aggregate["operational"] = {
-        key: _metric(_section_values(results, "operational", key))
-        for key in latency_keys
+        key: _aggregate_metric(results, "operational", key) for key in latency_keys
     }
     usage_totals: dict[str, dict[str, int]] = {}
     for result in results:
@@ -752,55 +1106,159 @@ def _git_metadata(project_root: Path) -> dict[str, Any]:
 
 
 def _load_index_metadata(settings: Settings) -> dict[str, Any]:
-    result: dict[str, Any] = {}
+    reports: dict[str, Any] = {}
+    warnings: list[str] = []
     for name in ("keyword_index_latest.json", "vector_index_latest.json"):
         path = settings.reports_dir / name
         if not path.is_file():
+            warnings.append(f"missing index report: {name}")
             continue
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        result[name.removesuffix("_latest.json")] = {
-            key: payload.get(key)
-            for key in ("run_id", "index_version", "model_name", "chunks")
-            if payload.get(key) is not None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            warnings.append(f"unreadable index report: {name}")
+            continue
+        report_name = name.removesuffix("_latest.json")
+        manifest = payload.get("manifest")
+        reports[report_name] = {
+            "summary": {
+                key: payload.get(key)
+                for key in ("run_id", "index_version", "model_name", "chunks")
+                if payload.get(key) is not None
+            },
+            "manifest": manifest if isinstance(manifest, dict) else None,
         }
-    return result
+        if not isinstance(manifest, dict):
+            warnings.append(f"{report_name} is legacy and has no artifact manifest")
+    manifests = [
+        item["manifest"] for item in reports.values() if isinstance(item.get("manifest"), dict)
+    ]
+    chunk_hashes = {item.get("chunk_artifact_sha256") for item in manifests}
+    if len(chunk_hashes) > 1:
+        warnings.append("keyword and vector indexes were built from different chunk artifacts")
+    for item in manifests:
+        warnings.extend(str(value) for value in item.get("warnings", []))
+    return {"reports": reports, "warnings": list(dict.fromkeys(warnings))}
 
 
 def _run_metadata(
-    settings: Settings, *, run_name: str | None, top_k: int, with_llm: bool
+    settings: Settings,
+    *,
+    run_name: str | None,
+    top_k: int,
+    with_llm: bool,
+    semantic_judge: bool,
+    dataset_sha256: str,
+    results: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    signature = inspect.signature(split_text)
     indexes = _load_index_metadata(settings)
-    vector = indexes.get("vector_index", {})
+    reports = indexes["reports"]
+    keyword_manifest = (reports.get("keyword_index") or {}).get("manifest") or {}
+    vector_manifest = (reports.get("vector_index") or {}).get("manifest") or {}
+    chunk_hash = (
+        keyword_manifest.get("chunk_artifact_sha256")
+        if keyword_manifest.get("chunk_artifact_sha256")
+        == vector_manifest.get("chunk_artifact_sha256")
+        else None
+    )
+    chunking = keyword_manifest.get("chunking") or vector_manifest.get("chunking")
+    answers = [item["answer"] for item in results if isinstance(item.get("answer"), dict)]
+    llm_used = any(item.get("generator_mode") == "llm" for item in answers)
+    planner_used = any(item.get("query_planner_status") == "used" for item in answers)
+    reflection_used = any(
+        item.get("retrieval_reflection_status") in {"sufficient", "retried"} for item in answers
+    )
+    degraded = sorted(
+        {
+            component
+            for item in results
+            for component in item.get("operational", {}).get("degraded_components", [])
+        }
+    )
+    semantic_used = any(
+        (
+            isinstance(item.get("citation"), dict)
+            and item["citation"].get("semantic_judge_status") == "used"
+        )
+        or (
+            isinstance(item.get("generation"), dict)
+            and item["generation"].get("fact_judge_status") == "used"
+        )
+        for item in results
+    )
     return {
         "run_name": run_name,
         "timestamp": datetime.now(UTC).isoformat(),
         "git": _git_metadata(settings.project_root),
         "project_version": __version__,
         "prompt_version": PROMPT_VERSION,
+        "with_llm": with_llm,
+        "semantic_judge_requested": semantic_judge,
         "rag_framework": "llamaindex",
-        "embedding_model": vector.get("model_name"),
-        "chunking": {
-            "version": CHUNKER_VERSION,
-            "target_chars": signature.parameters["target_chars"].default,
-            "max_chars": signature.parameters["max_chars"].default,
-            "overlap": 0,
-        },
+        "dataset_sha256": dataset_sha256,
+        "evaluated_case_ids": [item["case_id"] for item in results],
+        "embedding_model": vector_manifest.get("embedding_model"),
+        "chunk_artifact_sha256": chunk_hash,
+        "chunking": chunking,
         "retrieval_config": {
             "backend": "hybrid_rrf",
             "rrf_k": RRF_K,
             "top_k": top_k,
+            "component_top_k": top_k,
+            "answer_top_k": min(top_k, 12),
             "component_query": "raw_case_question",
         },
         "reranker": None,
-        "llm": settings.llm_model if with_llm else None,
-        "index_versions": indexes,
+        "generation": {
+            "with_llm_requested": with_llm,
+            "llm_used": llm_used,
+            "model": next(
+                (item.get("model_name") for item in answers if item.get("generator_mode") == "llm"),
+                None,
+            ),
+        },
+        "query_planner": {
+            "enabled": with_llm and settings.llm_query_planning,
+            "used": planner_used,
+            "model": next(
+                (
+                    item.get("query_planner_model")
+                    for item in answers
+                    if item.get("query_planner_status") == "used"
+                ),
+                None,
+            ),
+        },
+        "retrieval_reflection": {
+            "enabled": with_llm and settings.llm_retrieval_reflection,
+            "used": reflection_used,
+            "model": settings.llm_query_planner_model if reflection_used else None,
+        },
+        "semantic_judge": {
+            "requested": semantic_judge,
+            "used": semantic_used,
+            "model": settings.llm_model if semantic_used else None,
+            "citation_version": SEMANTIC_CITATION_JUDGE_VERSION,
+            "fact_version": FACT_COVERAGE_JUDGE_VERSION,
+        },
+        "execution": {
+            "degraded_components": degraded,
+            "fallback_used": any(
+                isinstance(item.get("answer"), dict)
+                and (
+                    item["answer"].get("llm_status") == "fallback"
+                    or item["answer"].get("query_planner_status") == "fallback"
+                    or item["answer"].get("retrieval_reflection_status") == "fallback"
+                )
+                for item in results
+            ),
+        },
+        "index_versions": reports,
+        "warnings": indexes["warnings"],
     }
 
 
-def _selected_dimensions(
-    case: GoldenCase, requested: RequestedDimension
-) -> set[EvalDimension]:
+def _selected_dimensions(case: GoldenCase, requested: RequestedDimension) -> set[EvalDimension]:
     available = set(case.eval_dimensions)
     if requested == "all":
         return available
@@ -846,6 +1304,7 @@ def run_golden_benchmark(
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
     dataset = load_golden_dataset(dataset_path)
+    dataset_sha256 = hashlib.sha256(dataset_path.read_bytes()).hexdigest()
     cases = _filter_cases(
         dataset,
         dimension=dimension,
@@ -863,9 +1322,7 @@ def run_golden_benchmark(
         if any("citation" in _selected_dimensions(case, dimension) for case in cases)
         else {}
     )
-    answer_settings = (
-        settings if with_llm else settings.model_copy(update={"llm_api_key": None})
-    )
+    answer_settings = settings if with_llm else settings.model_copy(update={"llm_api_key": None})
     results: list[dict[str, Any]] = []
     for case in cases:
         selected = _selected_dimensions(case, dimension)
@@ -904,18 +1361,11 @@ def run_golden_benchmark(
                 semantic_criteria=criteria,
             )
         fact_result: dict[str, Any] | None = None
-        if (
-            semantic_judge
-            and response is not None
-            and "generation" in selected
-            and case.gold_facts
-        ):
+        if semantic_judge and response is not None and "generation" in selected and case.gold_facts:
             unmatched = [
                 {"fact_id": fact.fact_id, "claim": fact.claim}
                 for fact in case.gold_facts
-                if not _pattern_match(
-                    response.answer, fact.deterministic_patterns, fact.claim
-                )
+                if not _pattern_match(response.answer, fact.deterministic_patterns, fact.claim)
             ]
             fact_result = judge_fact_coverage(
                 settings,
@@ -928,6 +1378,19 @@ def run_golden_benchmark(
             if retrieval_response is not None
             else None
         )
+        ranking_metrics: dict[str, Any] | None = None
+        if retrieval_metrics is not None:
+            ranking_keys = {
+                key
+                for key in retrieval_metrics
+                if key == "mrr" or key.startswith("ndcg_") or key == "required_evidence_ranks"
+            }
+            ranking_metrics = {key: retrieval_metrics[key] for key in ranking_keys}
+            ranking_metrics["metric_status"] = {
+                key: value
+                for key, value in retrieval_metrics["metric_status"].items()
+                if key == "mrr" or key.startswith("ndcg_")
+            }
         token_usage: dict[str, Any] = {}
         if response is not None:
             for key, usage in (
@@ -949,17 +1412,7 @@ def run_golden_benchmark(
             "answerability": case.answerability,
             "evaluated_dimensions": sorted(selected),
             "retrieval": retrieval_metrics if "retrieval" in selected else None,
-            "ranking": (
-                {
-                    key: value
-                    for key, value in (retrieval_metrics or {}).items()
-                    if key == "mrr"
-                    or key.startswith("ndcg_")
-                    or key == "required_evidence_ranks"
-                }
-                if "ranking" in selected
-                else None
-            ),
+            "ranking": (ranking_metrics if "ranking" in selected else None),
             "context": (
                 evaluate_context_hits(case, retrieval_response.hits, top_k=top_k)
                 if "context" in selected and retrieval_response is not None
@@ -996,6 +1449,10 @@ def run_golden_benchmark(
                     "evidence_status": response.evidence_status,
                     "generator_mode": response.generator_mode,
                     "llm_status": response.llm_status,
+                    "model_name": response.model_name,
+                    "query_planner_status": response.query_planner_status,
+                    "query_planner_model": response.query_planner_model,
+                    "retrieval_reflection_status": response.retrieval_reflection_status,
                     "retrieval_mode": response.retrieval_mode,
                     "retrieved_evidence_count": response.retrieved_evidence_count,
                     "citation_count": len(response.citations),
@@ -1020,14 +1477,31 @@ def run_golden_benchmark(
                 else None
             ),
             "operational": {
-                "retrieval_latency_ms": (
-                    retrieval_ms if retrieval_response is not None else None
-                ),
+                "retrieval_latency_ms": (retrieval_ms if retrieval_response is not None else None),
                 "answer_latency_ms": answer_ms if response is not None else None,
                 "total_latency_ms": round((perf_counter() - started) * 1000),
                 "token_usage": token_usage,
+                "degraded_components": (
+                    retrieval_response.degraded_components if retrieval_response is not None else []
+                ),
+                "metric_status": {},
             },
         }
+        operational = case_result["operational"]
+        assert isinstance(operational, dict)
+        for latency_key in (
+            "retrieval_latency_ms",
+            "answer_latency_ms",
+            "total_latency_ms",
+        ):
+            latency_value = operational[latency_key]
+            _record_metric(
+                operational,
+                latency_key,
+                latency_value,
+                evaluable=latency_value is not None,
+                reason="stage executed" if latency_value is not None else "stage not requested",
+            )
         results.append(case_result)
     run_id = uuid4().hex
     payload = {
@@ -1036,7 +1510,7 @@ def run_golden_benchmark(
         "dataset": {
             "path": str(dataset_path),
             "version": dataset.version,
-            "sha256": hashlib.sha256(dataset_path.read_bytes()).hexdigest(),
+            "sha256": dataset_sha256,
         },
         "requested_dimension": dimension,
         "filters": {
@@ -1045,7 +1519,13 @@ def run_golden_benchmark(
             "limit": limit,
         },
         "run_metadata": _run_metadata(
-            settings, run_name=run_name, top_k=top_k, with_llm=with_llm
+            settings,
+            run_name=run_name,
+            top_k=top_k,
+            with_llm=with_llm,
+            semantic_judge=semantic_judge,
+            dataset_sha256=dataset_sha256,
+            results=results,
         ),
         "aggregate": aggregate_results(results),
         "results": results,
@@ -1062,11 +1542,134 @@ def run_golden_benchmark(
     return payload
 
 
+def _flatten_values(value: Any, prefix: str = "") -> dict[str, Any]:
+    flattened: dict[str, Any] = {}
+    if isinstance(value, dict):
+        for key, child in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            flattened.update(_flatten_values(child, path))
+    else:
+        flattened[prefix] = value
+    return flattened
+
+
+def _aggregate_metric_nodes(value: Any, prefix: str = "") -> dict[str, dict[str, Any]]:
+    nodes: dict[str, dict[str, Any]] = {}
+    if not isinstance(value, dict):
+        return nodes
+    if {"value", "evaluable_cases"}.issubset(value):
+        nodes[prefix] = value
+        return nodes
+    for key, child in value.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        nodes.update(_aggregate_metric_nodes(child, path))
+    return nodes
+
+
+def compare_golden_runs(run_a_path: Path, run_b_path: Path) -> dict[str, Any]:
+    """Compare compatible Golden reports without hiding denominator changes."""
+
+    run_a = json.loads(run_a_path.read_text(encoding="utf-8"))
+    run_b = json.loads(run_b_path.read_text(encoding="utf-8"))
+    errors: list[str] = []
+    warnings: list[str] = []
+    sha_a = run_a.get("dataset", {}).get("sha256")
+    sha_b = run_b.get("dataset", {}).get("sha256")
+    if not sha_a or sha_a != sha_b:
+        errors.append("dataset SHA-256 differs or is missing")
+    ids_a = [item.get("case_id") for item in run_a.get("results", [])]
+    ids_b = [item.get("case_id") for item in run_b.get("results", [])]
+    if set(ids_a) != set(ids_b):
+        errors.append("evaluated case IDs differ")
+    dimension_a = run_a.get("requested_dimension")
+    dimension_b = run_b.get("requested_dimension")
+    if dimension_a != dimension_b:
+        errors.append("requested dimensions differ")
+
+    metadata_a = _flatten_values(run_a.get("run_metadata", {}))
+    metadata_b = _flatten_values(run_b.get("run_metadata", {}))
+    ignored_metadata = {"timestamp", "run_name", "git.dirty"}
+    metadata_differences = {
+        key: {"run_a": metadata_a.get(key), "run_b": metadata_b.get(key)}
+        for key in sorted(set(metadata_a) | set(metadata_b))
+        if key not in ignored_metadata and metadata_a.get(key) != metadata_b.get(key)
+    }
+
+    nodes_a = _aggregate_metric_nodes(run_a.get("aggregate", {}))
+    nodes_b = _aggregate_metric_nodes(run_b.get("aggregate", {}))
+    metrics: dict[str, Any] = {}
+    for key in sorted(set(nodes_a) | set(nodes_b)):
+        a = nodes_a.get(key)
+        b = nodes_b.get(key)
+        if a is None or b is None:
+            warnings.append(f"metric is present in only one run: {key}")
+            continue
+        set_a = a.get("evaluable_case_ids", [])
+        set_b = b.get("evaluable_case_ids", [])
+        same_evaluable_set = set(set_a) == set(set_b)
+        if not same_evaluable_set:
+            warnings.append(f"evaluable case set differs for {key}; delta suppressed")
+        value_a = a.get("value")
+        value_b = b.get("value")
+        numeric = isinstance(value_a, (int, float)) and isinstance(value_b, (int, float))
+        metric_comparable = not errors and same_evaluable_set and numeric
+        delta = (
+            round(value_b - value_a, 6)
+            if metric_comparable
+            and isinstance(value_a, (int, float))
+            and isinstance(value_b, (int, float))
+            else None
+        )
+        metrics[key] = {
+            "run_a": value_a,
+            "run_b": value_b,
+            "delta": delta,
+            "evaluable_cases_a": a.get("evaluable_cases"),
+            "evaluable_cases_b": b.get("evaluable_cases"),
+            "evaluable_case_ids_a": set_a,
+            "evaluable_case_ids_b": set_b,
+            "comparable": metric_comparable,
+        }
+
+    usage_a = _flatten_values(
+        run_a.get("aggregate", {}).get("operational", {}).get("token_usage", {})
+    )
+    usage_b = _flatten_values(
+        run_b.get("aggregate", {}).get("operational", {}).get("token_usage", {})
+    )
+    token_usage = {
+        key: {
+            "run_a": usage_a.get(key),
+            "run_b": usage_b.get(key),
+            "delta": (
+                usage_b[key] - usage_a[key]
+                if isinstance(usage_a.get(key), int) and isinstance(usage_b.get(key), int)
+                else None
+            ),
+        }
+        for key in sorted(set(usage_a) | set(usage_b))
+    }
+    return {
+        "schema_version": 1,
+        "run_a": str(run_a_path),
+        "run_b": str(run_b_path),
+        "compatible": not errors,
+        "checks": {
+            "dataset_sha256_match": sha_a == sha_b and bool(sha_a),
+            "case_ids_match": set(ids_a) == set(ids_b),
+            "requested_dimension_match": dimension_a == dimension_b,
+        },
+        "errors": errors,
+        "warnings": list(dict.fromkeys(warnings)),
+        "metadata_differences": metadata_differences,
+        "metrics": metrics,
+        "token_usage": token_usage,
+    }
+
+
 def _module_main() -> None:
     parser = argparse.ArgumentParser(description="Run the Unified RAG Golden Benchmark.")
-    parser.add_argument(
-        "--dataset", default="evals/golden/golden_questions.json"
-    )
+    parser.add_argument("--dataset", default="evals/golden/golden_questions.json")
     parser.add_argument("--dimension", choices=("all", *ALL_DIMENSIONS), default="all")
     parser.add_argument("--case-id", action="append", dest="case_ids")
     parser.add_argument("--category", action="append", dest="categories")

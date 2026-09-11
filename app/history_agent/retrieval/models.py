@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,6 +33,7 @@ class KeywordIndexSummary(BaseModel):
     chunks: int = Field(ge=0)
     index_path: str
     size_bytes: int = Field(ge=0)
+    manifest: dict[str, Any] | None = None
 
 
 class VectorIndexSummary(BaseModel):
@@ -47,6 +48,7 @@ class VectorIndexSummary(BaseModel):
     collection_name: str
     index_path: str
     size_bytes: int = Field(ge=0)
+    manifest: dict[str, Any] | None = None
 
 
 class SearchHit(BaseModel):

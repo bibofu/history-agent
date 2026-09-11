@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -65,6 +65,7 @@ class ChunkBuildSummary(BaseModel):
     started_at: str
     finished_at: str
     documents: list[DocumentChunkResult]
+    manifest: dict[str, Any] | None = None
 
     @property
     def totals(self) -> dict[str, int]:

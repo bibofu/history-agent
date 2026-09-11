@@ -19,6 +19,8 @@ from history_agent.answering.models import Citation
 from history_agent.config import Settings
 
 CLAIM_TOKEN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fffA-Za-z0-9]")
+SEMANTIC_CITATION_JUDGE_VERSION = "citation-entailment-v1"
+FACT_COVERAGE_JUDGE_VERSION = "fact-coverage-v1"
 
 
 class SemanticJudgment(BaseModel):

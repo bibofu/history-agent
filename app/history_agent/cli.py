@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import sys
+from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
@@ -14,13 +15,13 @@ from history_agent.corpus.catalog import load_catalog
 from history_agent.corpus.exporter import export_diff, export_manifest, load_latest_diff
 from history_agent.corpus.scanner import scan_corpus
 from history_agent.db import Database
-from history_agent.errors import ResearchDataError
+from history_agent.errors import HistoryAgentError, ResearchDataError
 from history_agent.evaluation.answers import evaluate_answers
 from history_agent.evaluation.comprehensive import (
     audit_comprehensive_question_set,
     evaluate_structured_questions,
 )
-from history_agent.evaluation.golden import run_golden_benchmark
+from history_agent.evaluation.golden import compare_golden_runs, run_golden_benchmark
 from history_agent.evaluation.intersections import (
     build_intersection_review_packet,
     evaluate_intersections,
@@ -1266,6 +1267,7 @@ def index_build_keyword(
             index_path=settings.keyword_index_path,
             reports_dir=settings.reports_dir,
             run_id=tracker.run_id,
+            project_root=settings.project_root,
         )
         payload = summary.model_dump()
         tracker.finish(payload)
@@ -1302,6 +1304,7 @@ def index_build_vector(
             reports_dir=settings.reports_dir,
             run_id=tracker.run_id,
             batch_size=batch_size,
+            project_root=settings.project_root,
         )
         payload = summary.model_dump()
         tracker.finish(payload)
@@ -1420,8 +1423,22 @@ def eval_golden(
             with_llm=with_llm,
             semantic_judge=semantic_judge,
         )
-    except (OSError, ValueError, ResearchDataError) as exc:
-        raise typer.BadParameter(str(exc)) from exc
+    except (OSError, ValueError, HistoryAgentError) as exc:
+        error = {
+            "error": type(exc).__name__,
+            "message": str(exc),
+            "hint": (
+                "Build current chunks and indexes with `history-agent process chunks`, "
+                "`history-agent index build-keyword`, and "
+                "`history-agent index build-vector`, then retry."
+            ),
+        }
+        if json_output:
+            typer.echo(json.dumps(error, ensure_ascii=False))
+        else:
+            typer.echo(f"golden benchmark failed: {error['message']}", err=True)
+            typer.echo(f"hint: {error['hint']}", err=True)
+        raise typer.Exit(code=2) from None
     if json_output:
         typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
         return
@@ -1438,6 +1455,58 @@ def eval_golden(
                 f"({metric['evaluable_cases']} evaluable cases)"
             )
     typer.echo(str(settings.reports_dir / "golden_benchmark_latest.json"))
+
+
+@eval_app.command("golden-compare")
+def eval_golden_compare(
+    run_a: str = typer.Argument(..., help="First Golden report JSON path."),
+    run_b: str = typer.Argument(..., help="Second Golden report JSON path."),
+    json_output: bool = typer.Option(False, "--json", help="Emit comparison JSON."),
+) -> None:
+    """Compare two compatible Golden runs and expose denominator changes."""
+
+    settings = get_settings()
+    path_a = Path(run_a)
+    path_b = Path(run_b)
+    if not path_a.is_absolute():
+        path_a = settings.project_root / path_a
+    if not path_b.is_absolute():
+        path_b = settings.project_root / path_b
+    try:
+        payload = compare_golden_runs(path_a, path_b)
+    except (OSError, ValueError, TypeError) as exc:
+        error = {"error": type(exc).__name__, "message": str(exc)}
+        if json_output:
+            typer.echo(json.dumps(error, ensure_ascii=False))
+        else:
+            typer.echo(f"golden comparison failed: {exc}", err=True)
+        raise typer.Exit(code=2) from None
+    if json_output:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        typer.echo(f"compatible: {payload['compatible']}")
+        for message in payload["errors"]:
+            typer.echo(f"error: {message}")
+        for message in payload["warnings"]:
+            typer.echo(f"warning: {message}")
+        for name, difference in payload["metadata_differences"].items():
+            typer.echo(
+                f"metadata {name}: {difference['run_a']!r} -> {difference['run_b']!r}"
+            )
+        for name, metric in payload["metrics"].items():
+            if metric["delta"] is not None:
+                typer.echo(
+                    f"{name}: {metric['run_a']} -> {metric['run_b']} "
+                    f"(delta {metric['delta']:+.6f}, "
+                    f"n={metric['evaluable_cases_a']}/{metric['evaluable_cases_b']})"
+                )
+            else:
+                typer.echo(
+                    f"{name}: not comparable "
+                    f"(n={metric['evaluable_cases_a']}/{metric['evaluable_cases_b']})"
+                )
+    if not payload["compatible"]:
+        raise typer.Exit(code=2)
 
 
 @eval_app.command("answers")
