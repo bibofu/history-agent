@@ -9,6 +9,7 @@ description = "Evidence-grounded local RAG for modern Chinese history research (
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "llama-index-core>=0.14.24,<0.15",
     "markdown-it-py>=4,<5",
     "pdfplumber>=0.11",
     "pydantic>=2.10",

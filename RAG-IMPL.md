@@ -1,8 +1,8 @@
 # RAG 实现说明
 
-本文描述仓库当前实际运行的 RAG 链路，包括 PDF 抽取、清洗与分片、关键词和向量索引、查询理解、双路召回、融合与重排、Top-K、证据构造、DeepSeek 生成、流式输出和引用校验。
+本文描述仓库当前实际运行的 LlamaIndex RAG 链路，包括 PDF 抽取、清洗与分片、关键词和向量索引、查询理解、双路召回、融合与重排、证据节点、检索反思 Workflow、DeepSeek 生成、流式输出和引用校验。
 
-实现快照日期为 2026-09-09。当前已构建索引的统计来自 2026-09-05 的 `data/reports/*_latest.json` 报告。
+实现快照日期为 2026-09-11。当前已构建索引的统计来自 2026-09-05 的 `data/reports/*_latest.json` 报告。
 
 ## 1. 总体架构
 
@@ -36,20 +36,40 @@ flowchart LR
     R -->|严格年份时间线或交集| S[结构化研究库]
     R -->|普通 RAG 问题| P[DeepSeek JSON 查询理解]
     P --> J[Pydantic 校验 / 原问题保留]
-    J --> T[规则解析与检索扩展]
+    J --> T[LlamaIndex QueryBundle]
     P -.失败降级.-> T
-    T --> H
-    T --> I
+    T --> K[自定义 BaseRetriever]
+    K --> H
+    K --> I
     H --> U[RRF 融合]
     I --> U
-    U --> V[来源加分、按页去重、时间覆盖选择]
-    V --> W[最多 12 条证据]
+    U --> V[TextNode / NodeWithScore]
+    V --> NP[NodePostprocessor 去重与限额]
+    NP --> RF{Workflow 证据充分性评估}
+    RF -->|不足| K
+    RF -->|充分或达到上限| W[证据包]
     W --> X[DeepSeek 流式生成]
     X --> Y[Markdown / 引用校验]
     Y --> Z[最终答案或证据摘录]
 ```
 
-### 1.1 篇目全文路由
+### 1.1 LlamaIndex 框架职责
+
+主 RAG 路径使用 `llama-index-core` 作为基础框架，而不是只在依赖中声明它：
+
+- 查询计划和证据评估的结构化输出由 `PydanticOutputParser` 解析与校验；
+- 主查询和扩展查询封装为 `QueryBundle`；
+- 关键词与向量融合后端实现为 `BaseRetriever`；
+- 每个领域 `SearchHit` 转换为 `TextNode + NodeWithScore`，完整保留文献、页码、章节、年份、人物和原始排序元数据；
+- 节点去重、合法性检查和数量限制由 `BaseNodePostprocessor` 执行；
+- 首轮检索、充分性判断、定向补充检索和有界停止由 LlamaIndex `Workflow` 及类型化 Event 编排；
+- 最终证据回答提示词由 `ChatPromptTemplate` 构造，项目继续使用自己的 DeepSeek HTTP 运行时，以保留连接池、并发准入、请求总预算、供应商 `thinking` 参数和 SSE 故障降级。
+
+框架与领域层之间通过适配器隔离。SQLite FTS5、FastEmbed/Qdrant、RRF、年代覆盖、人物
+硬过滤和引用校验没有替换成通用默认实现，因为这些规则是当前评测表现和史料可核验性的
+关键。API 响应和健康检查都公开 `rag_framework=llamaindex`，便于运行时确认真实链路。
+
+### 1.2 篇目全文路由
 
 只有问题同时包含书名号篇名和“全文”“完整原文”等明确标记时才进入全文路由。系统先在
 `data/processed/structure/*.json` 中精确匹配篇名，再只读取对应文档的 chunk 文件，并按

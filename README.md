@@ -351,7 +351,7 @@ Agent 引用时应说明具体版本，例如“据本地知识库所收民间�
 
 ## 技术方案
 
-项目采用 **混合 RAG + 结构化事件关系库**。普通 RAG 负责寻找和引用原文，结构化数据负责时间线、人物交集和组织关系查询。
+项目采用 **LlamaIndex Agentic RAG + 结构化事件关系库**。LlamaIndex 负责查询、证据节点、检索器、后处理器和检索反思工作流，项目自定义的混合检索负责历史领域排序与过滤；结构化数据负责时间线、人物交集和组织关系查询。
 
 ```mermaid
 flowchart LR
@@ -360,7 +360,8 @@ flowchart LR
     C --> D[文献元数据与页码映射]
     D --> E[关键词与向量混合索引]
     D --> F[人物/事件/关系抽取]
-    E --> G[首轮候选片段召回与重排]
+    E --> L[LlamaIndex QueryBundle / BaseRetriever]
+    L --> G[首轮 TextNode 召回与后处理]
     F --> H[时间线与关系查询]
     G --> R{核心方面是否有证据}
     R -->|不足且仍有预算| Q[针对缺失方面改写查询]
@@ -379,7 +380,7 @@ flowchart LR
 | PDF 解析 | PyMuPDF、pdfplumber、pypdf | 正文提取、页码映射和文档检查 |
 | 中文 OCR | PaddleOCR | 处理《西行漫记》和局部扫描页 |
 | API 服务 | FastAPI + Pydantic | 提供问答、人物和事件查询接口 |
-| RAG 编排 | 轻量自定义管线，必要时使用 LlamaIndex | 控制切分、检索、引用和回答流程 |
+| RAG 编排 | LlamaIndex Core / Workflow | 统一 QueryBundle、TextNode、Retriever、NodePostprocessor 和有界检索反思循环 |
 | 关键词检索 | BM25 | 人名、地名、会议名称和精确术语召回 |
 | 向量模型 | BAAI/bge-small-zh-v1.5（当前） | 本地 CPU 中文语义检索；后续可评测 BGE-M3 |
 | 融合/重排 | RRF（当前）、BGE Reranker v2 M3（候选） | 合并 BM25 与向量结果、去除同页重复证据 |
@@ -390,6 +391,18 @@ flowchart LR
 | 大语言模型 | DeepSeek V4-Pro（默认，可切换 V4-Flash） | 基于本地证据生成答案、thinking/high、引用 ID 校验 |
 | 初期界面 | FastAPI + 原生 HTML/CSS/JS | 单进程提供 API 和轻量会话页面 |
 | 测试评估 | pytest + 固定问题集 | 检查召回率、引用正确性和无依据回答 |
+
+### LlamaIndex 接入边界
+
+当前问答主链路基于 `llama-index-core 0.14.x`：自然语言计划通过
+`PydanticOutputParser` 解析和校验，查询进入 `QueryBundle`，本地混合召回实现为
+`BaseRetriever`，候选史料转换为带完整出处元数据的 `TextNode/NodeWithScore`，去重和
+数量限制由 `BaseNodePostprocessor` 执行，首轮检索、证据充分性评估和一次定向补检由
+LlamaIndex `Workflow` 的类型化事件编排。最终提示词使用 `ChatPromptTemplate` 构造。
+
+项目没有把领域逻辑强行换成框架默认值：BM25/Qdrant 融合、人物硬过滤、时间覆盖、页码
+映射和事实级引用校验仍是自定义组件，通过 LlamaIndex 扩展接口接入。这些能力直接决定
+历史问答的可核验性，也是与通用 RAG 示例的主要区别。
 
 初期不强制使用图数据库。人物关系首先存入可审计的 SQL 表，并用 NetworkX 完成分析和可视化；只有当关系规模和多跳查询明显变复杂时，再迁移到 Neo4j。
 

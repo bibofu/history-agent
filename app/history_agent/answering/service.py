@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -7,12 +8,14 @@ from time import perf_counter
 from typing import Any, Literal, cast
 
 import httpx
+from llama_index.core.prompts import ChatPromptTemplate
 
 from history_agent.answering.context import (
     requires_conversation_context,
     sanitize_history_content,
 )
 from history_agent.answering.full_text import answer_full_text_question
+from history_agent.answering.llamaindex_workflow import run_retrieval_workflow
 from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
 from history_agent.answering.query_understanding import (
     QueryExecution,
@@ -28,7 +31,6 @@ from history_agent.answering.structured import (
 )
 from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
-from history_agent.errors import RetrievalError
 from history_agent.retrieval.hybrid import search_hybrid_index
 from history_agent.retrieval.models import SearchHit, SearchResponse
 
@@ -330,7 +332,16 @@ def _llm_request_payload(
     history_text = "\n".join(
         f"{item.role}: {sanitize_history_content(item.content)}" for item in history_items
     )
-    messages: list[dict[str, object]] = [{"role": "system", "content": system}]
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system),
+            ("user", "问题：{question}\n\n仅可使用的本地证据：\n{evidence}"),
+        ]
+    )
+    formatted = prompt.format_messages(question=request.question, evidence=evidence)
+    messages: list[dict[str, object]] = [
+        {"role": formatted[0].role.value, "content": formatted[0].content or ""}
+    ]
     if history_text:
         messages.append(
             {
@@ -344,10 +355,7 @@ def _llm_request_payload(
             }
         )
     messages.append(
-        {
-            "role": "user",
-            "content": f"问题：{request.question}\n\n仅可使用的本地证据：\n{evidence}",
-        }
+        {"role": formatted[-1].role.value, "content": formatted[-1].content or ""}
     )
     request_payload: dict[str, object] = {
         "model": settings.llm_model,
@@ -732,56 +740,22 @@ def _retrieve_context(
         settings.person_aliases_path,
     )
     retrieval_limit = _retrieval_limit(request, execution)
-    retrieval = search_hybrid_index(
-        keyword_index_path=settings.keyword_index_path,
-        vector_index_path=settings.vector_index_path,
-        model_cache_dir=settings.model_cache_dir / "fastembed",
-        aliases_path=settings.person_aliases_path,
-        query=execution.primary_query,
-        top_k=retrieval_limit,
-        plan=execution.retrieval_plan,
-        additional_queries=list(execution.additional_queries),
+    workflow_result = asyncio.run(
+        run_retrieval_workflow(
+            settings=settings,
+            request=request,
+            plan=planning.plan if planning is not None else None,
+            execution=execution,
+            retrieval_limit=retrieval_limit,
+            search_backend=search_hybrid_index,
+            assess_retrieval=assess_retrieval,
+            merge_retrieval=_merge_retrieval_rounds,
+            runtime=runtime,
+            budget=budget,
+            max_chunks=MAX_COMPLEX_RETRIEVAL_CHUNKS,
+        )
     )
-    retrieval = retrieval.model_copy(update={"query": request.question})
-    reflection = assess_retrieval(
-        settings,
-        request,
-        planning.plan if planning is not None else None,
-        retrieval,
-        runtime,
-        budget,
-    )
-    reflection_status: Literal[
-        "disabled", "skipped", "sufficient", "retried", "fallback"
-    ] = reflection.status if reflection.status != "retry" else "retried"
-    retrieval_rounds = 1
-    reflection_error_code = reflection.error_code
-    if reflection.status == "retry":
-        try:
-            retry_limit = min(12, max(6, len(reflection.followup_queries) * 4))
-            retry = search_hybrid_index(
-                keyword_index_path=settings.keyword_index_path,
-                vector_index_path=settings.vector_index_path,
-                model_cache_dir=settings.model_cache_dir / "fastembed",
-                aliases_path=settings.person_aliases_path,
-                query=reflection.followup_queries[0],
-                top_k=retry_limit,
-                plan=execution.retrieval_plan,
-                additional_queries=list(reflection.followup_queries[1:]),
-            )
-            retrieval = _merge_retrieval_rounds(
-                retrieval,
-                retry,
-                query=request.question,
-                limit=min(
-                    MAX_COMPLEX_RETRIEVAL_CHUNKS,
-                    max(retrieval_limit, request.top_k + retry_limit),
-                ),
-            )
-            retrieval_rounds = 2
-        except RetrievalError:
-            reflection_status = "fallback"
-            reflection_error_code = "retry_retrieval_failed"
+    retrieval = workflow_result.retrieval
     keyword_backed = [hit for hit in retrieval.hits if hit.keyword_rank is not None]
     unsupported_entity = _unsupported_leading_entity(request.question, retrieval.hits)
     keyword_unavailable = "keyword" in retrieval.degraded_components
@@ -806,11 +780,11 @@ def _retrieve_context(
         citations,
         evidence_status,
         unsupported_entity,
-        reflection_status,
-        retrieval_rounds,
-        tuple(reflection.assessment.missing_aspects) if reflection.assessment else (),
-        reflection.usage,
-        reflection_error_code,
+        workflow_result.reflection_status,
+        workflow_result.retrieval_rounds,
+        workflow_result.missing_aspects,
+        workflow_result.reflection_usage,
+        workflow_result.reflection_error_code,
     )
 
 

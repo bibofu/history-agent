@@ -99,3 +99,4 @@ class AnswerResponse(BaseModel):
     citations: list[Citation]
     retrieved_evidence_count: int = Field(default=0, ge=0)
     limitations: list[str] = Field(default_factory=list)
+    rag_framework: Literal["llamaindex"] = "llamaindex"

@@ -154,6 +154,7 @@ class Settings(BaseSettings):
 
     def public_snapshot(self) -> dict[str, Any]:
         return {
+            "rag_framework": "llamaindex",
             "project_root": str(self.project_root),
             "docs_dir": str(self.docs_dir),
             "data_dir": str(self.data_dir),

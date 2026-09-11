@@ -114,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {
             "status": "ok",
             "version": __version__,
+            "rag_framework": "llamaindex",
             "indexes": indexes,
             "llm_enabled": active_settings.llm_enabled,
             "llm_provider": active_settings.llm_provider,

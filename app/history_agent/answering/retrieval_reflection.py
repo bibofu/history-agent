@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 import httpx
+from llama_index.core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field, ValidationError
 
 from history_agent.answering.models import QueryPlan, QuestionRequest
@@ -31,6 +32,9 @@ class EvidenceAssessment(BaseModel):
     covered_aspects: list[Aspect] = Field(default_factory=list, max_length=8)
     missing_aspects: list[Aspect] = Field(default_factory=list, max_length=4)
     reason: str = Field(min_length=2, max_length=240)
+
+
+EVIDENCE_ASSESSMENT_PARSER = PydanticOutputParser(EvidenceAssessment)
 
 
 @dataclass(frozen=True)
@@ -210,7 +214,7 @@ def assess_retrieval(
         choice = payload["choices"][0]
         if choice.get("finish_reason") == "length":
             return ReflectionResult("fallback", error_code="max_tokens_exhausted")
-        assessment = EvidenceAssessment.model_validate_json(
+        assessment = EVIDENCE_ASSESSMENT_PARSER.parse(
             str(choice["message"]["content"]).strip()
         )
         raw_usage = payload.get("usage", {})

@@ -6,9 +6,10 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import httpx
+from llama_index.core.output_parsers import PydanticOutputParser
 from pydantic import ValidationError
 
 from history_agent.answering.context import (
@@ -31,6 +32,7 @@ INTENT_HINTS = {
     "observation": "记述 描述 印象",
 }
 MAX_COVERAGE_QUERIES = 8
+QUERY_PLAN_PARSER = PydanticOutputParser(QueryPlan)
 CURRENT_QUESTION_YEAR = re.compile(r"(?<!\d)(?:18|19|20)\d{2}(?!\d)")
 CONTEXTUAL_TIME_REFERENCE = re.compile(
     r"那年|当年|这一年|同年|次年|翌年|当时|同期|这一时期|那个时期|这段时期"
@@ -251,7 +253,7 @@ def _guard_plan_against_history(
 
 
 def _validated_plan(content: str) -> QueryPlan:
-    plan = QueryPlan.model_validate_json(content.strip())
+    plan = cast(QueryPlan, QUERY_PLAN_PARSER.parse(content.strip()))
     if (plan.start_year is None) != (plan.end_year is None):
         raise ValueError("incomplete_year_range")
     if (
