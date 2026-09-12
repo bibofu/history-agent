@@ -11,6 +11,7 @@ from history_agent.answering.structured import (
     _structured_result_limit,
     answer_structured_question,
 )
+from history_agent.answering.timeline_evidence import TimelineEvidenceFilterResult
 from history_agent.config import Settings
 from history_agent.db import Database
 from history_agent.research.timeline import get_person_timeline
@@ -178,6 +179,102 @@ def test_structured_timeline_summary_uses_llm_plan_without_rag(
     assert data["answer"].startswith("主要经历可归纳")
     assert received == [["结构化索引日期：1943-01-21", "结构化索引日期：1943-02-01"]]
     assert subject_only_calls == [True]
+
+
+def test_empty_subject_timeline_falls_back_to_hybrid_retrieval(
+    work_path: Path,
+) -> None:
+    settings = _settings(work_path).model_copy(
+        update={
+            "person_aliases_path": Path(__file__).parents[1] / "config" / "person_aliases.json"
+        }
+    )
+    question = "毛泽东在1943年有哪些主要经历？"
+
+    response = answer_structured_question(
+        settings,
+        QuestionRequest(question=question),
+        _plan(question, "timeline", ["毛泽东"], 1943, 1943),
+    )
+
+    assert response is None
+
+
+def test_empty_subject_timeline_reaches_filtered_hybrid_api(
+    work_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    question = "毛泽东在1943年有哪些主要经历？"
+    planning = QueryPlanningResult(
+        _plan(question, "timeline", ["毛泽东"], 1943, 1943),
+        "used",
+        model_name="deepseek-v4-flash",
+    )
+    hit = SearchHit(
+        rank=1,
+        chunk_id="mao-action",
+        document_id="other-chronology",
+        title="其他人物年谱",
+        filename="other.pdf",
+        source_type="chronology",
+        verification_status="verified",
+        pdf_page_start=20,
+        pdf_page_end=20,
+        section_path=["1943年"],
+        text="1943年，毛泽东主持会议并部署工作。",
+        year_mentions=[1943],
+        people=["毛泽东"],
+        extraction_methods=["text_layer"],
+        score=1.0,
+        matched_terms=["毛泽东"],
+        keyword_rank=1,
+        vector_rank=1,
+    )
+    retrieval = SearchResponse(
+        query=question,
+        query_intent="timeline",
+        query_terms=["毛泽东", "1943"],
+        query_years=[1943],
+        query_year_range=[1943, 1943],
+        query_people=["毛泽东"],
+        document_filters=[],
+        include_out_of_scope=False,
+        hits=[hit],
+        retrieval_mode="planned_hybrid_rrf",
+    )
+
+    monkeypatch.setattr("history_agent.answering.service.plan_question", lambda *args: planning)
+    monkeypatch.setattr(
+        "history_agent.answering.service.search_hybrid_index", lambda **kwargs: retrieval
+    )
+    monkeypatch.setattr(
+        "history_agent.answering.service.filter_person_timeline_evidence",
+        lambda *args: TimelineEvidenceFilterResult(
+            retrieval.model_copy(update={"retrieval_mode": "planned_hybrid_rrf_subject_filtered"}),
+            "applied",
+            removed_count=0,
+        ),
+    )
+    monkeypatch.setattr(
+        "history_agent.answering.service._llm_answer",
+        lambda **kwargs: LLMResult(answer="1943年，毛泽东主持会议并部署工作。[E1]"),
+    )
+    settings = _settings(work_path).model_copy(
+        update={
+            "llm_api_key": SecretStr("test-key"),
+            "llm_retrieval_reflection": False,
+            "person_aliases_path": Path(__file__).parents[1] / "config" / "person_aliases.json",
+        }
+    )
+
+    data = TestClient(create_app(settings)).post(
+        "/api/questions", json={"question": question}
+    ).json()
+
+    assert data["retrieval_mode"] == "planned_hybrid_rrf_subject_filtered"
+    assert data["answer"] == "1943年，毛泽东主持会议并部署工作。[E1]"
+    assert data["citations"][0]["year_mentions"] == [1943]
+    assert any("年谱主体记录" in item for item in data["limitations"])
+    assert any("动作主体" in item for item in data["limitations"])
 
 
 def test_direct_evidence_wording_is_understood_before_structured_route(

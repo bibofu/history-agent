@@ -34,6 +34,7 @@ from history_agent.answering.structured import (
     answer_structured_question,
     requires_structured_generation,
 )
+from history_agent.answering.timeline_evidence import filter_person_timeline_evidence
 from history_agent.answering.validation import remove_uncited_claim_blocks, validate_grounded_answer
 from history_agent.config import Settings
 from history_agent.retrieval.hybrid import search_hybrid_index
@@ -41,18 +42,39 @@ from history_agent.retrieval.models import SearchHit, SearchResponse
 
 WHITESPACE = re.compile(r"\s+")
 SENTENCE_BOUNDARY = re.compile(r"(?<=[。！？；])")
+QUESTION_YEAR = re.compile(r"(?<!\d)(?:18|19|20)\d{2}(?!\d)")
+ANSWER_YEAR = re.compile(r"(?<!\d)(?:18|19|20)\d{2}年")
+MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+")
+TIMELINE_DATE = re.compile(
+    r"(?:(?P<year>(?:18|19|20)\d{2})\s*年\s*)?"
+    r"(?P<month>1[0-2]|0?[1-9])\s*月"
+    r"(?:\s*(?P<day>3[01]|[12]\d|0?[1-9])\s*日)?"
+)
+TRUNCATED_LEADING_MONTH = re.compile(
+    r"^(?P<prefix>……)?\s*\d{1,2}\s*月(?!\s*(?:\d{1,2}\s*日|上旬|中旬|下旬))"
+)
 LEADING_ENTITY = re.compile(
     r"^(?:请问|我想知道|想知道|帮我查)?(?P<entity>[\u3400-\u4dbf\u4e00-\u9fff·]{2,18})"
     r"(?:在|于)(?=(?:18|19|20)\d{2}年)"
 )
 ENTITY_SEPARATOR = re.compile(r"[、和与]")
-PROMPT_VERSION = "grounded-answer-v14"
+PROMPT_VERSION = "grounded-answer-v15"
 LLM_EVIDENCE_BATCH_SIZE = 12
 MAX_COMPLEX_RETRIEVAL_CHUNKS = 36
 
 
 def _compact(text: str) -> str:
     return WHITESPACE.sub(" ", text).strip()
+
+
+def _clean_quote_start(text: str) -> str:
+    """Remove a month token cut off from its day/context at a chunk boundary."""
+
+    match = TRUNCATED_LEADING_MONTH.match(text)
+    if match is None:
+        return text
+    prefix = match["prefix"] or ""
+    return prefix + text[match.end() :].lstrip()
 
 
 def _quote_for_hit(
@@ -67,13 +89,12 @@ def _quote_for_hit(
     if len(people) == 1:
         position = text.find(next(iter(people)))
         if position > 0:
-            window_start = max(0, position - 110)
+            window_start = max(0, position - 180)
             boundary = max(text.rfind(mark, window_start, position) for mark in "。！？；")
-            start = boundary + 1 if boundary >= window_start else window_start
-            if start:
-                text = "……" + text[start:]
+            if boundary >= window_start:
+                text = "……" + text[boundary + 1 :]
     if len(text) <= limit:
-        return text
+        return _clean_quote_start(text)
     person_positions = [
         match.start() for person in people for match in re.finditer(re.escape(person), text)
     ]
@@ -102,15 +123,33 @@ def _quote_for_hit(
             boundary = min((position for position in boundaries if position >= 0), default=-1)
             start = boundary + 1 if boundary >= 0 else window_start
             end = min(len(text), start + limit)
-            return ("……" if start else "") + text[start:end] + ("……" if end < len(text) else "")
-    window_start = max(0, center - 110)
+            return _clean_quote_start(
+                ("……" if start else "")
+                + text[start:end]
+                + ("……" if end < len(text) else "")
+            )
+    window_start = max(0, center - 180)
     boundaries = [text.rfind(mark, window_start, center) for mark in "。！？；"]
     boundary = max(boundaries)
-    start = boundary + 1 if boundary >= window_start else window_start
+    if boundary >= window_start:
+        start = boundary + 1
+    else:
+        date_context_start = max(0, window_start - 40)
+        date_matches = list(
+            re.finditer(
+                r"(?:(?:18|19|20)\d{2}\s*年\s*)?\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?",
+                text[date_context_start:center],
+            )
+        )
+        start = (
+            date_context_start + date_matches[-1].start()
+            if date_matches
+            else window_start
+        )
     end = min(len(text), start + limit)
     prefix = "……" if start else ""
     suffix = "……" if end < len(text) else ""
-    return f"{prefix}{text[start:end]}{suffix}"
+    return _clean_quote_start(f"{prefix}{text[start:end]}{suffix}")
 
 
 def _unsupported_leading_entity(question: str, hits: list[SearchHit]) -> str | None:
@@ -146,6 +185,7 @@ def _citations(response: Any) -> list[Citation]:
             source_type=hit.source_type,
             verification_status=hit.verification_status,
             extraction_methods=hit.extraction_methods,
+            year_mentions=hit.year_mentions,
         )
         for index, hit in enumerate(response.hits, start=1)
     ]
@@ -177,7 +217,10 @@ def _extractive_answer(intent: str, citations: list[Citation]) -> str:
         ]
         summary = (sentences[0] if sentences else citation.quote)[:180].strip()
         summary = re.sub(r"^[…，、\s]+", "", summary)
-        bullets.append(f"- {summary} [{citation.evidence_id}]")
+        year_prefix = ""
+        if intent == "timeline" and citation.year_mentions:
+            year_prefix = "、".join(str(year) for year in citation.year_mentions[:3]) + "年："
+        bullets.append(f"- {year_prefix}{summary} [{citation.evidence_id}]")
     return lead + "\n\n" + "\n".join(bullets)
 
 
@@ -284,6 +327,7 @@ def _llm_request_payload(
 ) -> dict[str, object]:
     evidence = evidence_override or "\n\n".join(
         f"[{item.evidence_id}] 《{item.document}》PDF第{item.pdf_page}页"
+        f"；片段标注年份：{'、'.join(str(year) for year in item.year_mentions) or '未标注'}"
         f"；章节：{' > '.join(item.section) or '未识别'}\n{item.quote}"
         for item in citations
     )
@@ -301,6 +345,12 @@ def _llm_request_payload(
         "检索年份范围只是召回线索，不能把同年其他活动或后来的回忆当作当时的交集。"
         "若证据覆盖所问时期的多个阶段，须按阶段组织回答，不能只总结前半段；"
         "对于跨年人物活动梳理，若证据覆盖多个年份，须按年份组织，不能只回答起止年份；"
+        "跨年问题的每个时间要点必须写明四位年份，或放在明确的四位年份小标题下；"
+        "不能脱离年份标题只写‘10月’、‘11月3日’或‘同年’，也不能打乱跨年顺序；"
+        "对于人物经历或活动问题，只纳入证据明确表明目标人物亲自实施、参与或承担角色的事项；"
+        "他人致电、邀请、评价或提到目标人物，以及目标人物仅作为收件人、被会见者或名单成员"
+        "而没有明确行动的材料，不能自动写成该人物的经历。没有目标人物专属年谱时，可以使用"
+        "其他年谱、党史和文献中的直接记载，但必须逐项核对动作主体；"
         "对于结构化年谱记录，若用户询问主要经历、概括或总结，应合并同类活动，按阶段"
         "或主题归纳；若用户明确要求列出时间线、逐条记录、原文或明细，则保持记录粒度和"
         "先后顺序，但仍整理成通顺回答。结构化索引日期只用于组织顺序，不得把仅仅提到"
@@ -384,9 +434,182 @@ def _repair_request_payload(
     }
 
 
+def _has_ambiguous_timeline_years(request: QuestionRequest, answer: str) -> bool:
+    """Detect month-only timeline items that lost their year in a multi-year answer."""
+
+    question_years = {int(year) for year in QUESTION_YEAR.findall(request.question)}
+    if len(question_years) < 2 or min(question_years) == max(question_years):
+        return False
+    active_year: int | None = None
+    previous_date: tuple[int, int, int] | None = None
+    for line in answer.splitlines():
+        stripped = line.strip()
+        if MARKDOWN_HEADING.match(stripped):
+            heading_year = ANSWER_YEAR.search(stripped)
+            active_year = int(heading_year.group()[:4]) if heading_year else None
+            previous_date = None
+            continue
+        if "[E" in stripped and ANSWER_YEAR.search(stripped) is None and active_year is None:
+            return True
+        if "[E" not in stripped:
+            continue
+        for match in TIMELINE_DATE.finditer(stripped):
+            year = int(match["year"]) if match["year"] else active_year
+            if year is None:
+                continue
+            active_year = year
+            current = (
+                year,
+                int(match["month"]),
+                int(match["day"]) if match["day"] else 0,
+            )
+            if previous_date is not None and current < previous_date:
+                return True
+            previous_date = current
+    return False
+
+
+def _timeline_year_repair_payload(
+    request_payload: dict[str, object], answer: str
+) -> dict[str, object]:
+    return {
+        **request_payload,
+        "messages": [
+            *cast(list[dict[str, object]], request_payload["messages"]),
+            {"role": "assistant", "content": answer},
+            {
+                "role": "user",
+                "content": (
+                    "上一版跨年回答丢失了部分时间点的四位年份，导致不同年份的月份混在一起。"
+                    "请重新输出完整回答：每个时间要点都写明四位年份，或置于明确的四位年份"
+                    "小标题下，并严格按年份先后排序。不得增加证据中没有的年份或事实，原有"
+                    "事实仍须保留对应证据编号。"
+                ),
+            },
+        ],
+    }
+
+
+def _citation_date_repair_payload(
+    request_payload: dict[str, object], answer: str, mismatches: tuple[str, ...]
+) -> dict[str, object]:
+    return {
+        **request_payload,
+        "messages": [
+            *cast(list[dict[str, object]], request_payload["messages"]),
+            {"role": "assistant", "content": answer},
+            {
+                "role": "user",
+                "content": (
+                    "上一版回答中的下列日期与同段所引证据原文不一致："
+                    + "、".join(mismatches)
+                    + "。请重新输出完整回答，日期必须逐字依据对应证据，不得根据相邻文字"
+                    "猜测或补全；无法确认的日期就删除具体月日。其他事实仍须保留对应证据编号。"
+                ),
+            },
+        ],
+    }
+
+
+def _repair_citation_dates(
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    request_payload: dict[str, object],
+    answer: str,
+    citations: list[Citation],
+    mismatches: tuple[str, ...],
+    initial_usage: dict[str, int] | None,
+    runtime: LLMRuntime | None,
+    budget: RequestBudget | None,
+) -> LLMResult:
+    payload = _citation_date_repair_payload(request_payload, answer, mismatches)
+    repaired = _request_deepseek_completion(settings, payload, runtime, budget)
+    usage = _merge_usage(initial_usage, repaired.usage)
+    if repaired.answer is None:
+        return LLMResult(
+            answer=None,
+            error_code=f"citation_date_repair_{repaired.error_code}",
+            usage=usage,
+        )
+    validation = validate_grounded_answer(repaired.answer, citations)
+    if validation.valid:
+        if _has_ambiguous_timeline_years(request, repaired.answer):
+            return _repair_timeline_years(
+                settings=settings,
+                request=request,
+                request_payload=request_payload,
+                answer=repaired.answer,
+                citations=citations,
+                initial_usage=usage,
+                runtime=runtime,
+                budget=budget,
+            )
+        return LLMResult(answer=repaired.answer, usage=usage)
+    if validation.error_code == "uncited_core_claim":
+        salvaged = _salvage_llm_result(
+            repaired.answer, citations, validation.uncited_claims, usage
+        )
+        if salvaged is not None and not _has_ambiguous_timeline_years(
+            request, salvaged.answer or ""
+        ):
+            return salvaged
+    return LLMResult(
+        answer=None,
+        error_code=f"citation_date_repair_{validation.error_code}",
+        usage=usage,
+        uncited_claims=validation.uncited_claims,
+    )
+
+
+def _repair_timeline_years(
+    *,
+    settings: Settings,
+    request: QuestionRequest,
+    request_payload: dict[str, object],
+    answer: str,
+    citations: list[Citation],
+    initial_usage: dict[str, int] | None,
+    runtime: LLMRuntime | None,
+    budget: RequestBudget | None,
+) -> LLMResult:
+    payload = _timeline_year_repair_payload(request_payload, answer)
+    repaired = _request_deepseek_completion(settings, payload, runtime, budget)
+    usage = _merge_usage(initial_usage, repaired.usage)
+    if repaired.answer is None:
+        return LLMResult(
+            answer=None,
+            error_code=f"timeline_year_repair_{repaired.error_code}",
+            usage=usage,
+        )
+    validation = validate_grounded_answer(repaired.answer, citations)
+    if validation.valid and not _has_ambiguous_timeline_years(request, repaired.answer):
+        return LLMResult(answer=repaired.answer, usage=usage)
+    if validation.error_code == "uncited_core_claim":
+        salvaged = _salvage_llm_result(
+            repaired.answer, citations, validation.uncited_claims, usage
+        )
+        if salvaged is not None and not _has_ambiguous_timeline_years(
+            request, salvaged.answer or ""
+        ):
+            return salvaged
+    error_code = (
+        "ambiguous_timeline_years"
+        if _has_ambiguous_timeline_years(request, repaired.answer)
+        else validation.error_code
+    )
+    return LLMResult(
+        answer=None,
+        error_code=f"timeline_year_repair_{error_code}",
+        usage=usage,
+        uncited_claims=validation.uncited_claims,
+    )
+
+
 def _validated_llm_answer(
     *,
     settings: Settings,
+    request: QuestionRequest,
     request_payload: dict[str, object],
     citations: list[Citation],
     runtime: LLMRuntime | None = None,
@@ -397,7 +620,30 @@ def _validated_llm_answer(
         return first
     validation = validate_grounded_answer(first.answer, citations)
     if validation.valid:
+        if _has_ambiguous_timeline_years(request, first.answer):
+            return _repair_timeline_years(
+                settings=settings,
+                request=request,
+                request_payload=request_payload,
+                answer=first.answer,
+                citations=citations,
+                initial_usage=first.usage,
+                runtime=runtime,
+                budget=budget,
+            )
         return first
+    if validation.error_code == "citation_date_mismatch":
+        return _repair_citation_dates(
+            settings=settings,
+            request=request,
+            request_payload=request_payload,
+            answer=first.answer,
+            citations=citations,
+            mismatches=validation.date_mismatches,
+            initial_usage=first.usage,
+            runtime=runtime,
+            budget=budget,
+        )
     if validation.error_code != "uncited_core_claim":
         return LLMResult(
             answer=None,
@@ -410,8 +656,21 @@ def _validated_llm_answer(
     )
     # A validated salvage is already safe to return. A second LLM round trip only
     # tries to recover removed prose and was the dominant latency in common cases.
-    if safe_first is not None:
+    if safe_first is not None and not _has_ambiguous_timeline_years(
+        request, safe_first.answer or ""
+    ):
         return safe_first
+    if safe_first is not None:
+        return _repair_timeline_years(
+            settings=settings,
+            request=request,
+            request_payload=request_payload,
+            answer=safe_first.answer or "",
+            citations=citations,
+            initial_usage=safe_first.usage,
+            runtime=runtime,
+            budget=budget,
+        )
     repair_payload = _repair_request_payload(
         request_payload, first.answer, citations, validation.uncited_claims
     )
@@ -428,11 +687,34 @@ def _validated_llm_answer(
         )
     repaired_validation = validate_grounded_answer(repaired.answer, citations)
     if repaired_validation.valid:
+        if _has_ambiguous_timeline_years(request, repaired.answer):
+            return _repair_timeline_years(
+                settings=settings,
+                request=request,
+                request_payload=request_payload,
+                answer=repaired.answer,
+                citations=citations,
+                initial_usage=combined_usage,
+                runtime=runtime,
+                budget=budget,
+            )
         preferred = _prefer_llm_result(
             safe_first, LLMResult(answer=repaired.answer), combined_usage
         )
         assert preferred is not None
         return preferred
+    if repaired_validation.error_code == "citation_date_mismatch":
+        return _repair_citation_dates(
+            settings=settings,
+            request=request,
+            request_payload=request_payload,
+            answer=repaired.answer,
+            citations=citations,
+            mismatches=repaired_validation.date_mismatches,
+            initial_usage=combined_usage,
+            runtime=runtime,
+            budget=budget,
+        )
     safe_repaired = None
     if repaired_validation.error_code == "uncited_core_claim":
         safe_repaired = _salvage_llm_result(
@@ -441,6 +723,10 @@ def _validated_llm_answer(
             repaired_validation.uncited_claims,
             combined_usage,
         )
+        if safe_repaired is not None and _has_ambiguous_timeline_years(
+            request, safe_repaired.answer or ""
+        ):
+            safe_repaired = None
     preferred = _prefer_llm_result(safe_first, safe_repaired, combined_usage)
     if preferred is not None:
         return preferred
@@ -469,6 +755,7 @@ def _llm_answer_direct(
     )
     return _validated_llm_answer(
         settings=settings,
+        request=request,
         request_payload=payload,
         citations=citations,
         runtime=runtime,
@@ -555,6 +842,7 @@ def _hierarchical_llm_answer(
     )
     final = _validated_llm_answer(
         settings=settings,
+        request=request,
         request_payload=preparation.request_payload,
         citations=citations,
         runtime=runtime,
@@ -658,6 +946,9 @@ class AnswerContext:
     missing_aspects: tuple[str, ...] = ()
     reflection_usage: dict[str, int] | None = None
     reflection_error_code: str | None = None
+    timeline_filter_status: Literal["disabled", "skipped", "applied", "fallback"] = "skipped"
+    timeline_filter_removed_count: int = 0
+    timeline_filter_error_code: str | None = None
 
 
 def _retrieval_limit(request: QuestionRequest, execution: QueryExecution) -> int:
@@ -732,9 +1023,18 @@ async def _aretrieve_context(
         max_chunks=MAX_COMPLEX_RETRIEVAL_CHUNKS,
         callback_manager=getattr(runtime, "callback_manager", None),
     )
-    retrieval = workflow_result.retrieval
+    original_retrieval = workflow_result.retrieval
+    timeline_filter = await asyncio.to_thread(
+        filter_person_timeline_evidence,
+        settings,
+        request.question,
+        original_retrieval,
+        runtime,
+        budget,
+    )
+    retrieval = timeline_filter.retrieval
     keyword_backed = [hit for hit in retrieval.hits if hit.keyword_rank is not None]
-    unsupported_entity = _unsupported_leading_entity(request.question, retrieval.hits)
+    unsupported_entity = _unsupported_leading_entity(request.question, original_retrieval.hits)
     keyword_unavailable = "keyword" in retrieval.degraded_components
     if (not keyword_backed and not keyword_unavailable) or unsupported_entity:
         citations: list[Citation] = []
@@ -762,6 +1062,9 @@ async def _aretrieve_context(
         workflow_result.missing_aspects,
         workflow_result.reflection_usage,
         workflow_result.reflection_error_code,
+        timeline_filter.status,
+        timeline_filter.removed_count,
+        timeline_filter.error_code,
     )
 
 
@@ -790,6 +1093,25 @@ def _finish_answer(
     answer = llm_result.answer or _extractive_answer(retrieval.query_intent, retrieved_citations)
     citations = _citations_used_by_answer(answer, retrieved_citations)
     limitations = []
+    structured_timeline_fallback = (
+        planning is not None
+        and planning.plan is not None
+        and planning.plan.intent == "timeline"
+        and planning.plan.retrieval_route == "structured"
+    )
+    if structured_timeline_fallback:
+        limitations.append("未找到目标人物的年谱主体记录，已自动转用混合检索。")
+    if context.timeline_filter_status == "applied":
+        limitations.append(
+            "候选证据已由查询理解模型逐条核对动作主体"
+            f"，剔除 {context.timeline_filter_removed_count} 条仅被提及、被动收件或"
+            "来源年代可疑的片段。"
+        )
+    elif context.timeline_filter_status == "fallback":
+        limitations.append(
+            "人物动作主体核验未通过"
+            f"（{context.timeline_filter_error_code}），回答模型仍按原文逐条约束生成。"
+        )
     if not retrieved_citations:
         reason = (
             f"检索片段中没有出现问题人物“{unsupported_entity}”。"

@@ -19,6 +19,7 @@ from history_agent.answering.service import (
     LLMResult,
     _extractive_answer,
     _finish_answer,
+    _has_ambiguous_timeline_years,
     _llm_answer,
     _quote_for_hit,
     _retrieval_limit,
@@ -143,6 +144,62 @@ def test_short_timeline_quote_starts_with_the_persons_relevant_sentence() -> Non
 
     assert quote.startswith("……中共中央决定由习仲勋任西北局书记")
     assert "土地政策" not in quote
+
+
+def test_long_timeline_quote_does_not_cut_the_leading_date() -> None:
+    hit = SearchHit(
+        rank=1,
+        chunk_id="peng",
+        document_id="mao",
+        title="毛泽东年谱 第1卷（1893.12-1937.06）",
+        filename="mao.pdf",
+        source_type="chronology",
+        verification_status="verified",
+        pdf_page_start=494,
+        pdf_page_end=494,
+        section_path=[],
+        text=(
+            "此前记录了部队部署和沿途情况。" * 18
+            + "11月3日，会议决定彭德怀为副主席，并任红一方面军司令员。"
+            + "11月4日，彭德怀与毛泽东致电各纵队布置行动。"
+        ),
+        year_mentions=[1935],
+        people=["彭德怀"],
+        extraction_methods=["text_layer"],
+        score=1.0,
+        matched_terms=["彭德怀"],
+    )
+
+    quote = _quote_for_hit(hit, ["彭德怀"], query_people=["彭德怀"])
+
+    assert "11月3日" in quote
+    assert re.search(r"(?<!\d)1月3日", quote) is None
+
+
+def test_quote_removes_month_fragment_without_day_at_chunk_start() -> None:
+    hit = SearchHit(
+        rank=1,
+        chunk_id="truncated-date",
+        document_id="mao",
+        title="毛泽东年谱",
+        filename="mao.pdf",
+        source_type="chronology",
+        verification_status="verified",
+        pdf_page_start=494,
+        pdf_page_end=494,
+        section_path=[],
+        text="1 月周恩来、彭德怀等为西北革命军事委员会委员。",
+        year_mentions=[1935],
+        people=["彭德怀"],
+        extraction_methods=["text_layer"],
+        score=1.0,
+        matched_terms=["彭德怀"],
+    )
+
+    quote = _quote_for_hit(hit, ["彭德怀"], query_people=["彭德怀"])
+
+    assert quote.startswith("周恩来、彭德怀")
+    assert not quote.startswith("1 月")
 
 
 def test_question_request_rejects_unbounded_history() -> None:
@@ -455,6 +512,70 @@ def test_validation_rejects_mismatched_document_name() -> None:
 
     assert result.valid is False
     assert result.error_code == "citation_metadata_mismatch"
+
+
+def test_validation_rejects_date_not_supported_by_cited_passage() -> None:
+    citation = _citation("11月3日，彭德怀被任命为红一方面军司令员。").model_copy(
+        update={"year_mentions": [1935]}
+    )
+
+    wrong = validate_grounded_answer("1935年1月，彭德怀被任命为司令员。[E1]", [citation])
+    correct = validate_grounded_answer("1935年11月3日，彭德怀被任命为司令员。[E1]", [citation])
+
+    assert wrong.valid is False
+    assert wrong.error_code == "citation_date_mismatch"
+    assert wrong.date_mismatches == ("1935年1月",)
+    assert correct.valid is True
+
+
+def test_year_heading_carries_context_for_cross_year_timeline_items() -> None:
+    request = QuestionRequest(question="彭德怀在1930-1935年的主要经历")
+    citation = _citation("1935年，彭德怀担任红一方面军司令员。").model_copy(
+        update={"year_mentions": [1935]}
+    )
+    answer = "## 1935年主要经历\n\n- 彭德怀担任红一方面军司令员。[E1]"
+
+    assert validate_grounded_answer(answer, [citation]).valid is True
+    assert _has_ambiguous_timeline_years(request, answer) is False
+    assert _has_ambiguous_timeline_years(
+        request, "- 彭德怀担任红一方面军司令员。[E1]"
+    ) is True
+    assert _has_ambiguous_timeline_years(
+        request,
+        "## 1935年主要经历\n\n- 11月4日部署行动。[E1]\n- 5月上旬拒绝任职。[E1]",
+    ) is True
+
+
+def test_deepseek_repairs_date_that_disagrees_with_evidence(monkeypatch: Any) -> None:
+    answers = iter(
+        [
+            "1935年1月，彭德怀被任命为司令员。[E1]",
+            "1935年11月3日，彭德怀被任命为司令员。[E1]",
+        ]
+    )
+    requests: list[dict[str, Any]] = []
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        requests.append(kwargs["json"])
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": next(answers)}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    citation = _citation("11月3日，彭德怀被任命为红一方面军司令员。").model_copy(
+        update={"year_mentions": [1935]}
+    )
+    result = _llm_answer(
+        settings=Settings(_env_file=None, llm_api_key="sk-test"),
+        request=QuestionRequest(question="彭德怀在1935年的主要经历"),
+        citations=[citation],
+    )
+
+    assert result.answer == "1935年11月3日，彭德怀被任命为司令员。[E1]"
+    assert len(requests) == 2
+    assert "日期与同段所引证据原文不一致" in requests[1]["messages"][-1]["content"]
 
 
 def test_deepseek_removes_uncited_block_without_repair_round_trip(

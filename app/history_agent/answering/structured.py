@@ -187,6 +187,12 @@ def answer_structured_question(
                 sample_across_range=synthesize,
                 subject_only=True,
             )
+            # A person may be known to the catalog without having a dedicated
+            # chronology in the structured store. Let the caller continue into
+            # hybrid retrieval instead of turning that data-model gap into a
+            # false "no evidence" answer.
+            if not timeline.events:
+                return None
             total, shown = timeline.total, len(timeline.events)
             for event in timeline.events:
                 evidence = event.evidence[0]

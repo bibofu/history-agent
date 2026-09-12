@@ -325,6 +325,78 @@ def test_structured_record_list_also_streams_through_llm(
     assert events[-1].data["answer"] == "整理后的记录。[E1]"
 
 
+def test_stream_structured_timeline_miss_finishes_with_filtered_hybrid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    question = "彭德怀在1930-1935年的主要经历"
+    plan = QueryPlan(
+        intent="timeline",
+        retrieval_route="structured",
+        normalized_question=question,
+        start_year=1930,
+        end_year=1935,
+    )
+    planning = QueryPlanningResult(plan, "used", model_name="deepseek-v4-flash")
+    citation = _citation().model_copy(
+        update={
+            "quote": "1935年11月3日，彭德怀被任命为红一方面军司令员。",
+            "year_mentions": [1935],
+        }
+    )
+    retrieval = _response([_hit("one", 1, page=688)]).model_copy(
+        update={
+            "query": question,
+            "query_intent": "timeline",
+            "query_people": ["彭德怀"],
+            "query_year_range": [1930, 1935],
+            "retrieval_mode": "planned_hybrid_rrf_subject_filtered",
+        }
+    )
+    context = AnswerContext(
+        retrieval,
+        [citation],
+        "partial",
+        None,
+        timeline_filter_status="applied",
+        timeline_filter_removed_count=4,
+    )
+
+    monkeypatch.setattr("history_agent.answering.streaming.plan_question", lambda *a: planning)
+    monkeypatch.setattr(
+        "history_agent.answering.streaming.answer_structured_question", lambda *a: None
+    )
+
+    async def retrieve(*args: object) -> AnswerContext:
+        return context
+
+    monkeypatch.setattr("history_agent.answering.streaming._aretrieve_context", retrieve)
+    _provider(
+        monkeypatch,
+        [
+            ChunkStream(
+                [
+                    _chunk("1935年11月3日，彭德怀被任命为司令员。[E1]", finish="stop"),
+                    b"data: [DONE]\n\n",
+                ]
+            )
+        ],
+    )
+
+    async def collect() -> list[Any]:
+        return [
+            event
+            async for event in stream_answer_question(
+                _settings().model_copy(update={"llm_query_planning": True}),
+                QuestionRequest(question=question),
+            )
+        ]
+
+    done = asyncio.run(collect())[-1].data
+    assert done["retrieval_mode"] == "planned_hybrid_rrf_subject_filtered"
+    assert any("年谱主体记录" in item for item in done["limitations"])
+    assert any("剔除 4 条" in item for item in done["limitations"])
+
+
 def test_cancelling_answer_closes_nested_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     body = ChunkStream([_chunk("参加有关"), _chunk("会议。[E1]", finish="stop")])
     _provider(monkeypatch, [body])

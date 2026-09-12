@@ -35,6 +35,14 @@ CLAUSE_BOUNDARY = re.compile(r"[，,。！？；;\n]")
 ASSERTION_TRANSITION = re.compile(r"但|然而|不过|实际|事实上|而且|并且|随后|因此|所以")
 CHINESE_YEAR = r"[一二三四五六七八九〇零]{4}年"
 DATE_SIGNAL = re.compile(rf"(?:(?:18|19|20)\d{{2}}年|{CHINESE_YEAR}|\d{{1,2}}月\d{{1,2}}日)")
+YEAR_ONLY_HEADING = re.compile(
+    rf"^(?:(?:18|19|20)\d{{2}}年|{CHINESE_YEAR})(?:主要经历|主要活动|活动|经历|时间线)?$"
+)
+FULL_DATE_REFERENCE = re.compile(
+    r"(?<!\d)(?P<year>(?:18|19|20)\d{2})\s*年\s*"
+    r"(?P<month>1[0-2]|0?[1-9])\s*月"
+    r"(?:\s*(?P<day>3[01]|[12]\d|0?[1-9])\s*日)?"
+)
 CORE_FACT_SIGNAL = re.compile(
     rf"(?:"
     rf"(?:18|19|20)\d{{2}}年|{CHINESE_YEAR}|\d{{1,2}}月\d{{1,2}}日|"
@@ -59,6 +67,7 @@ class AnswerValidationResult:
     used_evidence_ids: tuple[str, ...] = ()
     uncited_claims: tuple[str, ...] = ()
     citation_mismatches: tuple[str, ...] = ()
+    date_mismatches: tuple[str, ...] = ()
 
 
 @dataclass
@@ -101,7 +110,9 @@ def _claim_blocks(answer: str) -> list[_ClaimBlock]:
                     if child.map is not None:
                         blocks[preceding_paragraph].end_line = child.map[1]
                     continue
-                is_undated_heading = child.type == "heading" and not DATE_SIGNAL.search(text)
+                is_organizational_heading = child.type == "heading" and (
+                    not DATE_SIGNAL.search(text) or YEAR_ONLY_HEADING.fullmatch(text) is not None
+                )
                 is_nested_list_label = container.type == "list_item" and any(
                     item.type in {"bullet_list", "ordered_list"} for item in container.children
                 )
@@ -111,7 +122,7 @@ def _claim_blocks(answer: str) -> list[_ClaimBlock]:
                     for cell in child.children
                 )
                 if (
-                    is_undated_heading
+                    is_organizational_heading
                     or (is_nested_list_label and TOPIC_LABEL.fullmatch(text))
                     or is_table_header
                 ):
@@ -157,6 +168,20 @@ def _document_matches(claimed: str | None, actual: str) -> bool:
     )
 
 
+def _citation_supports_date(citation: Citation, year: int, month: int, day: int | None) -> bool:
+    if citation.year_mentions:
+        year_supported = year in citation.year_mentions
+    else:
+        year_supported = re.search(rf"(?<!\d){year}(?!\d)", citation.quote) is not None
+    if not year_supported:
+        return False
+    month_day = re.compile(
+        rf"(?<!\d)0?{month}\s*月"
+        + (rf"\s*0?{day}\s*日" if day is not None else "")
+    )
+    return month_day.search(citation.quote) is not None
+
+
 def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerValidationResult:
     """Check reference syntax, metadata and coverage, not semantic entailment."""
 
@@ -187,6 +212,7 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
 
     uncited_claims: list[str] = []
     citation_mismatches: list[str] = []
+    date_mismatches: list[str] = []
     for block in blocks:
         block_markers = EVIDENCE_MARKER.findall(block.text)
         if _is_core_fact_block(block.text) and not block_markers:
@@ -201,6 +227,14 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
             )
             if not matching_citation:
                 citation_mismatches.append(match.group(0))
+        for match in FULL_DATE_REFERENCE.finditer(block.text):
+            year, month = int(match["year"]), int(match["month"])
+            day = int(match["day"]) if match["day"] else None
+            if block_markers and not any(
+                _citation_supports_date(citation_by_id[marker], year, month, day)
+                for marker in block_markers
+            ):
+                date_mismatches.append(match.group(0))
 
     if citation_mismatches:
         return AnswerValidationResult(
@@ -209,6 +243,14 @@ def validate_grounded_answer(answer: str, citations: list[Citation]) -> AnswerVa
             used_evidence_ids=used_evidence_ids,
             uncited_claims=tuple(uncited_claims),
             citation_mismatches=tuple(citation_mismatches),
+        )
+    if date_mismatches:
+        return AnswerValidationResult(
+            valid=False,
+            error_code="citation_date_mismatch",
+            used_evidence_ids=used_evidence_ids,
+            uncited_claims=tuple(uncited_claims),
+            date_mismatches=tuple(date_mismatches),
         )
     if uncited_claims:
         return AnswerValidationResult(

@@ -69,6 +69,7 @@ class Citation(BaseModel):
     source_type: str
     verification_status: str
     extraction_methods: list[str]
+    year_mentions: list[int] = Field(default_factory=list)
 
 
 class AnswerResponse(BaseModel):

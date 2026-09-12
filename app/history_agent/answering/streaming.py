@@ -26,16 +26,19 @@ from history_agent.answering.service import (
     LLMResult,
     _aretrieve_context,
     _attach_query_planning,
+    _citation_date_repair_payload,
     _clarification_response,
     _deepseek_error_code,
     _finish_answer,
     _finish_structured_answer,
+    _has_ambiguous_timeline_years,
     _llm_request_payload,
     _merge_usage,
     _prefer_llm_result,
     _prepare_hierarchical_answer,
     _repair_request_payload,
     _salvage_llm_result,
+    _timeline_year_repair_payload,
 )
 from history_agent.answering.structured import (
     answer_structured_question,
@@ -150,14 +153,51 @@ async def _stream_llm_answer(
         yield AnswerStreamEvent("status", {"message": "正在核查引用…"})
         validation = validate_grounded_answer(result.answer, citations)
         if validation.valid:
+            if _has_ambiguous_timeline_years(request, result.answer):
+                if attempt:
+                    yield LLMResult(
+                        answer=None,
+                        error_code="timeline_year_repair_ambiguous_timeline_years",
+                        usage=usage,
+                    )
+                    return
+                payload = _timeline_year_repair_payload(payload, result.answer)
+                yield AnswerStreamEvent("status", {"message": "正在补全跨年时间点的年份…"})
+                continue
             preferred = _prefer_llm_result(safe_first, LLMResult(answer=result.answer), usage)
             assert preferred is not None
             yield preferred
             return
+        if validation.error_code == "citation_date_mismatch":
+            if attempt:
+                yield LLMResult(
+                    answer=None,
+                    error_code="citation_date_repair_citation_date_mismatch",
+                    usage=usage,
+                )
+                return
+            payload = _citation_date_repair_payload(
+                payload, result.answer, validation.date_mismatches
+            )
+            yield AnswerStreamEvent("status", {"message": "正在校正与证据不一致的日期…"})
+            continue
         if validation.error_code == "uncited_core_claim":
             salvaged = _salvage_llm_result(
                 result.answer, citations, validation.uncited_claims, usage
             )
+            if salvaged is not None and _has_ambiguous_timeline_years(
+                request, salvaged.answer or ""
+            ):
+                if attempt:
+                    salvaged = None
+                else:
+                    payload = _timeline_year_repair_payload(
+                        payload, salvaged.answer or result.answer
+                    )
+                    yield AnswerStreamEvent(
+                        "status", {"message": "正在补全跨年时间点的年份…"}
+                    )
+                    continue
             if attempt:
                 preferred = _prefer_llm_result(safe_first, salvaged, usage)
                 if preferred is not None:
