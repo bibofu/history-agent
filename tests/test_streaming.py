@@ -257,11 +257,11 @@ def test_stream_endpoint_sends_final_result_and_safe_error(monkeypatch: pytest.M
     assert "internal path" not in response.text
 
 
-def test_structured_stream_finishes_without_model() -> None:
-    client = TestClient(create_app(_settings()))
+def test_disabled_planner_uses_rag_without_generic_clarification() -> None:
+    client = TestClient(create_app(_settings().model_copy(update={"llm_api_key": None})))
     response = client.post("/api/questions/stream", json={"question": "毛泽东有哪些经历"})
     assert "event: done\n" in response.text
-    assert '"llm_status": "not_applicable"' in response.text
+    assert "请明确人物和年份" not in response.text
 
 
 def test_structured_summary_streams_through_llm(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from history_agent.answering.models import QueryEntity, QueryPlan
+from history_agent.answering.query_understanding import QueryPlanningResult
 from history_agent.cli import app
 from history_agent.config import Settings
 from history_agent.errors import ResearchDataError
@@ -392,7 +394,9 @@ def test_adjacent_attendance_guards(text: str, subject: str | None, expected: bo
             assert "主持者" not in roles.values()
 
 
-def test_adjacent_evidence_is_source_local_single_page_and_chat_complete(work_path: Path) -> None:
+def test_adjacent_evidence_is_source_local_single_page_and_chat_complete(
+    work_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     database = _prepare_database(work_path)
     text = "在北京会见外国代表。参加会见的有毛泽东、彭真等。"
     _save_event(
@@ -418,8 +422,24 @@ def test_adjacent_evidence_is_source_local_single_page_and_chat_complete(work_pa
         data_dir=work_path / "data",
         database_path=database.path,
     )
+    question = "毛泽东和周恩来在1956年有哪些交集"
+    plan = QueryPlan(
+        intent="intersection",
+        retrieval_route="structured",
+        normalized_question=question,
+        entities=[
+            QueryEntity(type="person", text="毛泽东", canonical="毛泽东"),
+            QueryEntity(type="person", text="周恩来", canonical="周恩来"),
+        ],
+        start_year=1956,
+        end_year=1956,
+    )
+    monkeypatch.setattr(
+        "history_agent.answering.service.plan_question",
+        lambda *args: QueryPlanningResult(plan, "used"),
+    )
     response = TestClient(create_app(settings)).post(
-        "/api/questions", json={"question": "毛泽东和周恩来在1956年有哪些交集"}
+        "/api/questions", json={"question": question}
     )
     assert response.status_code == 200
     assert response.json()["citations"][0]["quote"] == text

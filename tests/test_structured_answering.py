@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from history_agent.answering.models import ConversationMessage, QuestionRequest
-from history_agent.answering.service import LLMResult, answer_question
+from history_agent.answering.models import QueryEntity, QueryPlan, QuestionRequest
+from history_agent.answering.query_understanding import QueryPlanningResult
+from history_agent.answering.service import LLMResult
 from history_agent.answering.structured import (
     _structured_result_limit,
     answer_structured_question,
@@ -29,14 +30,52 @@ def _settings(work_path: Path) -> Settings:
     )
 
 
+def _plan(
+    question: str,
+    intent: str,
+    people: list[str],
+    start: int | None,
+    end: int | None,
+    *,
+    route: str = "structured",
+) -> QueryPlan:
+    return QueryPlan.model_validate(
+        {
+            "intent": intent,
+            "retrieval_route": route,
+            "normalized_question": question,
+            "entities": [
+                {"type": "person", "text": person, "canonical": person}
+                for person in people
+            ],
+            "start_year": start,
+            "end_year": end,
+        }
+    )
+
+
 @pytest.mark.parametrize(
-    "question,intent,has_evidence",
+    "question,intent,has_evidence,people,start,end",
     [
-        ("请列出1943年周恩来的时间线", "timeline", True),
-        ("周恩来在1942年至1943年参加过哪些会议", "timeline", True),
-        ("周恩来与林彪在1943年有哪些共同事件？", "intersection", True),
-        ("周恩来和毛泽东在1943年有哪些交集", "intersection", False),
-        ("林彪和周恩来在1942年有哪些交集", "intersection", False),
+        ("请列出1943年周恩来的时间线", "timeline", True, ["周恩来"], 1943, 1943),
+        ("周恩来在1942年至1943年参加过哪些会议", "timeline", True, ["周恩来"], 1942, 1943),
+        (
+            "周恩来与林彪在1943年有哪些共同事件？",
+            "intersection",
+            True,
+            ["周恩来", "林彪"],
+            1943,
+            1943,
+        ),
+        (
+            "周恩来和毛泽东在1943年有哪些交集",
+            "intersection",
+            False,
+            ["周恩来", "毛泽东"],
+            1943,
+            1943,
+        ),
+        ("林彪和周恩来在1942年有哪些交集", "intersection", False, ["林彪", "周恩来"], 1942, 1942),
     ],
     ids=[f"route-{index}" for index in range(5)],
 )
@@ -46,11 +85,14 @@ def test_structured_api_bypasses_rag_but_generates_when_evidence_exists(
     question: str,
     intent: str,
     has_evidence: bool,
+    people: list[str],
+    start: int,
+    end: int,
 ) -> None:
     settings = _settings(work_path)
 
     def unexpected(**kwargs: object) -> None:
-        pytest.fail("structured route must not invoke planner or hybrid retrieval")
+        pytest.fail("structured route must not invoke hybrid retrieval")
 
     def generate(**kwargs: object) -> LLMResult:
         citations = kwargs["citations"]
@@ -59,7 +101,12 @@ def test_structured_api_bypasses_rag_but_generates_when_evidence_exists(
 
     monkeypatch.setattr("history_agent.answering.service.search_hybrid_index", unexpected)
     monkeypatch.setattr("history_agent.answering.service._llm_answer", generate)
-    monkeypatch.setattr("history_agent.answering.service.plan_question", unexpected)
+    planning = QueryPlanningResult(
+        _plan(question, intent, people, start, end),
+        "used",
+        model_name="deepseek-v4-flash",
+    )
+    monkeypatch.setattr("history_agent.answering.service.plan_question", lambda *args: planning)
     settings = settings.model_copy(update={"llm_api_key": SecretStr("test-key")})
     response = TestClient(create_app(settings)).post(
         "/api/questions", json={"question": question, "top_k": 1}
@@ -67,6 +114,8 @@ def test_structured_api_bypasses_rag_but_generates_when_evidence_exists(
     assert response.status_code == 200
     data = response.json()
     assert data["retrieval_mode"] == f"structured_{intent}"
+    assert data["query_planner_status"] == "used"
+    assert data["query_plan"]["retrieval_route"] == "structured"
     assert bool(data["citations"]) == has_evidence
     assert data["evidence_status"] != "supported"
     if has_evidence:
@@ -79,14 +128,19 @@ def test_structured_api_bypasses_rag_but_generates_when_evidence_exists(
         assert "不代表" in data["answer"]
 
 
-def test_structured_timeline_summary_uses_llm_without_planner_or_rag(
+def test_structured_timeline_summary_uses_llm_plan_without_rag(
     work_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    settings = _settings(work_path).model_copy(update={"llm_api_key": SecretStr("test-key")})
+    settings = _settings(work_path).model_copy(
+        update={
+            "llm_api_key": SecretStr("test-key"),
+            "person_aliases_path": Path(__file__).parents[1] / "config" / "person_aliases.json",
+        }
+    )
     received: list[list[str]] = []
 
     def unexpected(**kwargs: object) -> None:
-        pytest.fail("exact structured summaries must not invoke planner or hybrid retrieval")
+        pytest.fail("exact structured summaries must not invoke hybrid retrieval")
 
     def generate(**kwargs: object) -> LLMResult:
         citations = kwargs["citations"]
@@ -95,10 +149,14 @@ def test_structured_timeline_summary_uses_llm_without_planner_or_rag(
         return LLMResult(answer="主要经历可归纳为通信联络和会议工作。[E1][E2]")
 
     monkeypatch.setattr("history_agent.answering.service.search_hybrid_index", unexpected)
-    monkeypatch.setattr("history_agent.answering.service.plan_question", unexpected)
+    question = "周恩来在1943年主要有哪些经历？"
+    planning = QueryPlanningResult(
+        _plan(question, "timeline", ["周恩来"], 1943, 1943), "used"
+    )
+    monkeypatch.setattr("history_agent.answering.service.plan_question", lambda *args: planning)
     monkeypatch.setattr("history_agent.answering.service._llm_answer", generate)
     response = TestClient(create_app(settings)).post(
-        "/api/questions", json={"question": "周恩来在1943年主要有哪些经历？", "top_k": 2}
+        "/api/questions", json={"question": question, "top_k": 2}
     )
 
     assert response.status_code == 200
@@ -108,6 +166,93 @@ def test_structured_timeline_summary_uses_llm_without_planner_or_rag(
     assert data["llm_status"] == "used"
     assert data["answer"].startswith("主要经历可归纳")
     assert received == [["结构化索引日期：1943-01-21", "结构化索引日期：1943-02-01"]]
+
+
+def test_direct_evidence_wording_is_understood_before_structured_route(
+    work_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    question = "周恩来与林彪在1943年有哪些有直接原文支持的交集？"
+    planning = QueryPlanningResult(
+        _plan(question, "intersection", ["周恩来", "林彪"], 1943, 1943),
+        "used",
+        model_name="deepseek-v4-flash",
+    )
+    monkeypatch.setattr("history_agent.answering.service.plan_question", lambda *args: planning)
+    monkeypatch.setattr(
+        "history_agent.answering.service.search_hybrid_index",
+        lambda **kwargs: pytest.fail("LLM selected the audited structured route"),
+    )
+    monkeypatch.setattr(
+        "history_agent.answering.service._llm_answer",
+        lambda **kwargs: LLMResult(answer="两人有共同活动。[E1]"),
+    )
+    settings = _settings(work_path).model_copy(
+        update={
+            "llm_api_key": SecretStr("test-key"),
+            "person_aliases_path": Path(__file__).parents[1] / "config" / "person_aliases.json",
+        }
+    )
+
+    data = TestClient(create_app(settings)).post(
+        "/api/questions", json={"question": question}
+    ).json()
+
+    assert data["retrieval_mode"] == "structured_intersection"
+    assert data["query_plan"]["retrieval_route"] == "structured"
+    assert "请明确人物和年份" not in data["answer"]
+
+
+def test_month_and_place_constraints_follow_llm_hybrid_route(
+    work_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    question = "1943年2月周恩来在北京有哪些活动？"
+    plan = QueryPlan(
+        intent="timeline",
+        retrieval_route="hybrid",
+        normalized_question=question,
+        entities=[
+            QueryEntity(type="person", text="周恩来", canonical="周恩来"),
+            QueryEntity(type="place", text="北京", canonical="北京"),
+        ],
+        start_year=1943,
+        end_year=1943,
+        constraints=["限定1943年2月", "地点为北京"],
+    )
+    planning = QueryPlanningResult(plan, "used", model_name="deepseek-v4-flash")
+    searches: list[str] = []
+
+    def search(**kwargs: object) -> SearchResponse:
+        searches.append(str(kwargs["query"]))
+        return SearchResponse(
+            query=str(kwargs["query"]),
+            query_intent="timeline",
+            query_terms=["周恩来", "1943年2月", "北京"],
+            query_years=[1943],
+            query_year_range=[1943, 1943],
+            query_people=["周恩来"],
+            document_filters=[],
+            include_out_of_scope=False,
+            retrieval_mode="hybrid_rrf",
+            hits=[],
+        )
+
+    monkeypatch.setattr("history_agent.answering.service.plan_question", lambda *args: planning)
+    monkeypatch.setattr("history_agent.answering.service.search_hybrid_index", search)
+    settings = _settings(work_path).model_copy(
+        update={
+            "llm_api_key": SecretStr("test-key"),
+            "person_aliases_path": Path(__file__).parents[1] / "config" / "person_aliases.json",
+        }
+    )
+
+    data = TestClient(create_app(settings)).post(
+        "/api/questions", json={"question": question}
+    ).json()
+
+    assert searches
+    assert data["retrieval_mode"] == "hybrid_rrf"
+    assert data["query_plan"]["constraints"] == ["限定1943年2月", "地点为北京"]
+    assert "请明确人物和年份" not in data["answer"]
 
 
 def test_long_structured_period_expands_evidence_budget() -> None:
@@ -132,55 +277,44 @@ def test_long_structured_period_expands_evidence_budget() -> None:
     ],
     ids=[f"constraint-{index}" for index in range(9)],
 )
-def test_constraints_are_not_silently_dropped(work_path: Path, question: str) -> None:
-    result = answer_structured_question(_settings(work_path), QuestionRequest(question=question))
-    assert result is not None
-    assert result.citations == []
-    assert result.evidence_status == "no_evidence"
+def test_llm_hybrid_route_keeps_constraints_out_of_structured_lookup(
+    work_path: Path, question: str
+) -> None:
+    plan = _plan(question, "intersection", ["周恩来", "林彪"], 1943, 1943, route="hybrid")
+    result = answer_structured_question(
+        _settings(work_path), QuestionRequest(question=question), plan
+    )
+    assert result is None
 
 
 def test_general_questions_still_use_rag_route(work_path: Path) -> None:
     settings = _settings(work_path)
-    assert (
-        answer_structured_question(
-            settings, QuestionRequest(question="毛泽东关于调查研究有哪些观点")
+    questions = [
+        ("毛泽东关于调查研究有哪些观点", "viewpoint", ["毛泽东"]),
+        ("毛泽东的早年经历如何影响他的调查研究观点", "causal_analysis", ["毛泽东"]),
+        ("毛泽东和周恩来的交集", "intersection", ["毛泽东", "周恩来"]),
+    ]
+    for question, intent, people in questions:
+        plan = _plan(question, intent, people, None, None, route="hybrid")
+        assert (
+            answer_structured_question(settings, QuestionRequest(question=question), plan)
+            is None
         )
-        is None
-    )
-    assert (
-        answer_structured_question(
-            settings, QuestionRequest(question="毛泽东的早年经历如何影响他的调查研究观点")
-        )
-        is None
-    )
-    assert (
-        answer_structured_question(settings, QuestionRequest(question="毛泽东和周恩来的交集"))
-        is None
-    )
 
 
 def test_structured_missing_database_returns_actionable_message(work_path: Path) -> None:
     settings = Settings(
         _env_file=None, project_root=work_path, database_path=work_path / "missing.db"
     )
-    result = answer_question(settings, QuestionRequest(question="毛泽东在1949年有哪些经历"))
-    assert "尚未就绪" in result.answer
-    assert not settings.database_path.exists()
-
-
-def test_elliptical_followup_requests_explicit_people(work_path: Path) -> None:
-    settings = _settings(work_path)
+    question = "毛泽东在1949年有哪些经历"
     result = answer_structured_question(
         settings,
-        QuestionRequest(
-            question="那1956年呢",
-            history=[ConversationMessage(role="user", content="周恩来和林彪在1943年有哪些交集")],
-        ),
+        QuestionRequest(question=question),
+        _plan(question, "timeline", ["毛泽东"], 1949, 1949),
     )
     assert result is not None
-    assert result.retrieval_mode == "structured_intersection"
-    assert result.citations == []
-    assert "请明确人物" in result.answer
+    assert "尚未就绪" in result.answer
+    assert not settings.database_path.exists()
 
 
 def test_chat_uses_actual_proof_and_full_page_range(work_path: Path) -> None:
@@ -194,8 +328,11 @@ def test_chat_uses_actual_proof_and_full_page_range(work_path: Path) -> None:
             "UPDATE evidence_records SET quote='周恩来致电毛泽东，详细报告当时的工作情况。' "
             "WHERE evidence_id='evidence_event_zhou_message'"
         )
+    question = "周恩来和林彪在1943年有哪些交集"
     result = answer_structured_question(
-        settings, QuestionRequest(question="周恩来和林彪在1943年有哪些交集")
+        settings,
+        QuestionRequest(question=question),
+        _plan(question, "intersection", ["周恩来", "林彪"], 1943, 1943),
     )
     assert result is not None
     assert result.citations[0].document_id == "lin_biao_chronology"
@@ -209,6 +346,14 @@ def test_intersection_before_year_routes_to_source_synthesis(
     result = answer_structured_question(
         _settings(work_path),
         QuestionRequest(question="周恩来和林彪在1949年之前的交集"),
+        _plan(
+            "周恩来和林彪在1949年之前的交集",
+            "intersection",
+            ["周恩来", "林彪"],
+            1921,
+            1948,
+            route="hybrid",
+        ),
     )
 
     assert result is None
@@ -221,7 +366,13 @@ def test_known_periods_select_source_synthesis(work_path: Path, period: str) -> 
         f"毛泽东和周恩来在{period}期间有哪些交集？",
         f"请列出周恩来在{period}时期的时间线",
     ):
-        assert answer_structured_question(settings, QuestionRequest(question=question)) is None
+        plan = _plan(
+            question, "intersection", ["毛泽东", "周恩来"], 1934, 1936, route="hybrid"
+        )
+        assert (
+            answer_structured_question(settings, QuestionRequest(question=question), plan)
+            is None
+        )
 
 
 @pytest.mark.parametrize(
@@ -242,9 +393,11 @@ def test_known_periods_select_source_synthesis(work_path: Path, period: str) -> 
     ids=[f"period-constraint-{index}" for index in range(11)],
 )
 def test_period_route_preserves_constraints(work_path: Path, question: str) -> None:
-    response = answer_structured_question(_settings(work_path), QuestionRequest(question=question))
-    assert response is not None
-    assert response.citations == []
+    plan = _plan(question, "intersection", ["毛泽东", "周恩来"], 1934, 1936, route="hybrid")
+    response = answer_structured_question(
+        _settings(work_path), QuestionRequest(question=question), plan
+    )
+    assert response is None
 
 
 def test_long_march_question_reaches_grounded_answer_api(

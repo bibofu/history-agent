@@ -83,6 +83,7 @@ def _messages(settings: Settings, request: QuestionRequest) -> list[dict[str, st
             "general|event_overview|timeline|intersection|viewpoint|observation|comparison|"
             "causal_analysis"
         ),
+        "retrieval_route": "structured|hybrid",
         "normalized_question": "完整保留约束并规范化简称、别名和指代后的问题",
         "search_queries": ["1至8条可独立执行的简短本地史料检索表达式"],
         "entities": [
@@ -112,6 +113,10 @@ def _messages(settings: Settings, request: QuestionRequest) -> list[dict[str, st
         "意图或限制条件。"
         "对“一大到六大”之类范围使用per_item；对“逐年”使用per_year；"
         "对跨度较长且要求整体梳理的时期使用balanced_period。"
+        "retrieval_route只在以下情况设为structured：问题意图是timeline或intersection，"
+        "分别恰好包含一位或两位明确人物，并且时间条件只有完整年份或年份区间；"
+        "月份、日期、地点、否定、指定文献、命名历史时期或其他检索限制存在时必须设为hybrid。"
+        "要求引用、直接原文支持、详细说明或按观点组织只是回答形式要求，不妨碍使用structured。"
         "只有人物、指代或限制条件确实无法确定时才needs_clarification；宽泛问题本身不需要澄清。"
         f"研究时间边界是{settings.research_start.year}—{settings.research_end.year}年。"
         f"输出字段示意：{json.dumps(schema, ensure_ascii=False)}"
@@ -270,48 +275,12 @@ def _normalize_coverage(plan: QueryPlan) -> QueryPlan:
     return plan
 
 
-def _relative_intersection_plan(settings: Settings, request: QuestionRequest) -> QueryPlan | None:
-    if not any(marker in request.question for marker in ("交集", "共同")):
-        return None
-    relative = parse_relative_year_range(
-        request.question, settings.research_start.year, settings.research_end.year
-    )
-    if relative is None or relative.start > relative.end:
-        return None
-    try:
-        aliases = load_person_aliases(settings.person_aliases_path)
-    except Exception:
-        return None
-    entities: list[QueryEntity] = []
-    for canonical, forms in aliases.items():
-        matched = next(
-            (form for form in [canonical, *forms] if form in request.question),
-            None,
-        )
-        if matched is not None:
-            entities.append(QueryEntity(type="person", text=matched, canonical=canonical))
-    if len(entities) != 2:
-        return None
-    normalized = request.question.replace(relative.raw, f"{relative.start}年至{relative.end}年")
-    return QueryPlan(
-        intent="intersection",
-        normalized_question=normalized,
-        entities=entities,
-        start_year=relative.start,
-        end_year=relative.end,
-        coverage="balanced_period",
-    )
-
-
 def plan_question(
     settings: Settings,
     request: QuestionRequest,
     runtime: LLMRuntime | None = None,
     budget: RequestBudget | None = None,
 ) -> QueryPlanningResult:
-    relative_plan = _relative_intersection_plan(settings, request)
-    if relative_plan is not None:
-        return QueryPlanningResult(relative_plan, "not_applicable")
     if not settings.llm_query_planning or not settings.llm_enabled:
         return QueryPlanningResult(None, "disabled")
     assert settings.llm_api_key is not None

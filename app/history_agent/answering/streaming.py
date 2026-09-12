@@ -25,6 +25,7 @@ from history_agent.answering.service import (
     LLM_EVIDENCE_BATCH_SIZE,
     LLMResult,
     _aretrieve_context,
+    _attach_query_planning,
     _clarification_response,
     _deepseek_error_code,
     _finish_answer,
@@ -238,12 +239,21 @@ async def stream_answer_question(
 ) -> AsyncGenerator[AnswerStreamEvent, None]:
     budget = budget or RequestBudget.start(settings.request_timeout_seconds)
     yield AnswerStreamEvent("status", {"message": "正在分析问题…"})
+    if settings.llm_query_planning and settings.llm_enabled:
+        yield AnswerStreamEvent("status", {"message": "正在理解问题并规划检索…"})
+    planning = await run_in_threadpool(plan_question, settings, request, runtime, budget)
+    if planning.plan is not None and planning.plan.needs_clarification:
+        yield AnswerStreamEvent("done", _clarification_response(request, planning).model_dump())
+        return
     full_text = await run_in_threadpool(answer_full_text_question, settings, request)
     if full_text is not None:
-        yield AnswerStreamEvent("done", full_text.model_dump())
+        yield AnswerStreamEvent("done", _attach_query_planning(full_text, planning).model_dump())
         return
-    structured = await run_in_threadpool(answer_structured_question, settings, request)
+    structured = await run_in_threadpool(
+        answer_structured_question, settings, request, planning.plan
+    )
     if structured is not None:
+        structured = _attach_query_planning(structured, planning)
         if requires_structured_generation(structured):
             result = LLMResult(answer=None, error_code="not_configured")
             if settings.llm_enabled and len(structured.citations) > LLM_EVIDENCE_BATCH_SIZE:
@@ -272,12 +282,6 @@ async def stream_answer_question(
             yield AnswerStreamEvent("done", final.model_dump())
             return
         yield AnswerStreamEvent("done", structured.model_dump())
-        return
-    if settings.llm_query_planning and settings.llm_enabled:
-        yield AnswerStreamEvent("status", {"message": "正在理解问题并规划检索…"})
-    planning = await run_in_threadpool(plan_question, settings, request, runtime, budget)
-    if planning.plan is not None and planning.plan.needs_clarification:
-        yield AnswerStreamEvent("done", _clarification_response(request, planning).model_dump())
         return
     retrieval_status = (
         "正在检索并检查证据覆盖…"

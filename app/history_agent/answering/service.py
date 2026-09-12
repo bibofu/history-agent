@@ -939,6 +939,22 @@ def _finish_structured_answer(
     )
 
 
+def _attach_query_planning(
+    response: AnswerResponse, planning: QueryPlanningResult
+) -> AnswerResponse:
+    """Expose the single semantic plan on every route selected after planning."""
+
+    return response.model_copy(
+        update={
+            "query_plan": planning.plan,
+            "query_planner_status": planning.status,
+            "query_planner_model": planning.model_name,
+            "query_planner_usage": planning.usage,
+            "query_planner_error_code": planning.error_code,
+        }
+    )
+
+
 def _clarification_response(
     request: QuestionRequest, planning: QueryPlanningResult
 ) -> AnswerResponse:
@@ -969,11 +985,17 @@ async def answer_question_async(
     budget: RequestBudget | None = None,
 ) -> AnswerResponse:
     budget = budget or RequestBudget.start(settings.request_timeout_seconds)
+    planning = await asyncio.to_thread(plan_question, settings, request, runtime, budget)
+    if planning.plan is not None and planning.plan.needs_clarification:
+        return _clarification_response(request, planning)
     full_text = await asyncio.to_thread(answer_full_text_question, settings, request)
     if full_text is not None:
-        return full_text
-    structured = await asyncio.to_thread(answer_structured_question, settings, request)
+        return _attach_query_planning(full_text, planning)
+    structured = await asyncio.to_thread(
+        answer_structured_question, settings, request, planning.plan
+    )
     if structured is not None:
+        structured = _attach_query_planning(structured, planning)
         if requires_structured_generation(structured):
             llm_result = await asyncio.to_thread(
                 _llm_answer,
@@ -985,9 +1007,6 @@ async def answer_question_async(
             )
             return _finish_structured_answer(settings, structured, llm_result)
         return structured
-    planning = await asyncio.to_thread(plan_question, settings, request, runtime, budget)
-    if planning.plan is not None and planning.plan.needs_clarification:
-        return _clarification_response(request, planning)
     context = await _aretrieve_context(settings, request, planning, runtime, budget)
     llm_result = (
         await asyncio.to_thread(

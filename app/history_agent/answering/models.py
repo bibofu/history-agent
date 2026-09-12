@@ -45,6 +45,7 @@ class QueryPlan(BaseModel):
         "comparison",
         "causal_analysis",
     ] = "general"
+    retrieval_route: Literal["structured", "hybrid"] = "hybrid"
     normalized_question: str = Field(min_length=2, max_length=500)
     search_queries: list[ShortQueryText] = Field(default_factory=list, max_length=8)
     entities: list[QueryEntity] = Field(default_factory=list, max_length=12)

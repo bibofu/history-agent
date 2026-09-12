@@ -5,10 +5,11 @@ from __future__ import annotations
 import re
 import sqlite3
 
-from history_agent.answering.models import AnswerResponse, Citation, QuestionRequest
-from history_agent.answering.time_ranges import (
-    RELATIVE_YEAR_PATTERN,
-    parse_relative_year_range,
+from history_agent.answering.models import (
+    AnswerResponse,
+    Citation,
+    QueryPlan,
+    QuestionRequest,
 )
 from history_agent.config import Settings
 from history_agent.db import Database
@@ -16,28 +17,9 @@ from history_agent.errors import ResearchDataError
 from history_agent.research.intersections import get_person_intersections
 from history_agent.research.people import resolve_person
 from history_agent.research.timeline import TimelineEvidence, get_person_timeline
-from history_agent.retrieval.keyword import PERIOD_RANGES
 
-_YEAR = re.compile(r"(?P<start>\d{4})年?(?:(?:至|到|—|–|-|~|～)(?P<end>\d{4})年?)?")
-_PERIOD = re.compile(
-    r"(?P<period>"
-    + "|".join(re.escape(name) for name in sorted(PERIOD_RANGES, key=len, reverse=True))
-    + r")(?:期间|时期|时|中)?"
-)
-_INTERSECTION = re.compile(r"交集|共同(?:事件|活动|经历|参加|参与|出席)")
-_TIMELINE = re.compile(r"时间线|经历[？?。]*$|经历有哪些|有哪些活动|做了什么|参加[过了]哪些会议")
 _RAW_TIMELINE = re.compile(r"列出|时间线|逐条|原文|明细|记录|清单|参加[过了]哪些会议")
 MAX_STRUCTURED_SUMMARY_RECORDS = 36
-_ALLOWED = {
-    "intersection": re.compile(
-        r"(?:有哪些|有什么|有过哪些)?(?:交集|共同事件|共同活动|共同经历)"
-        r"|共同参加过哪些会议|共同参与过哪些事件"
-    ),
-    "timeline": re.compile(
-        r"(?:主要)?(?:有哪些|有什么)?(?:主要)?(?:经历|活动)"
-        r"|(?:主要)?经历有哪些|时间线|做了什么|参加[过了]哪些会议"
-    ),
-}
 
 
 def _response(
@@ -95,67 +77,21 @@ def _structured_result_limit(request: QuestionRequest, start: int, end: int) -> 
 
 
 def answer_structured_question(
-    settings: Settings, request: QuestionRequest
+    settings: Settings, request: QuestionRequest, plan: QueryPlan | None
 ) -> AnswerResponse | None:
+    """Run an audited timeline/intersection lookup selected by the LLM query plan."""
+
+    if plan is None or plan.retrieval_route != "structured":
+        return None
+    if plan.intent not in {"timeline", "intersection"}:
+        return None
+    intent = plan.intent
     question = re.sub(r"\s+", "", request.question).rstrip("？?。！!")
-    intent = (
-        "intersection"
-        if _INTERSECTION.search(question)
-        else "timeline"
-        if _TIMELINE.search(question)
-        else None
-    )
-    if intent is None:
-        previous = next(
-            (message.content for message in reversed(request.history) if message.role == "user"), ""
-        )
-        if re.fullmatch(r"(?:那|那么)?(?:\d{4}年)?(?:呢|他呢|他们呢|继续|下一页)", question):
-            intent = (
-                "intersection"
-                if _INTERSECTION.search(previous)
-                else "timeline"
-                if _TIMELINE.search(previous)
-                else None
-            )
-        if intent is None:
-            return None
-    clarify = (
-        "请明确人物和年份，例如“毛泽东在1949年有哪些经历”或"
-        "“毛泽东与周恩来在1949年有哪些交集”。也可使用“长征期间”等已识别的时期名称"
-        "检索原文。当前查询支持整年、年份区间或“某年之前/之后”，"
-        "不会忽略地点、月份等附加条件，也不会自动继承上一轮人物。"
-    )
-    relative_years = list(RELATIVE_YEAR_PATTERN.finditer(question))
-    years = list(_YEAR.finditer(RELATIVE_YEAR_PATTERN.sub("", question)))
-    periods = list(_PERIOD.finditer(question))
-    relative_query = len(relative_years) == 1 and not years and not periods
-    period_query = not years and not relative_years and len(periods) == 1
-    unbounded_intersection = (
-        intent == "intersection" and not years and not relative_years and not periods
-    )
     lower, upper = settings.research_start.year, settings.research_end.year
-    start: int | None
-    end: int | None
-    if period_query:
-        start, end = PERIOD_RANGES[periods[0]["period"]]
-    elif relative_query:
-        relative = parse_relative_year_range(question, lower, upper)
-        assert relative is not None
-        start, end = relative.start, relative.end
-        if start > end:
-            return _response(
-                request,
-                intent,
-                f"时间条件“{relative.raw}”与研究范围 {lower}—{upper} 年没有重叠。",
-            )
-    elif len(years) == 1:
-        start = int(years[0]["start"])
-        end = int(years[0]["end"] or start)
-    elif unbounded_intersection:
-        start = end = None
-    else:
-        return _response(request, intent, clarify)
-    if start is not None and end is not None and not lower <= start <= end <= upper:
+    start, end = plan.start_year, plan.end_year
+    if start is None or end is None:
+        return None
+    if not lower <= start <= end <= upper:
         return _response(
             request, intent, f"研究范围为 {lower}—{upper} 年，请提供范围内且起止顺序正确的年份。"
         )
@@ -174,43 +110,23 @@ def answer_structured_question(
             }
         if not forms:
             return _response(request, intent, "人物主数据尚未就绪，请先初始化研究库。")
-        name_pattern = re.compile(
-            "|".join(re.escape(form) for form in sorted(forms, key=len, reverse=True))
-        )
-        mentions = list(name_pattern.finditer(question))
+        person_entities = [entity for entity in plan.entities if entity.type == "person"]
         expected_count = 2 if intent == "intersection" else 1
-        if len(mentions) != expected_count:
-            return _response(request, intent, clarify)
-        # Removing only recognized names/year/function words prevents silently dropping
-        # constraints (e.g. an unknown third person, a month, place, or negation).
-        time_pattern = (
-            _PERIOD if period_query else RELATIVE_YEAR_PATTERN if relative_query else _YEAR
-        )
-        remainder = name_pattern.sub("", time_pattern.sub("", question))
-        remainder = re.sub(r"^(?:(?:请问|请|帮我|查询|列出|梳理|一下|看看))+", "", remainder)
-        remainder = re.sub(r"[和与及、在于的]", "", remainder)
-        if _ALLOWED[intent].fullmatch(remainder) is None:
-            return _response(request, intent, clarify)
+        if len(person_entities) != expected_count:
+            return None
         person_ids = []
-        for mention in mentions:
-            resolution = resolve_person(database, mention.group())
+        for entity in person_entities:
+            resolution = resolve_person(database, entity.canonical)
+            if resolution.status != "resolved" and entity.text != entity.canonical:
+                resolution = resolve_person(database, entity.text)
             if resolution.status != "resolved":
-                return _response(
-                    request, intent, f"人物“{mention.group()}”未能唯一解析，请使用完整姓名。"
-                )
+                return None
             person = resolution.candidates[0]
             person_ids.append(person.merged_into_person_id or person.person_id)
         if len(set(person_ids)) != expected_count:
             return _response(
                 request, intent, "交集查询需要两位不同人物；两个称呼可能是同一人的别名。"
             )
-        if period_query or relative_query or unbounded_intersection:
-            # Named periods, open year bounds, and well-formed unbounded intersections ask
-            # for synthesis of source passages. Select that route BEFORE looking up
-            # joint-action candidates, and only after validating people/constraints. Never
-            # use retrieval as an outcome-dependent fallback for a failed structured lookup.
-            return None
-        assert start is not None and end is not None
         citations: list[Citation] = []
         lines: list[str] = []
         event_types = ["meeting"] if "会议" in question else None
