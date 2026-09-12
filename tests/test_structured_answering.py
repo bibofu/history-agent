@@ -13,6 +13,7 @@ from history_agent.answering.structured import (
 )
 from history_agent.config import Settings
 from history_agent.db import Database
+from history_agent.research.timeline import get_person_timeline
 from history_agent.retrieval.keyword import PERIOD_RANGES, infer_year_range
 from history_agent.retrieval.models import SearchHit, SearchResponse
 from history_agent.web.app import create_app
@@ -138,6 +139,13 @@ def test_structured_timeline_summary_uses_llm_plan_without_rag(
         }
     )
     received: list[list[str]] = []
+    subject_only_calls: list[bool] = []
+
+    real_get_person_timeline = get_person_timeline
+
+    def tracked_timeline(*args: object, **kwargs: object) -> object:
+        subject_only_calls.append(bool(kwargs.get("subject_only")))
+        return real_get_person_timeline(*args, **kwargs)
 
     def unexpected(**kwargs: object) -> None:
         pytest.fail("exact structured summaries must not invoke hybrid retrieval")
@@ -149,6 +157,9 @@ def test_structured_timeline_summary_uses_llm_plan_without_rag(
         return LLMResult(answer="主要经历可归纳为通信联络和会议工作。[E1][E2]")
 
     monkeypatch.setattr("history_agent.answering.service.search_hybrid_index", unexpected)
+    monkeypatch.setattr(
+        "history_agent.answering.structured.get_person_timeline", tracked_timeline
+    )
     question = "周恩来在1943年主要有哪些经历？"
     planning = QueryPlanningResult(
         _plan(question, "timeline", ["周恩来"], 1943, 1943), "used"
@@ -166,6 +177,7 @@ def test_structured_timeline_summary_uses_llm_plan_without_rag(
     assert data["llm_status"] == "used"
     assert data["answer"].startswith("主要经历可归纳")
     assert received == [["结构化索引日期：1943-01-21", "结构化索引日期：1943-02-01"]]
+    assert subject_only_calls == [True]
 
 
 def test_direct_evidence_wording_is_understood_before_structured_route(

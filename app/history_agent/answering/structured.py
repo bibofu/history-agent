@@ -185,6 +185,7 @@ def answer_structured_question(
                 event_types=event_types,
                 limit=result_limit if synthesize else request.top_k,
                 sample_across_range=synthesize,
+                subject_only=True,
             )
             total, shown = timeline.total, len(timeline.events)
             for event in timeline.events:
@@ -202,7 +203,7 @@ def answer_structured_question(
                     f"记录复核状态：{event.review_status}。原文：{quote} [{citation.evidence_id}]"
                 )
             limitations = [
-                "时间线包含年谱主体与原文提及记录，不保证本人参与了每条事件。",
+                "时间线只纳入目标人物被标记为年谱主体的记录；动作归属仍须结合原文核对。",
                 (
                     "记录按月份/时段抽样并优先采用较高复核状态，不等同于重要性排名；"
                     "日期为索引字段，须结合原文精度和来源差异核对。"

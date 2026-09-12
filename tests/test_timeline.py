@@ -67,17 +67,27 @@ def _save_event(
     review_status: str,
     page: int,
     include_lin: bool,
+    subject_person_id: str = "zhou_enlai",
 ) -> None:
+    names = {
+        "zhou_enlai": "周恩来",
+        "lin_biao": "林彪",
+        "mao_zedong": "毛泽东",
+    }
     participants = [
         EventParticipant(
-            person_id="zhou_enlai",
+            person_id=subject_person_id,
             role="年谱主体",
-            mention_text="周恩来",
+            mention_text=names[subject_person_id],
             mention_source="chronology_subject",
-        ),
-        EventParticipant(person_id="mao_zedong", mention_text="毛泽东"),
+        )
     ]
-    if include_lin:
+    for person_id in ("zhou_enlai", "mao_zedong"):
+        if person_id != subject_person_id:
+            participants.append(
+                EventParticipant(person_id=person_id, mention_text=names[person_id])
+            )
+    if include_lin and subject_person_id != "lin_biao":
         participants.append(
             EventParticipant(person_id="lin_biao", mention_text="林彪")
         )
@@ -138,6 +148,7 @@ def _prepare_timeline(work_path: Path) -> tuple[Database, str]:
         review_status="unreviewed",
         page=30,
         include_lin=True,
+        subject_person_id="lin_biao",
     )
     _save_event(
         database,
@@ -192,6 +203,19 @@ def test_timeline_combines_canonical_and_unmerged_events(work_path: Path) -> Non
         "周恩来年谱",
         "林彪年谱",
     }
+
+    subject_timeline = get_person_timeline(
+        database,
+        person_id="zhou_enlai",
+        start_year=1943,
+        end_year=1943,
+        limit=1,
+        subject_only=True,
+    )
+    assert subject_timeline.events[0].event_id == canonical_id
+    assert subject_timeline.events[0].evidence[0].document_id == (
+        "zhou_enlai_chronology_1949_1976"
+    )
 
     meetings = get_person_timeline(
         database,
@@ -255,6 +279,40 @@ def test_timeline_can_sample_across_the_requested_period(work_path: Path) -> Non
 
     assert len(timeline.events) == 2
     assert {event.start.value[:7] for event in timeline.events} == {"1943-01", "1943-02"}
+
+
+def test_timeline_subject_only_excludes_incidental_person_mentions(
+    work_path: Path,
+) -> None:
+    database = _prepare_database(work_path)
+    _save_event(
+        database,
+        event_id="event_zhou_mentions_mao",
+        document_id="zhou_enlai_chronology_1949_1976",
+        date_value="1949-01-01",
+        description="周恩来收到毛泽东来函并处理有关工作。",
+        event_type="correspondence",
+        review_status="confirmed",
+        page=40,
+        include_lin=False,
+    )
+
+    broad = get_person_timeline(
+        database,
+        person_id="mao_zedong",
+        start_year=1949,
+        end_year=1949,
+    )
+    subject_only = get_person_timeline(
+        database,
+        person_id="mao_zedong",
+        start_year=1949,
+        end_year=1949,
+        subject_only=True,
+    )
+
+    assert broad.total == 1
+    assert subject_only.total == 0
 
 
 def test_rejected_canonical_merge_restores_source_events(work_path: Path) -> None:

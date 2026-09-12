@@ -224,6 +224,7 @@ def _load_event_rows(
     event_types: Sequence[str],
     review_statuses: Sequence[str],
     other_person_id: str | None = None,
+    subject_only: bool = False,
 ) -> list[sqlite3.Row]:
     canonical_filters, canonical_parameters = _event_filters(
         "c",
@@ -246,6 +247,8 @@ def _load_event_rows(
         event_types=event_types,
         review_statuses=review_statuses,
     )
+    canonical_subject_filter = "AND cp.role = '年谱主体'" if subject_only else ""
+    source_subject_filter = "AND ep.role = '年谱主体'" if subject_only else ""
     rows = connection.execute(
         f"""
         SELECT
@@ -262,6 +265,7 @@ def _load_event_rows(
               SELECT 1 FROM canonical_event_participants cp
               WHERE cp.canonical_event_id = c.canonical_event_id
                 AND cp.person_id = ?
+                {canonical_subject_filter}
           )
           AND (? IS NULL OR EXISTS (
               SELECT 1 FROM canonical_event_participants cp2
@@ -282,6 +286,7 @@ def _load_event_rows(
           AND EXISTS (
               SELECT 1 FROM event_participants ep
               WHERE ep.event_id = e.event_id AND ep.person_id = ?
+                {source_subject_filter}
           )
           AND (? IS NULL OR EXISTS (
               SELECT 1 FROM event_participants ep2
@@ -383,9 +388,23 @@ def _load_evidence(
     connection: sqlite3.Connection,
     canonical_ids: list[str],
     source_ids: list[str],
+    *,
+    preferred_subject_person_id: str | None = None,
 ) -> dict[str, list[TimelineEvidence]]:
     result: dict[str, list[TimelineEvidence]] = defaultdict(list)
     if canonical_ids:
+        subject_order = ""
+        parameters: list[object] = list(canonical_ids)
+        if preferred_subject_person_id is not None:
+            subject_order = """
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM event_participants preferred_ep
+                    WHERE preferred_ep.event_id = ce.source_event_id
+                      AND preferred_ep.person_id = ?
+                      AND preferred_ep.role = '年谱主体'
+                ) THEN 0 ELSE 1 END,
+            """
+            parameters.append(preferred_subject_person_id)
         rows = connection.execute(
             f"""
             SELECT ce.canonical_event_id AS record_id, ce.source_event_id,
@@ -395,10 +414,11 @@ def _load_evidence(
             JOIN evidence_records er ON er.evidence_id = ce.evidence_id
             JOIN documents d ON d.document_id = er.document_id
             WHERE ce.canonical_event_id IN ({_placeholders(canonical_ids)})
-            ORDER BY ce.canonical_event_id, er.document_id, er.pdf_page_start,
+            ORDER BY ce.canonical_event_id, {subject_order}
+                     er.document_id, er.pdf_page_start,
                      er.evidence_id
             """,
-            canonical_ids,
+            parameters,
         ).fetchall()
         _append_evidence(result, rows)
     if source_ids:
@@ -444,6 +464,7 @@ def get_person_timeline(
     offset: int = 0,
     other_person_id: str | None = None,
     sample_across_range: bool = False,
+    subject_only: bool = False,
 ) -> PersonTimelineResponse:
     event_type_filter = sorted(set(event_types or []))
     status_filter = cast(
@@ -478,6 +499,7 @@ def get_person_timeline(
             event_types=event_type_filter,
             review_statuses=status_filter,
             other_person_id=other_person_id,
+            subject_only=subject_only,
         )
         selected = (
             _representative_rows(all_rows, limit)
@@ -490,7 +512,12 @@ def get_person_timeline(
             connection, canonical_ids, source_ids
         )
         participants = _load_participants(connection, canonical_ids, source_ids)
-        evidence = _load_evidence(connection, canonical_ids, source_ids)
+        evidence = _load_evidence(
+            connection,
+            canonical_ids,
+            source_ids,
+            preferred_subject_person_id=person_id if subject_only else None,
+        )
     events: list[TimelineEvent] = []
     for row in selected:
         record_id = str(row["record_id"])
